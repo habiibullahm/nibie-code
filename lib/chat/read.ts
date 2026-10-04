@@ -2,6 +2,7 @@ import "server-only";
 import { normalizeSavedMode } from "@/lib/chat/legacy-mode";
 
 import { sanitizeModelOutput } from "@/lib/ai/sanitize-model-output";
+import { attachmentSummaryColumns, toAttachmentSummary, type AttachmentRow, type AttachmentSummary } from "@/lib/attachments/types";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { schemaUnavailable } from "@/lib/chat/schema-error";
 import { validateConversationId } from "@/lib/chat/validation";
@@ -43,7 +44,7 @@ export type RoomSummary = {
   brief: RoomBriefSummary | null;
   pins: PinSummary[];
 };
-export type PersistedMessage = { id: string; role: "user" | "assistant"; content: string; position: number; status?: "complete" | "streaming" | "interrupted" | "error"; created_at?: string; terminationReason?: "user_stopped" };
+export type PersistedMessage = { id: string; role: "user" | "assistant"; content: string; position: number; status?: "complete" | "streaming" | "interrupted" | "error"; created_at?: string; terminationReason?: "user_stopped"; attachments?: AttachmentSummary[] };
 
 export async function getChatWorkspaceData(conversationId: unknown) {
   const supabase = await createSupabaseServerClient();
@@ -61,7 +62,7 @@ export async function getChatWorkspaceData(conversationId: unknown) {
 
   // The history list and the selected conversation's messages are independent reads, so they run together.
   // RLS scopes both to the signed-in owner; messages are only used when the conversation is in the owner's list.
-  const [conversationResult, { data: roomRows, error: roomsError }, { data: briefRows, error: briefsError }, { data: pinRows, error: pinsError }, messagesResult] = await Promise.all([
+  const [conversationResult, { data: roomRows, error: roomsError }, { data: briefRows, error: briefsError }, { data: pinRows, error: pinsError }, messagesResult, attachmentsResult] = await Promise.all([
     orderedConversations("id,title,selected_model,room_id,archived_at,created_at,updated_at"),
     supabase
       .from("rooms")
@@ -77,6 +78,10 @@ export async function getChatWorkspaceData(conversationId: unknown) {
       .order("updated_at", { ascending: false })
       .order("id", { ascending: true }),
     parsedId.success ? readMessages(parsedId.data) : Promise.resolve(null),
+    // Metadata only: the extracted text of an attachment never goes to the browser.
+    parsedId.success
+      ? supabase.from("message_attachments").select(`${attachmentSummaryColumns},message_id,created_at`).eq("conversation_id", parsedId.data).order("created_at", { ascending: true })
+      : Promise.resolve(null),
   ]);
   const withoutArchive = schemaUnavailable(conversationResult.error)
     ? await orderedConversations("id,title,selected_model,room_id,created_at,updated_at")
@@ -131,7 +136,19 @@ export async function getChatWorkspaceData(conversationId: unknown) {
     if (reread.error) return loadError;
     messages = reread.data ?? [];
   }
-  return { conversations, archivedConversations, rooms, roomsError: roomError, messages: messages.map(visibleMessage), activeId: active.id, error: roomError };
+  // A database without the attachments table yet has none; any other failed read keeps the thread from showing without them.
+  if (attachmentsResult?.error && !schemaUnavailable(attachmentsResult.error)) return loadError;
+  const byMessage = new Map<string, AttachmentSummary[]>();
+  for (const row of (attachmentsResult?.error ? [] : attachmentsResult?.data ?? []) as unknown as (AttachmentRow & { message_id: string | null })[]) {
+    if (!row.message_id) continue;
+    byMessage.set(row.message_id, [...(byMessage.get(row.message_id) ?? []), toAttachmentSummary(row)]);
+  }
+  return { conversations, archivedConversations, rooms, roomsError: roomError, messages: messages.map((message) => withAttachments(visibleMessage(message), byMessage)), activeId: active.id, error: roomError };
+}
+
+function withAttachments<T extends { id: string }>(message: T, byMessage: Map<string, AttachmentSummary[]>): T & { attachments?: AttachmentSummary[] } {
+  const attachments = byMessage.get(message.id);
+  return attachments ? { ...message, attachments } : message;
 }
 
 function visibleMessage<T extends { role: string; content: string }>(message: T): T {

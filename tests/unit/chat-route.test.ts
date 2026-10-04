@@ -1,7 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { createClient, stream, claim, modelOptions, contextCapabilities } = vi.hoisted(() => ({ createClient: vi.fn(), stream: vi.fn(), claim: vi.fn(), modelOptions: vi.fn(), contextCapabilities: vi.fn(() => ({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 })) }));
-vi.mock("@/lib/supabase/server", () => ({ createSupabaseServerClient: createClient }));
+// The chat route also reads this conversation's attachments. Tests that are not about attachments see none, while every
+// other table still goes to the test's own mock.
+const { withoutAttachments, attachmentState } = vi.hoisted(() => {
+  const attachmentState: { result: { data: unknown; error: unknown }; reads: unknown[][] } = { result: { data: [], error: null }, reads: [] };
+  const none = () => {
+    const builder: Record<string, unknown> = {};
+    for (const method of ["select", "eq", "order", "limit"]) builder[method] = (...args: unknown[]) => { attachmentState.reads.push([method, ...args]); return builder; };
+    builder.then = (resolve: (value: unknown) => unknown) => Promise.resolve(attachmentState.result).then(resolve);
+    return builder;
+  };
+  return { attachmentState, withoutAttachments: (client: unknown) => {
+    const value = client as { from?: (table: string) => unknown } | undefined;
+    if (!value || typeof value.from !== "function") return client;
+    const from = value.from;
+    return { ...value, from: (table: string) => table === "message_attachments" ? none() : from(table) };
+  } };
+});
+vi.mock("@/lib/supabase/server", () => ({ createSupabaseServerClient: async () => withoutAttachments(await createClient()) }));
 vi.mock("@/lib/ai/provider", () => ({ chatProvider: { stream } }));
 vi.mock("@/lib/ai/registry", () => ({ getModelOptions: modelOptions, contextCapabilitiesFor: contextCapabilities, providerFor: (mode: string) => mode === "Fast" ? "sumopod" : "openai" }));
 const allModes = { models: ["Fast", "Balanced", "High"].map((id) => ({ id, label: id, description: "" })) };
@@ -16,7 +33,7 @@ const assistantId = "e3b624e6-d792-47a8-8ff2-46724452c1ca";
 const assistant = { id: assistantId, position: 3, content: "…", status: "streaming", replayed: false };
 
 describe("POST /api/chat", () => {
-  beforeEach(() => { preferenceResult = { data: null, error: null }; createClient.mockReset(); stream.mockReset(); modelOptions.mockReset().mockReturnValue(allModes); contextCapabilities.mockReset().mockReturnValue({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 }); claim.mockReset().mockReturnValue(query({ data: assistant, error: null })); });
+  beforeEach(() => { attachmentState.result = { data: [], error: null }; attachmentState.reads = []; preferenceResult = { data: null, error: null }; createClient.mockReset(); stream.mockReset(); modelOptions.mockReset().mockReturnValue(allModes); contextCapabilities.mockReset().mockReturnValue({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 }); claim.mockReset().mockReturnValue(query({ data: assistant, error: null })); });
   afterEach(() => vi.useRealTimers());
 
   it.each(["stop", "length", "content_filter"])("finalizes %s explicitly, with sanitized persistence", async (reason) => {
@@ -52,6 +69,55 @@ describe("POST /api/chat", () => {
     const shown = events.flatMap((event) => event.type === "delta" ? [event.text] : []).join("");
     expect(shown).toBe(parts.join(""));
     expect(writes).toContainEqual({ content: shown, status: "complete" });
+  });
+
+  describe("chat attachments in the reply context", () => {
+    const row = (overrides: Record<string, unknown> = {}) => ({ message_id: "user-message", original_name: "attachment-a.txt", mime_type: "text/plain", extracted_text: "The internal codename for this test document is Cedar Harbor.", truncated: false, page_count: null, created_at: "2026-10-04T00:00:00Z", ...overrides });
+
+    it("grounds the reply in this conversation's attachments as untrusted data", async () => {
+      const writes: unknown[] = [];
+      const results = [
+        { data: { id: "user-message", position: 1, content: "hello" }, error: null },
+        { data: [{ id: "user-message", role: "user", content: "hello", status: "complete", position: 1 }], error: null },
+        { data: { id: assistantId }, error: null },
+      ];
+      const from = vi.fn((table: string) => table === "user_preferences" ? query(preferenceResult) : table === "conversations"
+        ? query({ data: { id: "conversation", selected_model: "Balanced" }, error: null })
+        : query(results.shift(), (write) => writes.push(write)));
+      createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc: claim });
+      attachmentState.result = { data: [row(), row({ message_id: "another-conversation-message", original_name: "elsewhere.txt", extracted_text: "Not this one." })], error: null };
+      stream.mockResolvedValue(providerChunks(["Cedar Harbor."], "stop"));
+      const response = await POST(validRequest());
+      const events = await Array.fromAsync(readChatSse(response.body!));
+      expect(events.slice(-2)).toEqual([{ type: "status", status: "complete" }, { type: "done" }]);
+      expect(attachmentState.reads).toContainEqual(["eq", "conversation_id", "5e9bdcca-9205-4fea-a773-13952bb78c44"]);
+      const prompt = stream.mock.calls[0][1] as { role: string; content: string }[];
+      expect(prompt[0].content).not.toContain("Cedar Harbor");
+      expect(prompt[1].content).toContain('filename: "attachment-a.txt"');
+      expect(prompt[1].content).toContain("<untrusted_attachment_content>\nThe internal codename for this test document is Cedar Harbor.");
+      expect(prompt[1].content).not.toContain("Not this one.");
+      expect(events[0]).toMatchObject({ type: "start", context: { sources: expect.arrayContaining([expect.objectContaining({ type: "attachment", state: "included" })]) } });
+    });
+
+    it("does not start a reply without attachments it could not read", async () => {
+      const writes: unknown[] = [];
+      readyClient(writes);
+      attachmentState.result = { data: null, error: { code: "XX000", message: "read failed" } };
+      const response = await POST(validRequest());
+      expect(response.status).toBe(503);
+      expect(stream).not.toHaveBeenCalled();
+      expect(claim).not.toHaveBeenCalled();
+    });
+
+    it("replies normally on a database that has no attachments table yet", async () => {
+      readyClient([]);
+      attachmentState.result = { data: null, error: { code: "PGRST205", message: "missing" } };
+      stream.mockResolvedValue(providerChunks(["Done."], "stop"));
+      const response = await POST(validRequest());
+      expect(response.status).toBe(200);
+      await response.text();
+      expect(stream).toHaveBeenCalledOnce();
+    });
   });
 
   it.each(["Auto", "High"])("routes model choice %s on the server", async (model) => {

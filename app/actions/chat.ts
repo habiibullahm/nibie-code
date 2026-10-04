@@ -8,6 +8,7 @@ import { modelInputSchema } from "@/lib/chat/legacy-mode";
 import { getModelOptions } from "@/lib/ai/registry";
 import { logError, logInfo } from "@/lib/observability/logger";
 import { operationalCodes } from "@/lib/observability/codes";
+import { attachmentErrors, parseAttachmentIds } from "@/lib/attachments/rules";
 
 export type ChatActionResult<T = undefined> = { data?: T; error?: string };
 type ConversationRow = { id: string; title: string; selected_model: string; room_id: string | null; created_at: string; updated_at: string };
@@ -88,14 +89,25 @@ export async function stopChatResponseAction(conversationId: unknown, userMessag
 
 // The same message id makes the append idempotent, including the one allowed
 // retry when a cancelled claim committed between stop retirement and append.
-async function appendMessage(supabase: Supabase, conversationId: string, messageId: string, content: string, stopped: readonly string[] = []): Promise<{ data: SavedMessage } | { error: string }> {
+// With attachments, the message and its attachment links are saved in one transaction (see 0009_chat_attachments.sql).
+async function appendMessage(supabase: Supabase, conversationId: string, messageId: string, content: string, stopped: readonly string[] = [], attachmentIds: readonly string[] = []): Promise<{ data: SavedMessage } | { error: string }> {
   if (stopped.length && !await retireStoppedReplies(supabase, conversationId, stopped)) return { error: saveFailed };
-  const append = () => supabase.rpc("append_user_message", {
-    p_conversation_id: conversationId, p_message_id: messageId, p_content: content,
-  }).single<SavedMessage>();
+  const append = () => attachmentIds.length
+    ? supabase.rpc("append_user_message_with_attachments", {
+      p_conversation_id: conversationId, p_message_id: messageId, p_content: content, p_attachment_ids: [...attachmentIds],
+    }).single<SavedMessage>()
+    : supabase.rpc("append_user_message", {
+      p_conversation_id: conversationId, p_message_id: messageId, p_content: content,
+    }).single<SavedMessage>();
   let result = await append();
   if (result.error?.code === "PT409" && stopped.length && await retireStoppedReplies(supabase, conversationId, stopped)) result = await append();
   const { data, error } = result;
+  if (attachmentIds.length) {
+    if (error?.code === "PT409" && error.message === "Attachment unavailable.") return { error: attachmentErrors.unavailable };
+    if (error?.code === "PT413") return { error: attachmentErrors.totalTooLarge };
+    if (error?.code === "PT400") return { error: attachmentErrors.tooMany };
+    if (error && schemaUnavailable(error)) return { error: "Attachments aren't available yet." };
+  }
   if (error?.code === "PT409") return { error: "A response is already running or this submission changed. Refresh and try again." };
   if (error?.code === "PT404") return { error: "That conversation is no longer available." };
   if (error || !data) return { error: saveFailed };
@@ -118,7 +130,9 @@ export async function createConversationAction(model: unknown): Promise<ChatActi
 
 // The first message of a new chat: creates the conversation and saves the message in one round trip from the browser.
 // If the message cannot be saved, the empty conversation is removed again so history is not left with a blank "New chat".
-export async function startConversationAction(model: unknown, messageId: unknown, content: unknown, roomId: unknown = null): Promise<ChatActionResult<{ conversation: ConversationRow; message: SavedMessage }>> {
+export async function startConversationAction(model: unknown, messageId: unknown, content: unknown, roomId: unknown = null, attachmentIds: unknown = undefined): Promise<ChatActionResult<{ conversation: ConversationRow; message: SavedMessage }>> {
+  const parsedAttachments = parseAttachmentIds(attachmentIds);
+  if (!parsedAttachments.ok) return { error: attachmentErrors.tooMany };
   const parsedModel = modelInputSchema.safeParse(model);
   const parsedMessageId = validateConversationId(messageId);
   const parsedContent = validateMessage(content);
@@ -133,7 +147,7 @@ export async function startConversationAction(model: unknown, messageId: unknown
     const { data: conversation, error } = await insertConversation(supabase, user.id, parsedModel.data, parsedRoom.data);
     if (error?.code === "23503") return { error: "That room is no longer available." };
     if (error || !conversation) return failure();
-    const saved = await appendMessage(supabase, conversation.id, parsedMessageId.data, parsedContent.data);
+    const saved = await appendMessage(supabase, conversation.id, parsedMessageId.data, parsedContent.data, [], parsedAttachments.ids);
     if ("error" in saved) {
       await supabase.from("conversations").delete().eq("id", conversation.id).then(() => undefined, () => undefined);
       return { error: saved.error };
@@ -161,7 +175,9 @@ export async function updateConversationModelAction(id: unknown, model: unknown)
   }
 }
 
-export async function addUserMessageAction(id: unknown, content: unknown, messageId: unknown = crypto.randomUUID(), stoppedReplies: unknown = []): Promise<ChatActionResult<SavedMessage>> {
+export async function addUserMessageAction(id: unknown, content: unknown, messageId: unknown = crypto.randomUUID(), stoppedReplies: unknown = [], attachmentIds: unknown = undefined): Promise<ChatActionResult<SavedMessage>> {
+  const parsedAttachments = parseAttachmentIds(attachmentIds);
+  if (!parsedAttachments.ok) return { error: attachmentErrors.tooMany };
   const parsedId = validateConversationId(id);
   const parsedContent = validateMessage(content);
   const stopped = parseStoppedReplies(stoppedReplies);
@@ -172,7 +188,7 @@ export async function addUserMessageAction(id: unknown, content: unknown, messag
   if (!parsedMessageId.success) return { error: "Choose a valid message." };
   try {
     const { supabase } = await authenticatedClient();
-    const saved = await appendMessage(supabase, parsedId.data, parsedMessageId.data, parsedContent.data, stopped);
+    const saved = await appendMessage(supabase, parsedId.data, parsedMessageId.data, parsedContent.data, stopped, parsedAttachments.ids);
     return "error" in saved ? { error: saved.error } : { data: saved.data };
   } catch {
     return { error: "Your session has expired or the service is unavailable. Please try again." };

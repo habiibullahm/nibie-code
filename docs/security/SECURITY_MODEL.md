@@ -846,6 +846,16 @@ Files V1 stores owner-scoped room text in the private `room-files` Supabase buck
 - Storage policies, applied when the `storage` schema exists, allow the same owner-folder operations on the private bucket.
 - Extracted text is untrusted context. It is included only when the user selects that file for a message, and it is not copied into the product-policy prompt.
 
+### 24.2 Chat attachments V1
+
+Chat attachments store the extracted text of a file a person attached to their own message, in `message_attachments`. The design is in [Chat Attachments V1](../feature/attachments/v1.md).
+
+- The owner is `auth.uid()` from the session. The upload route refuses owner, message, conversation, and text fields.
+- Row-level security is enabled and forced. Policies allow reading own rows, inserting unlinked drafts only, deleting own unsent drafts only, and linking a draft once. Only `conversation_id` and `message_id` are updatable.
+- A composite foreign key ties a sent attachment to one of the owner's messages in the same conversation, so another person's message or another conversation cannot claim it.
+- The extension and bytes decide the type; images, binary content, and anything else are refused. PDF text is read without scripts, forms, or network access. Original bytes are not stored.
+- Attachment text is untrusted context inside explicit boundaries, never part of the product-policy prompt, never sent to the browser, and never logged.
+
 ---
 
 ## 25. Data export and destructive operations

@@ -15,6 +15,7 @@ import { CONTEXT_POLICY_VERSION } from "@/lib/context/context-policy";
 import type { FileContextInput } from "@/lib/context/context-types";
 import type { RoomContextInput } from "@/lib/context/room-context";
 import { parseSelectedFileIds } from "@/lib/files/inspect";
+import { contextAttachments, type AttachmentContextRow, type ContextMessageRow } from "@/lib/attachments/context";
 import { MAX_FILES_PER_MESSAGE } from "@/lib/files/limits";
 import { roomContextFromRows, type PinContextRow, type RoomBriefRow } from "@/lib/rooms/map";
 import { loadOwnerPreferences } from "@/lib/preferences/store";
@@ -67,11 +68,13 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   // The conversation, the user message and the recent context only depend on the ids in the request, so they are read together
   // (RLS hides other owners' rows from all three); the message context is trimmed to this message below.
   // Preferences are soft personalization. A failed read uses safe defaults and does not block this authenticated request.
-  const [{ data: loadedConversation, error: loadedConversationError }, { data: userMessage, error: messageError }, { data: recent, error: readError }, preferenceState] = await Promise.all([
+  // Chat attachments of this conversation only (RLS also limits them to the owner); trimmed to the messages in context below.
+  const [{ data: loadedConversation, error: loadedConversationError }, { data: userMessage, error: messageError }, { data: recent, error: readError }, preferenceState, attachmentResult] = await Promise.all([
     supabase.from("conversations").select("id,selected_model,room_id").eq("id", parsedId.data).maybeSingle(),
     supabase.from("messages").select("id,position,content").eq("id", parsedMessageId.data).eq("conversation_id", parsedId.data).eq("role", "user").eq("status", "complete").maybeSingle(),
-    supabase.from("messages").select("role,content,status,position").eq("conversation_id", parsedId.data).eq("status", "complete").order("position", { ascending: false }).limit(34),
+    supabase.from("messages").select("id,role,content,status,position").eq("conversation_id", parsedId.data).eq("status", "complete").order("position", { ascending: false }).limit(34),
     loadOwnerPreferences(supabase),
+    supabase.from("message_attachments").select("message_id,original_name,mime_type,extracted_text,truncated,page_count,created_at").eq("conversation_id", parsedId.data).order("created_at", { ascending: false }).limit(60),
   ]);
   if (preferenceState.error) logError("preferences.read.failed", { requestId, code: operationalCodes.preferenceReadFailed });
   let conversation = loadedConversation;
@@ -112,6 +115,13 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   if (!validateMessage(userMessage.content).success) return NextResponse.json({ error: "Invalid saved message." }, { status: 400 });
   const rows = recent?.filter((row) => row.position <= userMessage.position && (row.role === "user" || row.role === "assistant") && row.status === "complete").slice(0, 32);
   if (readError || !rows?.length) return NextResponse.json({ error: safeError }, { status: 503 });
+  // An attachment that cannot be read is never silently dropped: the reply waits for a working read instead.
+  // A database without the attachments table (not migrated yet) simply has none.
+  if (attachmentResult.error && !schemaUnavailable(attachmentResult.error)) {
+    logError("chat.response.failed", { requestId, stage: "attachments", code: operationalCodes.attachmentReadFailed });
+    return NextResponse.json({ error: safeError }, { status: 503 });
+  }
+  const attachments = contextAttachments(attachmentResult.error ? [] : (attachmentResult.data ?? []) as AttachmentContextRow[], rows as ContextMessageRow[], userMessage.id);
   const { data: assistant, error: claimError } = await supabase.rpc(regenerate ? "regenerate_assistant_message" : "claim_assistant_message", {
     p_conversation_id: conversation.id, p_user_message_id: parsedMessageId.data,
   }).single<{ id: string; position: number; content: string; status: string; replayed: boolean }>();
@@ -158,6 +168,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       summary: null,
       room,
       files,
+      attachments,
       messages: rows.map((row) => ({ role: row.role as "user" | "assistant", content: row.content, position: row.position })),
       currentPosition: userMessage.position,
     });
@@ -176,6 +187,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       pinsIncluded,
       fileIncluded,
       fileCount: files?.length ?? 0,
+      attachmentCount: attachments.length,
       summaryIncluded,
       sourceCount: plan.blocks.filter((block) => block.included).length,
       recentMessageCount: plan.diagnostics.recentMessageCount,

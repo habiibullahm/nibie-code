@@ -1,11 +1,12 @@
 import { contextPolicyFor, CONTEXT_POLICY_VERSION } from "@/lib/context/context-policy";
 import { ContextBuildError, type BuildContextInput, type ContextBlock, type ContextDiagnostics, type ContextPlan, type ContextSourceDiagnostic, type ThreadMessage } from "@/lib/context/context-types";
+import { renderAttachmentContext } from "@/lib/context/attachment-context";
 import { renderFileContext } from "@/lib/context/file-context";
 import { pinPieces, type PinPiece } from "@/lib/context/pin-context";
 import { profilePieces, profileReason, type ProfilePiece } from "@/lib/context/profile-context";
 import { roomPieces, roomReason, type RoomPiece } from "@/lib/context/room-context";
 import { renderThreadSummary, resolveThreadSummary, selectThreadMessages } from "@/lib/context/thread-context";
-import { budgetLimits, estimateTokens, FILE_TOKEN_CAP, PIN_TOKEN_CAP, PROTECTED_RECENT_COUNT, ROOM_TOKEN_CAP, SUMMARY_TOKEN_CAP } from "@/lib/context/token-budget";
+import { ATTACHMENT_TOKEN_CAP, budgetLimits, estimateTokens, FILE_TOKEN_CAP, PIN_TOKEN_CAP, PROTECTED_RECENT_COUNT, ROOM_TOKEN_CAP, SUMMARY_TOKEN_CAP } from "@/lib/context/token-budget";
 
 function block(partial: ContextBlock): ContextBlock {
   return partial;
@@ -89,6 +90,11 @@ export function buildContext(input: BuildContextInput): ContextPlan {
   const renderedFiles = requestedFiles ? renderFileContext(requestedFiles, Math.min(FILE_TOKEN_CAP, remaining.value)) : null;
   if (renderedFiles?.text) remaining.value -= estimateTokens(renderedFiles.text);
 
+  // Chat attachments of this conversation: after room context and room files, before the summary and older history.
+  const requestedAttachments = input.attachments?.length ? input.attachments : null;
+  const renderedAttachments = requestedAttachments ? renderAttachmentContext(requestedAttachments, Math.min(ATTACHMENT_TOKEN_CAP, remaining.value)) : null;
+  if (renderedAttachments?.text) remaining.value -= estimateTokens(renderedAttachments.text);
+
   let summaryText = "";
   let summaryIncluded = false;
   let summaryDroppedForBudget = false;
@@ -105,12 +111,13 @@ export function buildContext(input: BuildContextInput): ContextPlan {
   const olderFit = summaryIncluded ? { included: [] as ThreadMessage[], dropped: olderMessages } : takeNewest(olderMessages, remaining);
   const dialogue = [...olderFit.included, ...protectedFit.included, current];
   const droppedMessages = summaryIncluded ? protectedFit.dropped : [...olderFit.dropped, ...protectedFit.dropped];
-  const truncated = droppedMessages.length > 0 || droppedPieces.length > 0 || droppedRoom.length > 0 || droppedPins.length > 0 || Boolean(renderedFiles?.truncated) || summaryDroppedForBudget;
+  const truncated = droppedMessages.length > 0 || droppedPieces.length > 0 || droppedRoom.length > 0 || droppedPins.length > 0 || Boolean(renderedFiles?.truncated) || Boolean(renderedAttachments?.truncated) || summaryDroppedForBudget;
 
   const profileText = includedPieces.map((piece) => piece.text).join("\n");
   const roomText = includedRoom.map((piece) => piece.text).join("\n\n");
   const pinText = includedPins.map((piece) => piece.text).join("\n\n");
   const fileText = renderedFiles?.text ?? "";
+  const attachmentText = renderedAttachments?.text ?? "";
   const blocks: ContextBlock[] = [
     block({ id: "core", authority: "policy", priority: 1, required: true, text: corePolicyText, tokenEstimate: coreTokens, included: true, exclusionReason: null }),
     block({ id: "profile", authority: "untrusted_data", priority: 4, required: false, text: profileText, tokenEstimate: profileText ? estimateTokens(profileText) : 0, included: Boolean(profileText), exclusionReason: profileText ? null : input.preferenceReadFailed ? "read_failed" : droppedPieces.length && !includedPieces.length ? "budget" : "defaults_only" }),
@@ -121,6 +128,9 @@ export function buildContext(input: BuildContextInput): ContextPlan {
   }
   if (requestedFiles) {
     blocks.push(block({ id: "file", authority: "untrusted_data", priority: 6, required: false, text: fileText, tokenEstimate: fileText ? estimateTokens(fileText) : 0, included: Boolean(fileText), exclusionReason: fileText ? null : "budget" }));
+  }
+  if (requestedAttachments) {
+    blocks.push(block({ id: "attachment", authority: "untrusted_data", priority: 6, required: false, text: attachmentText, tokenEstimate: attachmentText ? estimateTokens(attachmentText) : 0, included: Boolean(attachmentText), exclusionReason: attachmentText ? null : "budget" }));
   }
   blocks.push(block({ id: "thread_summary", authority: "untrusted_data", priority: 6, required: false, text: summaryText, tokenEstimate: summaryText ? estimateTokens(summaryText) : 0, included: summaryIncluded, exclusionReason: summaryIncluded ? null : summaryDroppedForBudget ? "budget" : resolved.exclusionReason }));
   for (const message of dialogue) {
@@ -164,6 +174,12 @@ export function buildContext(input: BuildContextInput): ContextPlan {
       : { type: "file", label: "File context", state: "not_used", reason: "Not used for this reply." }
     : null;
 
+  const attachmentDiagnostic: ContextSourceDiagnostic | null = requestedAttachments
+    ? renderedAttachments?.includedCount
+      ? { type: "attachment", label: "Attachments", state: "included", reason: renderedAttachments.truncated ? "Partly included: some file text did not fit this reply." : requestedAttachments.length === 1 ? "A file attached in this conversation" : "Files attached in this conversation" }
+      : { type: "attachment", label: "Attachments", state: "not_used", reason: "Not used for this reply." }
+    : null;
+
   let diagnostics: ContextDiagnostics;
   try {
     const sources = [profileDiagnostic, recentDiagnostic, summaryDiagnostic];
@@ -175,6 +191,7 @@ export function buildContext(input: BuildContextInput): ContextPlan {
       const insertAt = pinsIndex >= 0 ? pinsIndex + 1 : roomIndex >= 0 ? roomIndex + 1 : 1;
       sources.splice(insertAt, 0, fileDiagnostic);
     }
+    if (attachmentDiagnostic) sources.splice(sources.findIndex((source) => source.type === "recent_messages"), 0, attachmentDiagnostic);
     diagnostics = { sources, recentMessageCount: dialogue.length };
   } catch {
     diagnostics = { sources: [], recentMessageCount: dialogue.length };
