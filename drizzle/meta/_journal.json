@@ -64,6 +64,13 @@
       "when": 1791130000000,
       "tag": "0008_workbench",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791093375416,
+      "tag": "0009_chat_attachments",
+      "breakpoints": true
     }
   ]
 }

@@ -24,6 +24,7 @@ describe("deleteAllConversationsAction", () => {
     const filters: Array<[string, string]> = [];
     const builder = {
       eq: vi.fn((column: string, value: string) => { filters.push([column, value]); return builder; }),
+      is: vi.fn((column: string, value: null) => { filters.push([column, String(value)]); return builder; }),
       select: vi.fn(() => builder),
       then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: [{ id: "conversation" }], error: null }).then(resolve),
     };
@@ -47,8 +48,9 @@ describe("deleteAllConversationsAction", () => {
     const { from, filters, tables } = clientFor("owner-a");
     const action = deleteAllConversationsAction as (confirmation: unknown, userId?: string) => ReturnType<typeof deleteAllConversationsAction>;
     await expect(action("DELETE", "owner-b")).resolves.toEqual({ deletedCount: 1 });
-    expect(tables).toEqual(["conversations"]);
-    expect(filters).toEqual([["user_id", "owner-a"]]);
+    // Conversations (with their messages and sent attachments, by cascade), then only this owner's unsent drafts.
+    expect(tables).toEqual(["conversations", "message_attachments"]);
+    expect(filters).toEqual([["user_id", "owner-a"], ["user_id", "owner-a"], ["message_id", "null"]]);
     expect(from).not.toHaveBeenCalledWith("messages");
     expect(from).not.toHaveBeenCalledWith("users");
     expect(from).not.toHaveBeenCalledWith("user_preferences");

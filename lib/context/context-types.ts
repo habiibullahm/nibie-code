@@ -4,7 +4,7 @@ import type { RoomContextInput } from "@/lib/context/room-context";
 
 export type { RoomContextInput } from "@/lib/context/room-context";
 
-export type ContextSourceType = "core" | "profile" | "room" | "pins" | "file" | "thread_summary" | "recent_messages" | "current_request";
+export type ContextSourceType = "core" | "profile" | "room" | "pins" | "file" | "attachment" | "thread_summary" | "recent_messages" | "current_request";
 
 export type ContextAuthority = "policy" | "untrusted_data";
 
@@ -25,8 +25,8 @@ export type ContextBlock = {
 };
 
 export type ContextSourceDiagnostic = {
-  type: "profile" | "room" | "pins" | "file" | "thread_summary" | "recent_messages";
-  label: "Your profile" | "This room" | "Pinned context" | "File context" | "Thread summary" | "Recent conversation";
+  type: "profile" | "room" | "pins" | "file" | "attachment" | "thread_summary" | "recent_messages";
+  label: "Your profile" | "This room" | "Pinned context" | "File context" | "Attachments" | "Thread summary" | "Recent conversation";
   state: "included" | "not_used";
   reason: string;
 };
@@ -35,6 +35,19 @@ export type ContextSourceDiagnostic = {
 export type FileContextInput = {
   name: string;
   text: string;
+};
+
+// Text of a file the user attached to one of their messages in this conversation, already authorized for this owner
+// and conversation. Chat attachments are not room files and never come from another thread.
+export type AttachmentContextInput = {
+  name: string;
+  typeLabel: string;
+  text: string;
+  // The saved text is not the whole file (cut at the text limit, or PDF pages beyond the page limit).
+  truncated: boolean;
+  pageCount: number | null;
+  // Attached to the message being answered, rather than to an earlier one.
+  current: boolean;
 };
 
 export type ContextDiagnostics = {
@@ -91,6 +104,8 @@ export type BuildContextInput = {
   room?: RoomContextInput | null;
   // Present only for files the caller already authorized for this request. Never every room file.
   files?: FileContextInput[] | null;
+  // Attachments of this conversation's messages in context, current message first. Omitted when there are none.
+  attachments?: AttachmentContextInput[] | null;
 };
 
 export class ContextBuildError extends Error {
