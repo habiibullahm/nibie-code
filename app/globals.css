@@ -442,7 +442,7 @@ a.account-menu-action { font: inherit; text-decoration: none; }
   .message-row { gap: 9px; margin-bottom: 27px; }
   .message-row.assistant { padding-right: 0; }
   .message-row.user { padding-left: 24px; }
-  .message-content p { font-size: 13.5px; }
+  .message-content.user p { font-size: 13.5px; }
   .message-column.user { max-width: 86%; }
   .message-content.user { padding: 10px 12px; }
   .composer-dock { padding: 13px 11px 10px; }
@@ -457,38 +457,75 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
 
 /* M5: Markdown, code blocks, and last-turn controls */
-.markdown { min-width: 0; color: var(--text-2); font-size: 14px; line-height: 1.72; overflow-wrap: anywhere; }
+/* Assistant Markdown. A chat answer, not a document page: compact headings, calm lists, quiet code and tables. */
+.markdown { --md-gap: 11px; --md-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; min-width: 0; color: var(--text-2); font-size: 14.5px; line-height: 1.7; overflow-wrap: anywhere; }
 .markdown.is-streaming { white-space: pre-wrap; }
 .markdown > :first-child { margin-top: 0; }
 .markdown > :last-child { margin-bottom: 0; }
-.markdown p { margin: 0 0 10px; white-space: normal; }
-.markdown h1, .markdown h2, .markdown h3, .markdown h4 { margin: 15px 0 6px; color: var(--text); font-size: 14px; font-weight: 600; line-height: 1.4; }
-.markdown h1 { font-size: 16px; }
-.markdown h2 { font-size: 15px; }
+/* Inherit the answer size: the generic .message-content p rule is for user bubbles and plain text. */
+.markdown p { margin: 0 0 var(--md-gap); font-size: inherit; line-height: inherit; white-space: normal; }
+/* Models are asked for ## and ###; a stray # renders no larger than ##. */
+.markdown h1, .markdown h2, .markdown h3, .markdown h4 { margin: 20px 0 6px; color: var(--text); font-weight: 600; letter-spacing: -.005em; }
+.markdown h1, .markdown h2 { font-size: 17px; line-height: 1.4; }
+.markdown h3 { font-size: 15px; line-height: 1.45; }
+.markdown h4 { margin-top: 16px; font-size: 14.5px; line-height: 1.5; }
+.markdown h2 + h3 { margin-top: 10px; }
+.markdown ul, .markdown ol { margin: 0 0 var(--md-gap); padding-left: 1.45em; }
 .markdown ul { list-style: disc; }
 .markdown ol { list-style: decimal; }
-.markdown ul, .markdown ol { margin: 0 0 10px; padding-left: 20px; }
+.markdown li { margin: 0; padding-left: .15em; }
+.markdown li + li { margin-top: 5px; }
 .markdown li::marker { color: var(--text-4); }
-.markdown li { margin: 2px 0; }
+.markdown ol > li::marker { color: var(--text-3); font-variant-numeric: tabular-nums; }
 .markdown li > p { margin: 0; }
+.markdown li > p + p { margin-top: 6px; }
+/* One nested level reads as a sub-point, not a new block. */
+.markdown li > ul, .markdown li > ol { margin: 5px 0 0; padding-left: 1.25em; }
+.markdown li > ul { list-style: circle; }
+.markdown li > ol { list-style: lower-alpha; }
+.markdown li > .code-block, .markdown li > .markdown-table, .markdown li > blockquote { margin-top: 8px; margin-bottom: 8px; }
 .markdown strong { color: var(--text); font-weight: 600; }
-.markdown a { color: var(--link); text-decoration: underline; text-underline-offset: 2px; }
-.markdown blockquote { margin: 0 0 10px; padding: 2px 0 2px 12px; border-left: 2px solid color-mix(in srgb, var(--accent) 72%, var(--border-strong)); color: var(--text-3); }
-.markdown hr { margin: 14px 0; border: 0; border-top: 1px solid var(--border-soft); }
-.markdown :not(pre) > code { padding: 1px 5px; border-radius: 5px; background: var(--bg-code); color: var(--text); font-size: 12.5px; }
-.markdown-table { max-width: 100%; overflow-x: auto; margin: 0 0 10px; }
-.markdown table { border-collapse: collapse; font-size: 13px; }
-.markdown th, .markdown td { padding: 6px 10px; border: 1px solid var(--border); text-align: left; }
-.markdown th { background: var(--bg-raised); font-weight: 600; }
+.markdown a { color: var(--link); text-decoration: underline; text-decoration-thickness: 1px; text-decoration-color: color-mix(in srgb, var(--link) 45%, transparent); text-underline-offset: 2.5px; }
+.markdown a:hover { text-decoration-color: currentColor; }
+.markdown a:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; border-radius: 3px; }
+.markdown blockquote { margin: 0 0 var(--md-gap); padding: 0 0 0 12px; border-left: 2px solid color-mix(in srgb, var(--accent) 72%, var(--border-strong)); color: var(--text-3); }
+.markdown blockquote p { margin-bottom: 6px; }
+.markdown blockquote > :last-child { margin-bottom: 0; }
+.markdown hr { margin: 20px 0; border: 0; border-top: 1px solid var(--border-soft); }
+/* Inline code sits in the sentence: same weight as the text around it, a warm raised chip, never louder than the answer. */
+.markdown :not(pre) > code { padding: .1em .35em; border: 1px solid var(--border-soft); border-radius: 5px; background: var(--bg-raised); color: var(--text); font-family: var(--md-mono); font-size: .86em; overflow-wrap: anywhere; }
+.markdown a code { color: inherit; }
+/* Tables keep their natural width and scroll inside their frame on narrow screens. Cells wrap at spaces, never
+   mid-word, and keep a readable minimum width so a narrow screen scrolls instead of stacking one word per line. */
+.markdown-table { width: fit-content; max-width: 100%; margin: 0 0 var(--md-gap); overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
+.markdown table { border-collapse: collapse; font-size: 13.5px; line-height: 1.55; }
+.markdown th, .markdown td { min-width: 14ch; padding: 7px 12px; border-bottom: 1px solid var(--border-soft); text-align: left; vertical-align: top; overflow-wrap: normal; word-break: normal; }
+.markdown th + th, .markdown td + td { border-left: 1px solid var(--border-soft); }
+.markdown thead th { border-bottom-color: var(--border); background: var(--bg-raised); color: var(--text); font-weight: 600; }
+.markdown tbody tr:last-child td { border-bottom: 0; }
+.markdown td code, .markdown th code { overflow-wrap: normal; }
 .code-block { margin: 0 0 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-code); overflow: hidden; }
-.code-block-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 6px 4px 12px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--bg-code) 70%, var(--bg-app)); color: var(--text-3); font-size: 11px; }
-.code-block pre { margin: 0; padding: 12px 14px; overflow-x: auto; }
-.code-block pre code { display: block; color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.65; white-space: pre; }
+.code-block-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; padding: 3px 6px 3px 12px; border-bottom: 1px solid var(--border-soft); background: color-mix(in srgb, var(--bg-code) 70%, var(--bg-app)); color: var(--text-3); font-size: 11px; }
+.code-block-header > span { font-family: var(--md-mono, ui-monospace, monospace); letter-spacing: .02em; }
+.code-block pre { margin: 0; padding: 12px 14px; overflow-x: auto; overscroll-behavior-x: contain; tab-size: 2; }
+.code-block pre:focus-visible { outline: 2px solid var(--link); outline-offset: -2px; }
+.code-block pre code { display: block; width: max-content; min-width: 100%; color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.65; white-space: pre; }
+@media (max-width: 760px) {
+  .markdown { --md-gap: 10px; font-size: 14px; }
+  .markdown h1, .markdown h2 { font-size: 16.5px; }
+  .markdown h3 { font-size: 14.5px; }
+  .markdown table { font-size: 13px; }
+  .code-block pre { padding: 11px 12px; }
+}
 .message-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 8px; }
 .message-column.user .message-actions { margin-top: 0; justify-content: flex-end; }
 .copy-button, .message-action { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 3px 9px; border: 0; border-radius: 7px; background: transparent; color: var(--text-3); font: inherit; font-size: 11.5px; cursor: pointer; }
 .copy-button:hover, .message-action:hover:not(:disabled) { background: var(--hover); color: var(--text); }
 .copy-button.is-compact { min-height: 24px; padding: 2px 7px; }
+.copy-button.is-icon-only { justify-content: center; width: 28px; min-height: 26px; padding: 0; }
+.copy-button.is-icon-only:focus-visible { outline: 2px solid var(--link); outline-offset: 1px; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+@media (max-width: 760px) { .copy-button.is-icon-only { width: 34px; min-height: 32px; } }
 .message-action:disabled { opacity: .45; cursor: not-allowed; }
 .message-action.is-primary { background: var(--primary-bg); color: var(--primary-fg); }
 .message-action.is-primary:hover:not(:disabled) { background: var(--primary-bg-hover); color: var(--primary-fg); }

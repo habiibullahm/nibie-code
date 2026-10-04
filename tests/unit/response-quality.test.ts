@@ -43,6 +43,11 @@ describe("response quality rules and compatibility", () => {
     /turn it into an echo heading/i,
     /Ideation, brainstorming, recommendations, or plans with real choices/i, /usually give three to five options, not one minimal suggestion/i,
     /detailed enough to compare or act on/i, /unless one idea or a very short answer is asked/i, /Concise means efficient, not underdeveloped/i,
+    /Formatting: plain prose by default/i, /Simple or short answers: short paragraphs, no headings/i,
+    /brief ## or ### headings only when sections help; never #/i, /Steps: numbered list/i, /bullets, nested at most one level/i,
+    /Tables only to compare several attributes, kept small/i, /Code: fenced with its language/i,
+    /inline code for file names, commands, env vars and identifiers/i, /Caveats: prose or a short blockquote/i,
+    /Bold sparingly; no decorative emoji/i, /no Summary, Conclusion or Key Takeaways heading on a short answer/i,
   ])("includes the generation rule %s in the provider policy", (rule) => {
     expect(toProviderMessages(buildContext(input("hello")))[0].content).toMatch(rule);
   });
@@ -92,7 +97,7 @@ describe("response quality rules and compatibility", () => {
     const plan = buildContext(input("hello"));
     const core = plan.blocks.find((block) => block.id === "core")!;
     const basePolicy = buildContext(input("hello", "Balanced")).blocks.find((block) => block.id === "core")!;
-    expect(basePolicy.tokenEstimate, `base policy is ${basePolicy.tokenEstimate} tokens; the smallest existing context budget leaves 794 after the current request`).toBeLessThan(795);
+    expect(basePolicy.tokenEstimate, `base policy is ${basePolicy.tokenEstimate} tokens; the smallest context window in the suite (920, room-files) leaves 914 after the current request`).toBeLessThan(915);
     expect(core.tokenEstimate).toBeLessThan(1_200);
     expect(core.tokenEstimate).toBe(estimateTokens(contextPolicyFor("Fast")));
     expect(core.required).toBe(true);

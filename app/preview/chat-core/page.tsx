@@ -4,6 +4,7 @@ import type { PersistedMessage } from "@/lib/chat/read";
 import { validateConversationId } from "@/lib/chat/validation";
 import { ChatCoreComposerFixture } from "@/tests/fixtures/chat-core-composer";
 import { longReply, longReplyFixtureId } from "@/tests/fixtures/long-reply";
+import { formattingSample, formattingSampleId } from "@/tests/fixtures/formatting-sample";
 import { ChatWorkspace } from "@/components/chat-workspace";
 import { modelPickerCopy, type ModelOption } from "@/lib/chat/models";
 import { requestTime } from "@/lib/chat/groups";
@@ -23,11 +24,11 @@ export default async function ChatCorePreview({ searchParams }: { searchParams: 
     const saved = jar.get("chat-core-stop-snapshot")?.value;
     // Set once the stopped partial has been saved, so a reload shows the persisted text rather than the claim placeholder.
     const stoppedContent = jar.get("chat-core-stop-partial")?.value === "1" ? "Partial first response" : "…";
-    // A saved thread for streaming regressions. A long reply is named by fixture id because it does not fit in a cookie.
+    // A saved thread for streaming and formatting checks. Long replies are named by fixture id because they do not fit in a cookie.
     const thread = jar.get("chat-core-thread")?.value;
     if (thread) {
       const rows: unknown = JSON.parse(decodeURIComponent(thread));
-      if (Array.isArray(rows)) messages.push(...(rows as PersistedMessage[]).map((row) => row.content === longReplyFixtureId ? { ...row, content: longReply } : row));
+      if (Array.isArray(rows)) messages.push(...(rows as PersistedMessage[]).map((row) => row.content === longReplyFixtureId ? { ...row, content: longReply } : row.content === formattingSampleId ? { ...row, content: formattingSample } : row));
     }
     if (saved) {
       const ids: unknown = JSON.parse(decodeURIComponent(saved));

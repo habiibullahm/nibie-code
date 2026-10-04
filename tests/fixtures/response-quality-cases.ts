@@ -39,5 +39,12 @@ export const responseQualityCases: ResponseQualityCase[] = [
   { id: "single-idea", request: "give me one weekend date idea", expected: ["Exactly one idea", "No extra alternatives"] },
   { id: "explain-simply", request: "explain closures in javascript simply", expected: ["Short, simple explanation", "One small example at most", "No list of options"] },
   { id: "one-sentence", request: "Answer in one sentence: what is a Room in Nibie?", expected: ["Exactly one sentence"] },
+  { id: "format-simple-fact", request: "What is the capital of Japan?", expected: ["One or two short sentences", "No heading, list, bold, or table"] },
+  { id: "format-procedure", request: "How do I set up a Python virtual environment on macOS?", expected: ["Numbered steps", "Commands in fenced bash blocks or inline code", "No H1 or echo heading"] },
+  { id: "format-technical-explanation", request: "Explain how HTTP caching works with ETag and Cache-Control.", expected: ["Short intro paragraph", "Compact ## or ### sections only if they help", "Header names such as `Cache-Control` in inline code"] },
+  { id: "format-comparison", request: "Compare PostgreSQL, MySQL and SQLite for a small SaaS app: concurrency, operations effort, and hosting.", expected: ["A small table for the attributes compared", "A one-line recommendation in prose", "No oversized table"] },
+  { id: "format-coding", request: "Write a TypeScript function that groups an array of objects by a key.", expected: ["Fenced ts code block first", "Inline code for the function and parameter names in the explanation", "Brief explanation after the code"] },
+  { id: "format-long-structured", request: "Write a detailed onboarding guide for a new backend engineer joining a small team.", expected: ["## and ### hierarchy, no H1", "Numbered steps where order matters", "No Summary or Key Takeaways heading tacked on"] },
+  { id: "format-very-short", request: "thanks!", expected: ["One short line", "No Markdown structure at all"] },
   { id: "explicit-table", request: "Compare clinic FAQ and appointment reminders in a table: value, integration effort, and risks.", context: { room: clinicQualityRoom }, expected: ["Requested comparison table", "Unconfirmed capabilities and integration requirements labelled", "Fast mode follows explicit format"] },
 ];
