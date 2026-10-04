@@ -1,4 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Fills match lib/theme/palette.ts. SVG cannot import that module. -->
   <title>Nibie</title>
   <style>
     @media (prefers-color-scheme: light) {

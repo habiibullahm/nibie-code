@@ -139,7 +139,7 @@
   border: 1px solid var(--border);
   border-radius: 20px;
   background: var(--bg-sidebar);
-  box-shadow: 0 28px 70px #00000059, var(--shadow-sm);
+  box-shadow: var(--shadow-frame), var(--shadow-sm);
 }
 .landing-frame .history-group p {
   margin: 0 9px 8px;
@@ -327,7 +327,7 @@
 .landing-trust li { padding: 26px 0; border-top: 1px solid var(--border-soft); }
 .landing-trust h3 { margin: 0; color: var(--text); font-size: 16px; font-weight: 550; letter-spacing: -.02em; line-height: 1.45; }
 .landing-privacy-link { margin: 28px 0 0; font-size: 14px; }
-.landing-privacy-link a { color: var(--text-2); text-underline-offset: 3px; }
+.landing-privacy-link a { color: var(--link); text-underline-offset: 3px; }
 .landing-privacy-link a:hover { color: var(--text); }
 
 .landing-document { padding-top: 64px; padding-bottom: 96px; }
@@ -343,14 +343,14 @@
 .landing-document p { max-width: 40rem; margin: 14px 0 0; color: var(--text-2); font-size: 16px; line-height: 1.65; }
 .landing-document ul { max-width: 40rem; margin: 14px 0 0; padding-left: 1.15rem; color: var(--text-2); font-size: 16px; line-height: 1.65; }
 .landing-document li + li { margin-top: 8px; }
-.landing-document a { color: var(--text); }
+.landing-document a { color: var(--link); }
 
 .landing-notes { padding-top: 72px; }
 .landing-notes h2 { max-width: none; margin: 0; color: var(--text-3); font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 650; letter-spacing: .08em; line-height: 1.4; text-transform: uppercase; }
 .landing-notes ul { max-width: 36rem; margin: 8px 0 0; padding: 0; list-style: none; }
 .landing-notes li { padding: 14px 0; border-top: 1px solid var(--border-soft); color: var(--text); font-size: 16px; line-height: 1.45; }
 .landing-notes p { margin: 16px 0 0; }
-.landing-notes a { color: var(--text); font-size: 14px; font-weight: 550; text-decoration: underline; text-underline-offset: 4px; }
+.landing-notes a { color: var(--link); font-size: 14px; font-weight: 550; text-decoration: underline; text-underline-offset: 4px; }
 .landing-final { padding-top: 108px; padding-bottom: 96px; }
 .landing-final h2 { max-width: 10em; font-size: clamp(42px, 5.4vw, 72px); line-height: 1.04; }
 .landing-final p { max-width: 28rem; margin: 18px 0 28px; }

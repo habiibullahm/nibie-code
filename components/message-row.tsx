@@ -68,7 +68,7 @@ export const MessageRow = memo(function MessageRow({ message, initial, isLast, i
     const canRetry = canMutate && isLast && (message.status === "error" || message.status === "interrupted");
     return <article className="message-row assistant">
       <div className="message-content assistant">
-        <div className="message-author">Nibie{message.status === "interrupted" ? " · Stopped" : message.status === "error" ? " · Couldn't respond" : ""}<MessageTime value={message.created_at} /></div>
+        <div className="message-author">Nibie{message.status === "interrupted" ? <span className="message-status"> · Stopped</span> : message.status === "error" ? <span className="message-status is-danger">{" · Couldn't respond"}</span> : null}<MessageTime value={message.created_at} /></div>
         {waiting ? <span className="thinking-dots" role="status" aria-label="Nibie is responding"><i /><i /><i /></span> : <><MessageMarkdown content={message.content} />{message.status === "streaming" && <span className="thinking-dots is-inline" role="status" aria-label="Nibie is responding"><i /><i /><i /></span>}</>}
         {(canCopy || canRetry) && <div className="message-actions">
           {canCopy && <CopyButton text={message.content} label="Copy response" />}
