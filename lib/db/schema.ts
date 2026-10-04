@@ -1,5 +1,6 @@
 import {
   check,
+  date,
   foreignKey,
   index,
   integer,
@@ -19,6 +20,7 @@ export const preferredLanguage = pgEnum("preferred_language", ["auto", "en", "id
 export const preferenceModel = pgEnum("preference_model", ["fast", "balanced", "reasoning"]);
 export const responseLength = pgEnum("response_length", ["concise", "balanced", "detailed"]);
 export const responseStyle = pgEnum("response_style", ["natural", "professional", "direct"]);
+export const weeklyUsageMode = pgEnum("weekly_usage_mode", ["Fast", "Balanced", "High"]);
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey(),
@@ -192,6 +194,47 @@ export const messages = pgTable(
     uniqueIndex("messages_one_active_response_idx").on(table.conversationId).where(sql`${table.role} = 'assistant' AND ${table.status} = 'streaming'`),
     index("messages_user_conversation_idx").on(table.userId, table.conversationId),
     check("messages_content_not_blank", sql`${table.content} <> ''`),
+  ],
+);
+
+// Exactly-once generation-level reservation records prevent a logical provider generation from being charged twice.
+export const weeklyUsageReservations = pgTable(
+  "weekly_usage_reservations",
+  {
+    generationId: uuid("generation_id").primaryKey().references(() => messages.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    weekStart: date("week_start", { mode: "date" }).notNull(),
+    logicalMode: weeklyUsageMode("logical_mode").notNull(),
+    creditsCharged: integer("credits_charged").notNull(),
+    releasedAt: timestamp("released_at", { withTimezone: true, mode: "date" }),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("weekly_usage_reservations_user_week_idx").on(table.userId, table.weekStart),
+    check("weekly_usage_reservations_credits_positive", sql`${table.creditsCharged} > 0`),
+  ],
+);
+
+// Per-user weekly totals. Database functions own reservation/release writes; users can only read their row through RLS.
+export const weeklyAiUsage = pgTable(
+  "weekly_ai_usage",
+  {
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    weekStart: date("week_start", { mode: "date" }).notNull(),
+    creditsUsed: integer("credits_used").notNull().default(0),
+    fastRequests: integer("fast_requests").notNull().default(0),
+    balancedRequests: integer("balanced_requests").notNull().default(0),
+    highRequests: integer("high_requests").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("weekly_ai_usage_user_week_key").on(table.userId, table.weekStart),
+    check("weekly_ai_usage_credits_nonnegative", sql`${table.creditsUsed} between 0 and 100`),
+    check("weekly_ai_usage_fast_nonnegative", sql`${table.fastRequests} >= 0`),
+    check("weekly_ai_usage_balanced_nonnegative", sql`${table.balancedRequests} >= 0`),
+    check("weekly_ai_usage_high_nonnegative", sql`${table.highRequests} >= 0`),
   ],
 );
 

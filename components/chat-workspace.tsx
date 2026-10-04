@@ -28,10 +28,13 @@ import { clearStoredConversationReference } from "@/lib/privacy/local-state";
 import { modelForComposer } from "@/lib/preferences/model";
 import { accountDisplayName } from "@/lib/auth/display-name";
 import { defaultUserPreferences, type UserPreferences } from "@/lib/preferences/types";
+import { createPreviewConversations } from "@/lib/chat/preview-data";
 import { previewContextDiagnostics } from "@/lib/context/profile-context";
 import type { ContextDiagnostics } from "@/lib/context/context-types";
 import { followAfterSending, followStreamedContent, isNearBottom, trackNearBottom } from "@/lib/chat/scroll";
 import { ChatStreamServerError, readChatSse } from "@/lib/ai/sse";
+import { operationalCodes } from "@/lib/observability/codes";
+import { weeklyLimitNotice } from "@/lib/usage/format";
 import { compareNames, compareText } from "@/lib/chat/order";
 import { readRoomFileSelection, rememberRoomFileSelection } from "@/lib/files/selection-memory";
 import { abortLiveChatStream, finishLiveChatStream, liveChatConversationId, shouldStopLiveChatOnLeave, startLiveChatStream } from "@/lib/chat/live-stream";
@@ -56,11 +59,6 @@ const previewRoomId = "preview-room-nibie";
 const mockRooms: RoomSummary[] = [
   { id: previewRoomId, name: "Nibie Development", description: "The product and the context engine.", instructions: "Keep the voice calm and specific.", created_at: previewStamp, updated_at: previewStamp, brief: { goal: "Ship Rooms", current_focus: "Room detail", important_decisions: null, open_questions: null, next_step: "Keep general threads working" }, pins: [{ id: "preview-pin-deploy", room_id: previewRoomId, title: "Deployment rule", content: "Production runs on Vercel Seoul and user data stays owner-scoped through Supabase RLS.", created_at: previewStamp, updated_at: previewStamp }] },
 ];
-const mockConversations: Conversation[] = [
-  { id: "preview-writing", title: "A thoughtful note to the team", selected_model: "Balanced", room_id: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), messages: [{ id: "p1", role: "user", content: "Help me write a thoughtful note to my team after a busy launch week.", position: 1, created_at: previewStamp }, { id: "p2", role: "assistant", content: "A good note can recognize the effort, name what the team accomplished, and leave room for everyone to recharge.\n\nYou might start with what you noticed most: the care people brought to the final details, the way they supported one another, or a moment that made you proud.", position: 2, created_at: previewStamp }] },
-  { id: "preview-learning", title: "Learning the basics of astronomy", selected_model: "Balanced", room_id: previewRoomId, created_at: new Date(Date.now() - 86400000).toISOString(), updated_at: new Date(Date.now() - 86400000).toISOString(), messages: [{ id: "p3", role: "user", content: "Where should I begin if I want to learn astronomy?", position: 1, created_at: previewStamp }, { id: "p4", role: "assistant", content: "Start by looking up. Learning a few bright constellations and the phases of the Moon gives you a useful map. From there, the scale of the solar system becomes much easier to picture.", position: 2, created_at: previewStamp }] },
-  { id: "preview-code", title: "Debouncing a search box", selected_model: "Balanced", room_id: null, created_at: new Date(Date.now() - 172800000).toISOString(), updated_at: new Date(Date.now() - 172800000).toISOString(), messages: [{ id: "p5", role: "user", content: "Show me a tiny debounce helper in TypeScript.", position: 1, created_at: previewStamp }, { id: "p6", role: "assistant", content: "A debounce helper delays a call until input has settled.\n\n## Example\n\n```ts\nexport function debounce<T extends unknown[]>(fn: (...args: T) => void, wait = 250) {\n  let timer: ReturnType<typeof setTimeout> | undefined;\n  return (...args: T) => {\n    clearTimeout(timer);\n    timer = setTimeout(() => fn(...args), wait);\n  };\n}\n```\n\n- Use `wait` to tune responsiveness.\n- Read more in the [MDN guide](https://developer.mozilla.org/docs/Glossary/Debounce).", position: 2, created_at: previewStamp }] },
-];
 
 const noModels: ModelOption[] = [];
 
@@ -72,7 +70,8 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const draftParam = searchParams.get("draft") === "1";
   // Server history captured at delete-all. It stays hidden until a newer server payload arrives, so deleted chats do not flash back.
   const [droppedServerHistory, setDroppedServerHistory] = useState<WorkspaceData | null>(null);
-  const conversations = preview ? mockConversations : initialData && initialData === droppedServerHistory ? noConversations : (initialData?.conversations ?? noConversations);
+  const previewConversations = useMemo(() => createPreviewConversations(renderedAt ?? 0), [renderedAt]);
+  const conversations = preview ? previewConversations : initialData && initialData === droppedServerHistory ? noConversations : (initialData?.conversations ?? noConversations);
   const archivedConversations = preview ? noConversations : initialData?.archivedConversations ?? noConversations;
   const [localMessages, setLocalMessages] = useState<Record<string, PersistedMessage[]>>({});
   const [removedIds, setRemovedIds] = useState<string[]>([]);
@@ -430,6 +429,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     const controller = startLiveChatStream(id);
     let assistantId: string | null = null;
     let httpStatus: number | undefined;
+    let weeklyLimitResetAt: string | null = null;
     let buffer = "";
     let flushTimer: ReturnType<typeof setTimeout> | null = null;
     let shown = false;
@@ -468,7 +468,12 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     stopGeneration.current = stopOwnedGeneration;
     try {
       const response = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: id, userMessageId, model: mode, ...(options.regenerate ? { regenerate: true } : {}), ...(options.fileIds?.length ? { fileIds: options.fileIds } : {}) }), signal: controller.signal });
-      if (!response.ok || !response.body) { if (!response.ok) httpStatus = response.status; const payload = await response.json().catch(() => null); throw new Error(payload?.error ?? failureNotice); }
+      if (!response.ok || !response.body) {
+        if (!response.ok) httpStatus = response.status;
+        const payload = await response.json().catch(() => null);
+        if (payload?.code === operationalCodes.weeklyUsageLimitRejected && typeof payload.resetAt === "string" && Number.isFinite(Date.parse(payload.resetAt))) weeklyLimitResetAt = payload.resetAt;
+        throw new Error(payload?.error ?? failureNotice);
+      }
       for await (const data of readChatSse(response.body)) {
         if (controller.signal.aborted) throw new DOMException("Response aborted.", "AbortError");
         if (data.type === "start") {
@@ -487,6 +492,10 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     } catch (error) {
       flush();
       if (controller.signal.reason === "user_stopped" || epoch !== userStopEpoch.current) return;
+      if (weeklyLimitResetAt) {
+        setNotice(weeklyLimitNotice(weeklyLimitResetAt));
+        return;
+      }
       const kind = classifyStreamFailure({ error, aborted: controller.signal.aborted, httpStatus });
       if (!assistantId) clearPlaceholder();
       if (needsServerCheck(kind)) {

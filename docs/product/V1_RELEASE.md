@@ -23,7 +23,12 @@ Does not ship:
 
 - Recall, Actions, RAG, agents, or web search
 - Account deletion
-- A per-account rate limit or provider spend ceiling
+- A per-minute per-account rate limit or real provider-dollar spend ceiling
+- Weekly AI usage is **not shipped in the current production release**. This worktree contains an unverified branch candidate only; see [Weekly AI usage candidate](../feature/weekly-usage/v1.md). Do not describe it as shipped until the approved production migration/deployment and post-deploy checks pass.
+
+## Weekly usage policy (candidate only)
+
+The candidate sets a free allowance of 100 weighted credits per account/week, resetting Monday 00:00 UTC. Fast / Balanced / High cost 1 / 3 / 6 credits per newly established provider generation. These are product policy weights, not model prices. Authentication, reading history, model selection, Rooms, Pins, file uploads alone, Workbench/database-only actions, and provider-free replays are not charged. Stop after stream establishment stays charged; setup failures attempt idempotent release. The weekly read is shown quietly in Settings; quota rejection returns stable `WEEKLY_USAGE_LIMIT` plus the server-generated reset timestamp. There are no paid tiers, billing, or checkout. This is an allowance, not a true dollar ceiling or a general per-minute abuse limit. Full lifecycle/security details and rollout gates are in [the candidate spec](../feature/weekly-usage/v1.md).
 
 ## Migrations
 
@@ -40,10 +45,11 @@ Drizzle journal order:
 7. `drizzle/0006_pins.sql` — owner-scoped room pins, forced RLS, cascade delete with the room
 8. `drizzle/0007_room_files.sql` — owner-scoped room files, forced RLS, cascade delete with the room
 9. `drizzle/0008_workbench.sql` — owner-scoped workbench documents, forced RLS. Deleting a room sets only `room_id` to null
+10. `drizzle/0009_weekly_ai_usage.sql` — weekly account allowance and exactly-once generation reservations; additive only
 
 `0003` does not change conversations or messages. `0005` does not change preferences or rooms. Do not regenerate `0004` from `lib/db/schema.ts`; the SQL, not the Drizzle `onDelete("set null")` shorthand, is authoritative for the column-specific null.
 
-Every user-owned table in these files enables and forces RLS. Policies use `auth.uid()`. Chat RPCs are `SECURITY INVOKER` and granted only to `authenticated`.
+Every user-owned table in these migrations enables and forces RLS; aggregate reads use `auth.uid()` owner isolation. Existing chat-generation RPCs stay `SECURITY INVOKER`. The new quota reservation/release writes are intentionally narrow `SECURITY DEFINER` exceptions because authenticated clients have no direct write grants; each derives its caller via `auth.uid()`, validates that caller's active generation, sets an empty `search_path`, and is executable only by `authenticated`. The current-week read is `SECURITY INVOKER`. See the [candidate security details](../feature/weekly-usage/v1.md).
 
 ## Required environment
 
@@ -74,8 +80,8 @@ Optional tests:
 ## Supabase
 
 1. Use the Nibie project. Confirm the database is the intended one before migrating.
-2. Apply the nine migrations in the order above (`npm run db:migrate` against that `DATABASE_URL`).
-3. Confirm RLS is enabled and forced on `users`, `conversations`, `messages`, `user_preferences`, `rooms`, `room_briefs`, `pins`, `room_files`, and `workbench_documents`.
+2. When the weekly-usage candidate is approved for release, apply migrations `0000` through `0009` in journal order. Until then, keep production at its current applied schema; this worktree has not applied the candidate migration.
+3. Verify RLS is enabled and forced on `users`, `conversations`, `messages`, `user_preferences`, `rooms`, `room_briefs`, `pins`, `room_files`, `workbench_documents`, `weekly_ai_usage`, and `weekly_usage_reservations`. Verify authenticated users can read only their own aggregate and cannot directly write quota rows or read the reservation ledger.
 4. Enable Email auth. Enable the Google provider with the Google client id and secret stored in Supabase, not in the Next.js bundle.
 5. Set the Site URL to `NEXT_PUBLIC_APP_URL`.
 6. Allow the auth callback: `https://<production-host>/auth/callback`. Add each Vercel preview host only if that preview should complete Google sign-in.
@@ -93,7 +99,7 @@ Optional tests:
 Do not skip the backup.
 
 1. Confirm the target database and take a backup.
-2. Apply migrations `0000` through `0008` in journal order.
+2. Confirm whether the weekly-usage candidate is approved. Apply only the intended additive migration set in journal order; do not apply `0009` until its release is approved, its rollback/forward-fix plan is reviewed, and the local concurrency/RLS and pre-production checks pass.
 3. Verify RLS is still enabled and forced, and that a second user cannot read another user's rows.
 4. Deploy the Next.js app with the runtime environment above. Do not deploy `DATABASE_URL` or a service-role key to the browser.
 5. Smoke auth: email sign-in, Google sign-in, callback, and sign out.
@@ -119,7 +125,8 @@ Signed in:
 - Send a message and refresh; the reply is still there
 - Stop a long reply; the conversation is not left spinning after refresh
 - Retry and Regenerate only affect the latest turn
-- Change Fast / Balanced / Reasoning; the request body mode is one of those three names
+- Change Fast / Balanced / High; the browser sends only the safe logical mode. If the weekly candidate is released: confirm a new provider generation charges once at 1 / 3 / 6 credits, a completed replay does not charge, a stopped established stream remains charged, and an exhausted allowance returns `WEEKLY_USAGE_LIMIT` without calling the provider
+- Open Settings → General; verify the server-supplied remaining allowance/reset, then verify exhausted-state copy. No usage preflight occurs before Send
 - Context panel names profile, room, pinned context, file context, summary, and recent messages without quoting About you, the brief, pin text, or file text
 - Create a Room, put a thread in it, delete the Room, and open that thread from the general list
 - Export downloads `nibie-export-v1.json` and does not accept `user_id`
@@ -128,9 +135,9 @@ Signed in:
 ## Known limitations
 
 - Account deletion is not available. Sign-out and delete-all do not remove the Auth user.
-- There is no per-account request rate limit or provider spend ceiling. Protections that do exist: 20,000-character messages, a 16,384-token context budget, one streaming reply per conversation, a 120-second provider abort, and server-side mode names.
+- Weekly weighted usage is a branch-only candidate; the current production build still has no account allowance. If approved and released, it remains a request-budget guard—not a dollar spend ceiling, IP/signup control, or per-minute rate limit. Existing protections include 20,000-character messages, a 16,384-token context budget, one streaming reply per conversation, a 120-second provider abort, and server-side logical mode names.
 - The provider request does not send `max_tokens`. A very long completion is not hard-cut before it is stored.
-- The model picker shows the configured provider model name as secondary text. The client still cannot submit an arbitrary model id, and `AI_API_KEY` stays server-side.
+- The browser model picker displays only the Fast / Balanced / High product modes, descriptions, and usage weights. Provider names, ids, and routing stay server-side.
 - AI Room drafting runs only when some configured mode's model id is exactly `gpt-6-luna`. Otherwise the dialog tells the user to set the Room up manually.
 - Thread summaries are not generated.
 - Content-Security-Policy is not set. The theme script is inline. `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options`, and `Permissions-Policy` are set.

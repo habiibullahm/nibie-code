@@ -367,13 +367,13 @@ If a future direct-Postgres architecture is proposed, it requires a separate sec
 
 ### 9.3 RPC security
 
-User-facing database procedures should remain:
+User-facing data functions should normally remain:
 
 - `SECURITY INVOKER`;
 - owned by the authenticated session;
 - constrained by table policies and database constraints.
 
-Privileged procedures require explicit review.
+Privileged functions require explicit review. The weekly usage candidate is an intentional exception: its two quota-write procedures are narrowly scoped `SECURITY DEFINER` functions because authenticated clients cannot safely receive direct table write grants. They derive ownership from `auth.uid()`, validate an active owner-owned assistant generation, fix an empty `search_path`, and grant execution only to `authenticated`. Aggregate reads stay RLS-scoped and the current-usage function remains `SECURITY INVOKER`. No service-role runtime access is added. This candidate is **not production-released**; see [Weekly AI usage](../feature/weekly-usage/v1.md).
 
 ---
 
@@ -525,7 +525,11 @@ The backend should support account-level limits such as:
 
 Client-supplied quota values are ignored.
 
-### 13.4 Model allowlist
+### 13.4 Current weekly-usage candidate (not shipped)
+
+This worktree adds a 100-credit weekly weighted allowance (Fast 1, Balanced 3, High 6; Monday 00:00 UTC), but the production database/app have not been migrated, deployed, or verified for it. Weights are product policy, not provider-dollar prices. The guard reserves once per new provider generation, releases an unestablished stream via an idempotent atomic operation, and keeps charges after a stream is established (including Stop). Settings show a small remaining allowance/reset time; exhausted requests return `WEEKLY_USAGE_LIMIT`, never an upgrade prompt. It is not a true provider spend ceiling, per-minute rate limit, or IP/signup-abuse control. Logs are owner-identifier-free metadata only. Full behavior and the process-crash limitation are documented in [the release candidate](../feature/weekly-usage/v1.md).
+
+### 13.5 Model allowlist
 
 The browser may select only logical product modes.
 

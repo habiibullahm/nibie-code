@@ -84,7 +84,7 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
     });
   }
 
-  const modelItems: MenuItem<ChatModel>[] = models.map((option) => ({ value: option.id, label: option.label, detail: option.description }));
+  const modelItems: MenuItem<ChatModel>[] = models.map((option) => ({ value: option.id, label: option.label, detail: option.credits === undefined ? option.description : `${option.description} · ${option.credits} credit${option.credits === 1 ? "" : "s"}` }));
   const showExpandControl = expanded || draft.includes("\n") || draft.length > 120;
 
   return <div ref={dockRef} className={`composer-dock${centered ? " is-centered" : ""}`}>

@@ -25,7 +25,8 @@ function deferred() { let resolve!: () => void; const promise = new Promise<void
 function database(mode: string, failSave = false, lateClaim = false) {
   const rows: Row[] = [{ id: firstUser, conversation_id: conversation, role: "user", content: "First", status: "complete", position: 1 }];
   const contentGate = deferred(), stopAck = deferred();
-  let stoppedContentWrites = 0, stoppedStatusWrites = 0, appendCalls = 0;
+  let stoppedContentWrites = 0, stoppedStatusWrites = 0, appendCalls = 0, creditsUsed = 0;
+  const weights: Record<string, number> = { Fast: 1, Balanced: 3, High: 6 };
   function from(table: string) {
     const filters: ((row: Row) => boolean)[] = [];
     let write: Partial<Row> | undefined, single = false;
@@ -54,23 +55,32 @@ function database(mode: string, failSave = false, lateClaim = false) {
     }
     return query;
   }
-  const rpc = vi.fn((name: string, args: Record<string, string>) => ({ single: async () => {
-    if (name === "append_user_message") {
-      appendCalls++;
-      if (lateClaim) { lateClaim = false; rows.push({ id: firstAssistant, conversation_id: conversation, role: "assistant", content: "…", status: "streaming", position: 2, reply_to_message_id: firstUser }); return { data: null, error: { code: "PT409" } }; }
-      const existing = rows.find((row) => row.id === args.p_message_id);
-      if (existing) return { data: existing, error: null };
-      if (rows.some((row) => row.status === "streaming")) return { data: null, error: { code: "PT409" } };
-      const row: Row = { id: args.p_message_id, conversation_id: conversation, role: "user", content: args.p_content, status: "complete", position: Math.max(...rows.map((item) => item.position)) + 1 };
-      rows.push(row); return { data: row, error: null };
-    }
-    const old = rows.find((row) => row.reply_to_message_id === args.p_user_message_id);
-    if (old || rows.some((row) => row.status === "streaming")) return { data: null, error: { code: "PT409" } };
-    const row: Row = { id: args.p_user_message_id === firstUser ? firstAssistant : secondAssistant, conversation_id: conversation, role: "assistant", content: "…", status: "streaming", position: Math.max(...rows.map((item) => item.position)) + 1, reply_to_message_id: args.p_user_message_id };
-    rows.push(row); return { data: { ...row, replayed: false }, error: null };
-  } }));
+  const rpc = vi.fn((name: string, args: Record<string, string>) => {
+    const run = async () => {
+      if (name === "reserve_weekly_ai_usage") {
+        const cost = weights[args.p_logical_mode] ?? 0; creditsUsed += cost;
+        return { data: { accepted: true, credits_charged: cost, credits_used: creditsUsed, credits_remaining: 100 - creditsUsed, reset_at: "2026-10-05T00:00:00.000Z" }, error: null };
+      }
+      if (name === "start_weekly_ai_usage") return { data: true, error: null };
+      if (name === "release_weekly_ai_usage") { creditsUsed = Math.max(0, creditsUsed - (weights[mode] ?? 0)); return { data: true, error: null }; }
+      if (name === "append_user_message") {
+        appendCalls++;
+        if (lateClaim) { lateClaim = false; rows.push({ id: firstAssistant, conversation_id: conversation, role: "assistant", content: "…", status: "streaming", position: 2, reply_to_message_id: firstUser }); return { data: null, error: { code: "PT409" } }; }
+        const existing = rows.find((row) => row.id === args.p_message_id);
+        if (existing) return { data: existing, error: null };
+        if (rows.some((row) => row.status === "streaming")) return { data: null, error: { code: "PT409" } };
+        const row: Row = { id: args.p_message_id, conversation_id: conversation, role: "user", content: args.p_content, status: "complete", position: Math.max(...rows.map((item) => item.position)) + 1 };
+        rows.push(row); return { data: row, error: null };
+      }
+      const old = rows.find((row) => row.reply_to_message_id === args.p_user_message_id);
+      if (old || rows.some((row) => row.status === "streaming")) return { data: null, error: { code: "PT409" } };
+      const row: Row = { id: args.p_user_message_id === firstUser ? firstAssistant : secondAssistant, conversation_id: conversation, role: "assistant", content: "…", status: "streaming", position: Math.max(...rows.map((item) => item.position)) + 1, reply_to_message_id: args.p_user_message_id };
+      rows.push(row); return { data: { ...row, replayed: false }, error: null };
+    };
+    return { single: run, then: (resolve: (value: unknown) => unknown) => run().then(resolve) };
+  });
   createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc });
-  return { rows, contentGate, stopAck, rpc, counts: () => ({ stoppedContentWrites, stoppedStatusWrites, appendCalls }) };
+  return { rows, contentGate, stopAck, rpc, usage: () => creditsUsed, counts: () => ({ stoppedContentWrites, stoppedStatusWrites, appendCalls }) };
 }
 function request(user: string) { return new Request("http://localhost/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: conversation, userMessageId: user }) }); }
 afterEach(() => { vi.restoreAllMocks(); provider.mockReset(); createClient.mockReset(); });
@@ -99,6 +109,7 @@ describe("main chat route/action Stop handoff", () => {
     expect((await Array.fromAsync(readChatSse(second.body!))).at(-2)).toEqual({ type: "status", status: "complete" });
     expect(provider).toHaveBeenCalledTimes(2);
     expect(provider.mock.calls.map((call) => call[0])).toEqual([mode, mode]);
+    expect(db.usage()).toBe(2 * ({ Fast: 1, Balanced: 3, High: 6 } as const)[mode as "Fast" | "Balanced" | "High"]);
     expect(acknowledged).toBe(false);
     expect(db.rows.find((row) => row.id === firstAssistant)?.content).toBe("…");
     db.contentGate.resolve(); db.stopAck.resolve();

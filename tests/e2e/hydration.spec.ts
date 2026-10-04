@@ -31,3 +31,16 @@ for (const environment of environments) {
     });
   }
 }
+
+test("preview history hydrates when the browser clock differs from the server", async ({ page }) => {
+  const problems: string[] = [];
+  page.on("console", (message) => { if (hydration.test(message.text())) problems.push(message.text().slice(0, 300)); });
+  page.on("pageerror", (error) => { if (hydration.test(error.message)) problems.push(error.message.slice(0, 300)); });
+  await page.addInitScript(() => {
+    const realNow = Date.now.bind(Date);
+    Date.now = () => realNow() + 86_400_000;
+  });
+  await page.goto("/preview");
+  await page.waitForLoadState("networkidle");
+  expect(problems).toEqual([]);
+});
