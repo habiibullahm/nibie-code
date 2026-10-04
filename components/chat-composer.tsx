@@ -19,6 +19,8 @@ type Props = {
   mode: ChatModel;
   models: ModelOption[];
   onModelChange: (model: ChatModel) => void;
+  // True only while a mode change is being saved; the picker says so instead of claiming a response is running.
+  savingMode: boolean;
   caption: string;
   diagnostics: ContextDiagnostics;
   onEditProfile: () => void;
@@ -35,7 +37,7 @@ type Props = {
 };
 
 // The draft lives here, not in the workspace: typing re-renders only this component, never the message list or sidebar.
-export const ChatComposer = memo(function ChatComposer({ ref, sending, streaming, mode, models, onModelChange, caption, diagnostics, onEditProfile, onSubmit, onStop, onAttach, attachmentPanel = null, roomItems, roomId, roomLabel, roomSelectionNotice, roomsLoading, onRoomChange }: Props) {
+export const ChatComposer = memo(function ChatComposer({ ref, sending, streaming, mode, models, onModelChange, savingMode, caption, diagnostics, onEditProfile, onSubmit, onStop, onAttach, attachmentPanel = null, roomItems, roomId, roomLabel, roomSelectionNotice, roomsLoading, onRoomChange }: Props) {
   const [draft, setDraft] = useState("");
   const [enterToSend] = useChatFlag("enterToSend");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -65,7 +67,7 @@ export const ChatComposer = memo(function ChatComposer({ ref, sending, streaming
     <div className="composer-tools"><div className="composer-left-tools">
       <button className="composer-icon" type="button" aria-label="Attach file" title="Attach file" aria-pressed={Boolean(attachmentPanel)} onClick={onAttach}><Plus size={18} /></button>
       {onRoomChange ? <ComposerMenu name="Room" value={roomId} items={roomItems} onChange={onRoomChange} disabled={sending || streaming || roomsLoading} disabledReason={roomsLoading ? "Loading rooms" : "Message is being sent"} /> : <span className="composer-room-context" aria-label={`Room context: ${roomLabel}`} title={roomLabel}>{roomLabel}</span>}
-      <ComposerMenu name="Model" value={mode} items={modelItems} onChange={onModelChange} disabled={sending || streaming || !models.length} disabledReason="A response is running or no models are configured" />
+      <ComposerMenu name="Model" value={mode} items={modelItems} onChange={onModelChange} disabled={sending || streaming || !models.length} disabledReason={!models.length ? "No models are configured" : savingMode ? "Saving…" : "A response is running"} />
     </div>
     {streaming ? <button key="stop" className="send-button" type="button" aria-label="Stop response" onClick={onStop}><X size={18} /></button> : <button key="send" className="send-button" type="submit" aria-label="Send message" disabled={!draft.trim() || sending}>{sending ? <span className="send-spinner" /> : <ArrowUp size={18} strokeWidth={2.3} />}</button>}</div></form><p className="composer-caption" role="status">{caption}</p></div>;
 });

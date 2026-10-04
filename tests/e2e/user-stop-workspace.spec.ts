@@ -13,7 +13,9 @@ declare global {
 }
 const conversation = "5e9bdcca-9205-4fea-a773-13952bb78c44";
 
-async function workspace(page: Page, mode: string, stopFailure = false) {
+async function workspace(page: Page, mode: string, stopFailure = false, holdModelSave = false) {
+  let releaseModelSave!: () => void;
+  const modelSaveGate = new Promise<void>((resolve) => { releaseModelSave = resolve; });
   let releaseStop!: () => void;
   const stopAck = new Promise<void>((resolve) => { releaseStop = resolve; });
   const actions: unknown[][] = [];
@@ -35,6 +37,7 @@ async function workspace(page: Page, mode: string, stopFailure = false) {
     const modelUpdate = args.length === 2 && ["Fast", "Balanced", "High"].includes(args[1] as string);
     // Only the message save (and an explicit model choice) are Server Actions here; anything else is recorded and fails the Stop tests.
     if (args.length !== 4 && !modelUpdate) return route.abort();
+    if (modelUpdate && holdModelSave) await modelSaveGate;
     const adds = actions.filter((action) => action.length === 4).length;
     const result = modelUpdate ? {} : { data: { id: args[2], position: adds * 2 - 1 } };
     await route.fulfill({ contentType: "text/x-component", body: '0:{"a":"$@1","f":[],"b":"development"}\n1:' + JSON.stringify(result) + "\n" });
@@ -72,7 +75,7 @@ async function workspace(page: Page, mode: string, stopFailure = false) {
     };
   });
   await page.goto("/preview/chat-core?workspace=1&mode=" + mode + "&conversation=" + conversation);
-  return { actions, stops, releaseStop };
+  return { actions, stops, releaseStop, releaseModelSave };
 }
 
 for (const mode of ["Fast", "Balanced", "High"]) {
@@ -174,4 +177,16 @@ test("the single picker sends the chosen mode and never a reasoning field", asyn
     { model: "High", hasReasoning: false }, { model: "Fast", hasReasoning: false },
   ]);
   expect(server.actions.filter((args) => args.length === 2).map((args) => args[1])).toEqual(["High", "Fast"]);
+});
+
+test("while a mode change saves, the picker says Saving… and never claims a response is running", async ({ page }) => {
+  const server = await workspace(page, "Balanced", false, true);
+  await page.getByRole("button", { name: "Model: Balanced", exact: true }).click();
+  await page.getByRole("menuitemradio", { name: /^Fast/ }).click();
+  const saving = page.getByRole("button", { name: "Model: Fast (Saving…)", exact: true });
+  await expect(saving).toBeDisabled();
+  await expect(page.getByRole("button", { name: /A response is running/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /no models are configured/ })).toHaveCount(0);
+  server.releaseModelSave();
+  await expect(page.getByRole("button", { name: "Model: Fast", exact: true })).toBeEnabled();
 });

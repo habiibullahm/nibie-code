@@ -102,6 +102,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   // A conversation's saved mode is only used while that mode is still configured; otherwise the first available one is shown.
   const availableModes = useMemo(() => models.map((option) => option.id), [models]);
   const [modelChoice, setModelChoice] = useState<ModelChoice>("Auto");
+  const [savingMode, setSavingMode] = useState(false);
   const [savedPreferences, setSavedPreferences] = useState(preferences ?? defaultUserPreferences());
   const [serverUpdatedAt, setServerUpdatedAt] = useState(preferences?.updatedAt ?? null);
   if (preferences && preferences.updatedAt !== serverUpdatedAt) {
@@ -776,6 +777,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     if (choice === "Auto" || preview || !activeConversation) return;
     busy.current = true;
     setSending(true);
+    setSavingMode(true);
     try {
       const result = await updateConversationModelAction(activeConversation.id, choice);
       if (result.error) { setModelChoice(previous); setNotice(result.error); return; }
@@ -785,7 +787,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     } catch {
       setModelChoice(previous);
       setNotice("We couldn't save that model choice. Please try again.");
-    } finally { busy.current = false; setSending(false); }
+    } finally { busy.current = false; setSending(false); setSavingMode(false); }
   });
   const stopStream = useStableCallback(() => stopGeneration.current?.());
   const openingWorkbench = useRef(false);
@@ -856,7 +858,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
         <button type="button" className="header-new-chat" aria-label="New chat" title="New chat" disabled={controlsDisabled} onClick={newChat}><SquarePen size={17} /></button>
       </header>
       <div ref={scrollRef} onScroll={handleScroll} className={`conversation-scroll ${showRoom ? "is-room" : messages.length || loadingConversation ? "has-messages" : "is-empty"}`}>{showRoom && activeRoom ? <RoomDetail key={activeRoom.id} room={activeRoom} threads={roomThreads} busy={controlsDisabled} preview={preview} onOpenThread={openConversation} onNewThread={() => newThreadInRoom(activeRoom.id)} onSaveRoom={saveRoom} onSaveBrief={saveBrief} onCreatePin={createPin} onUpdatePin={updatePin} onDeletePin={removePin} onDelete={removeRoom} /> : loadingConversation ? <div className="message-list conversation-skeleton" role="status" aria-busy="true" aria-label="Loading conversation"><div className="skeleton-line is-short" /><div className="skeleton-line" /><div className="skeleton-line" /><div className="skeleton-line is-medium" /></div> : messages.length ? <div className="message-list" aria-live="polite">{messages.map((message) => <MessageRow key={message.id} message={message} initial={initial} isLast={message.id === lastMessage?.id} isLastUser={message.id === lastUser?.id} canMutate={!preview} disabled={messageActionsLocked} editing={editingId === message.id} responseFailed={notice === failureNotice} onRegenerate={regenerate} onStartEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} onContinueInWorkbench={preview ? undefined : continueInWorkbench} workbenchPending={workbenchPending} />)}{notice && <p className="local-notice" role="status">{notice}</p>}</div> : <div className="welcome-panel">{notice && <p className="local-notice" role="status">{notice}</p>}<div className="welcome-icon"><BrandMark activity={assistantActivity} /></div><p className="welcome-eyebrow">{drafting && activeRoom ? "NEW THREAD" : "A LITTLE ROOM TO THINK"}</p><h1>{drafting && activeRoom ? activeRoom.name : "What’s on your mind?"}</h1><p className="welcome-copy">{drafting && activeRoom ? "This thread starts inside the room. Nibie will use its instructions, brief, and pins." : "A fresh page for ideas, questions, and whatever you’re working through."}</p>{drafting ? null : <div className="suggestion-list" aria-label="Suggestions">{suggestions.map((suggestion) => <button key={suggestion} onClick={() => { composerRef.current?.set(suggestion); composerRef.current?.focus(); }}>{suggestion}<span>↗</span></button>)}</div>}</div>}</div>
-      {showRoom ? null : <ChatComposer ref={composerRef} sending={sending || recovering || movingThread !== null} streaming={streaming} mode={mode} models={models} onModelChange={changeModel} caption={caption} diagnostics={contextDiagnostics ?? contextPreview} onEditProfile={editProfile} onSubmit={submitMessage} onStop={stopStream} onAttach={attach} roomItems={roomItems} roomId={selectedRoomId ?? ""} roomLabel={roomLabel} roomSelectionNotice={roomSelectionNotice} roomsLoading={roomsLoading} onRoomChange={activeId ? undefined : chooseDraftRoom} attachmentPanel={filePickerOpen && threadRoom ? <RoomFilePicker roomId={threadRoom.id} selectedIds={selectedFileIds} disabled={controlsDisabled || sending || streaming} onChange={setSelectedFileIds} /> : null} />}    </section>
+      {showRoom ? null : <ChatComposer ref={composerRef} sending={sending || recovering || movingThread !== null} streaming={streaming} mode={mode} models={models} onModelChange={changeModel} savingMode={savingMode} caption={caption} diagnostics={contextDiagnostics ?? contextPreview} onEditProfile={editProfile} onSubmit={submitMessage} onStop={stopStream} onAttach={attach} roomItems={roomItems} roomId={selectedRoomId ?? ""} roomLabel={roomLabel} roomSelectionNotice={roomSelectionNotice} roomsLoading={roomsLoading} onRoomChange={activeId ? undefined : chooseDraftRoom} attachmentPanel={filePickerOpen && threadRoom ? <RoomFilePicker roomId={threadRoom.id} selectedIds={selectedFileIds} disabled={controlsDisabled || sending || streaming} onChange={setSelectedFileIds} /> : null} />}    </section>
     {renaming && <dialog ref={renameDialogRef} className="room-setup-dialog" aria-labelledby={renameTitleId} aria-busy={renameSaving} onCancel={(event) => { event.preventDefault(); if (!renameSaving) setRenaming(null); }}>
       <header className="settings-header"><h1 id={renameTitleId}>Rename conversation</h1><button type="button" className="icon-button" aria-label="Close rename dialog" disabled={renameSaving} onClick={() => setRenaming(null)}><X size={18} /></button></header>
       <form className="room-setup-form" onSubmit={(event) => { event.preventDefault(); void saveRename(); }}>
