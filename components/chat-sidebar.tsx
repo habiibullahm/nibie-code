@@ -1,12 +1,11 @@
 "use client";
 
 import { memo, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type RefObject } from "react";
-import Link from "next/link";
-import { Archive, ChevronDown, ChevronRight, DoorOpen, FileText, MessageSquare, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Plus, RotateCcw, Search, Settings, SquarePen, X } from "lucide-react";
+import { Archive, ChevronDown, ChevronRight, DoorOpen, MessageSquare, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Plus, RotateCcw, Search, Settings, SquarePen, X } from "lucide-react";
 import { SIGN_OUT_LABEL } from "@/lib/privacy/sign-out";
 import { AccountMenu } from "@/components/account-menu";
 import { Brand, type BrandActivity } from "@/components/brand";
-import { chatPath, workbenchPath } from "@/lib/routes";
+import { chatPath } from "@/lib/routes";
 import { groupFor, groupThreads, historyGroups, requestTime } from "@/lib/chat/groups";
 import type { ConversationSummary, RoomSummary } from "@/lib/chat/read";
 
@@ -151,11 +150,9 @@ export const ChatSidebar = memo(function ChatSidebar({ conversations, archivedCo
     <div className="sidebar-top">{collapsed && !mobile ? <Brand variant="mark" href={chatPath} label="Nibie home" activity={activity} /> : <Brand href={chatPath} label="Nibie home" activity={activity} />}{mobile ? <button ref={closeMenuRef} className="icon-button" aria-label="Close menu" onClick={onClose}><X size={19} /></button> : collapsed ? <button ref={desktopExpandRef} type="button" className="icon-button" aria-label="Expand sidebar" title="Expand sidebar" aria-expanded="false" onClick={onExpand}><PanelLeftOpen size={18} /></button> : <div className="sidebar-controls"><button type="button" className="icon-button" aria-label="Search conversations" title="Search conversations" aria-haspopup="dialog" aria-expanded={searchOpen} onClick={() => setSearchOpen(true)}><Search size={18} aria-hidden="true" /></button>{onCollapse ? <button ref={desktopToggleRef} type="button" className="icon-button" aria-label="Collapse sidebar" title="Collapse sidebar" aria-expanded="true" onClick={onCollapse}><PanelLeftClose size={18} /></button> : null}</div>}</div>
     {collapsed && !mobile ? <nav className="sidebar-rail-nav" aria-label="Primary navigation">
       <button type="button" className="rail-button" aria-label="New chat" title="New chat" disabled={busy} onClick={onNewChat}><SquarePen size={17} aria-hidden="true" /></button>
-      <Link className="rail-button" aria-label="Workbench" title="Workbench" href={workbenchPath}><FileText size={17} aria-hidden="true" /></Link>
       <button type="button" className={"rail-button" + (activeRoomId ? " is-active" : "")} aria-label="Rooms" title="Rooms" aria-current={activeRoomId ? "page" : undefined} onClick={() => { onExpand?.(); requestAnimationFrame(() => roomsSectionRef.current?.focus()); }}><DoorOpen size={17} aria-hidden="true" /></button>
       <button type="button" className={"rail-button" + (!activeRoomId && !settingsActive ? " is-active" : "")} aria-label="General" title="General" aria-current={!activeRoomId && !settingsActive ? "page" : undefined} onClick={() => { onExpand?.(); if (!grouped.general.length) onOpen(null); requestAnimationFrame(() => generalSectionRef.current?.focus()); }}><MessageSquare size={17} aria-hidden="true" /></button>
     </nav> : <button type="button" className="new-chat-button" disabled={busy} onClick={onNewChat}><SquarePen size={17} /> <span>New chat</span></button>}
-    {!collapsed || mobile ? <Link className="new-chat-button sidebar-workbench" href={workbenchPath}><FileText size={17} strokeWidth={2.2} /> <span>Workbench</span></Link> : null}
     {!collapsed || mobile ? <nav ref={historyNavRef} className="history-nav" aria-label="Conversations" tabIndex={-1}>
       <section ref={roomsSectionRef} className="history-group" aria-label="Rooms" tabIndex={-1}>
         <h2>Rooms</h2>

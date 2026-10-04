@@ -7,12 +7,13 @@ test("desktop sidebar collapses to an accessible primary navigation rail", async
   const sidebar = page.locator(".desktop-sidebar");
   await expect(sidebar).toBeVisible();
   await expect(sidebar).toHaveCSS("width", "264px");
-  await expect(sidebar.getByRole("link", { name: "Workbench" })).toHaveAttribute("href", "/workbench");
+  // Workbench is hidden from primary navigation for V1; its route and data are untouched.
+  await expect(sidebar.getByRole("link", { name: "Workbench" })).toHaveCount(0);
   await sidebar.getByRole("button", { name: "Collapse sidebar" }).click();
   await expect(sidebar).toHaveCSS("width", "64px");
   await expect(sidebar.getByRole("button", { name: "Expand sidebar" })).toHaveAttribute("aria-expanded", "false");
   await expect(sidebar.getByRole("button", { name: "New chat" })).toBeVisible();
-  await expect(sidebar.getByRole("link", { name: "Workbench" })).toBeVisible();
+  await expect(sidebar.getByRole("link", { name: "Workbench" })).toHaveCount(0);
   await expect(sidebar.getByRole("button", { name: "Rooms" })).toBeVisible();
   await expect(sidebar.getByRole("button", { name: "General" })).toBeVisible();
   await expect(sidebar.getByRole("button", { name: "Settings" })).toBeVisible();
@@ -51,7 +52,7 @@ test("desktop sidebar collapses to an accessible primary navigation rail", async
   await expect(sidebar.locator(".account-profile")).toHaveAttribute("aria-expanded", "true");
   await sidebar.getByRole("button", { name: "Expand sidebar" }).click();
   await expect(sidebar).toHaveCSS("width", "264px");
-  await expect(sidebar.getByRole("link", { name: "Workbench" })).toBeVisible();
+  await expect(sidebar.getByRole("link", { name: "Workbench" })).toHaveCount(0);
   await expect(sidebar.getByRole("button", { name: "New chat" })).toBeVisible();
 });
 
