@@ -33,6 +33,27 @@ describe("POST /api/chat", () => {
     expect(JSON.stringify(writes)).not.toContain("private");
   });
 
+  it.each([true, false])("finishes a long High reply with the same text it saved (provider DONE: %s)", async (withDone) => {
+    const writes: unknown[] = [];
+    readyClient(writes);
+    const parts = Array.from({ length: 600 }, (_, index) => index % 50 === 0 ? `\n\n## Part ${index / 50} — “tradeoffs” ✓\n\n` : `token${index} `);
+    // Provider frames arrive split at arbitrary byte boundaries, then end with finish_reason "stop" and either [DONE] or a bare EOF.
+    const wire = encoder.encode(parts.map((part) => `data: ${JSON.stringify({ choices: [{ delta: { content: part } }] })}\n\n`).join("")
+      + `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n` + (withDone ? "data: [DONE]\n\n" : ""));
+    stream.mockResolvedValue(new ReadableStream<Uint8Array>({ start(controller) {
+      for (let offset = 0; offset < wire.length; offset += 97) controller.enqueue(wire.slice(offset, offset + 97));
+      controller.close();
+    } }));
+    const response = await POST(new Request(validRequest().url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...await validRequest().json(), model: "High" }) }));
+    const events = await Array.fromAsync(readChatSse(response.body!));
+    expect(stream.mock.calls[0][0]).toBe("High");
+    expect(events[0]).toMatchObject({ type: "start", id: assistantId });
+    expect(events.slice(-2)).toEqual([{ type: "status", status: "complete" }, { type: "done" }]);
+    const shown = events.flatMap((event) => event.type === "delta" ? [event.text] : []).join("");
+    expect(shown).toBe(parts.join(""));
+    expect(writes).toContainEqual({ content: shown, status: "complete" });
+  });
+
   it.each(["Auto", "High"])("routes model choice %s on the server", async (model) => {
     readyClient([]);
     stream.mockResolvedValue(providerChunks(["Done."], "stop"));

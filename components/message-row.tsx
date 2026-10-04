@@ -10,6 +10,8 @@ import { canContinueInWorkbench } from "@/lib/workbench/offer";
 import { formatMessageTimestamp } from "@/lib/chat/timestamps";
 
 const placeholderResponses = new Set(["Response stopped.", "Response unavailable."]);
+// Content of a saved reply the server has claimed but not written yet.
+const claimPlaceholder = "…";
 
 type Props = {
   message: PersistedMessage;
@@ -53,7 +55,7 @@ function MessageTime({ value }: { value: string | undefined }) {
 // Memoized per message: while a reply streams, only the row whose message object changed re-renders.
 export const MessageRow = memo(function MessageRow({ message, initial, isLast, isLastUser, canMutate, disabled, editing, responseFailed = false, onRegenerate, onContinueInWorkbench, workbenchPending = false, onStartEdit, onCancelEdit, onSaveEdit }: Props) {
   if (message.role === "assistant") {
-    const waiting = message.status === "streaming" && !message.content;
+    const waiting = message.status === "streaming" && (!message.content || message.content === claimPlaceholder);
     const canCopy = message.status !== "streaming" && message.status !== "error" && Boolean(message.content) && !placeholderResponses.has(message.content);
     const canRetry = canMutate && isLast && (message.status === "error" || message.status === "interrupted");
     const showWorkbench = Boolean(onContinueInWorkbench) && canContinueInWorkbench(message);
