@@ -35,5 +35,9 @@ export const responseQualityCases: ResponseQualityCase[] = [
   { id: "detailed-request", request: "Give me a detailed architecture plan for a clinic FAQ prototype. Explain comprehensively and mark assumptions.", context: { room: clinicQualityRoom }, expected: ["Appropriately detailed structured plan", "Explicit assumptions and unconfirmed integrations", "Fast brevity defaults do not override requested detail"] },
   { id: "room-start-fast", request: "mulai dariman", context: { room: clinicQualityRoom }, expected: ["Recommend a concrete first workflow as a suggestion", "Short paragraphs or useful bullets", "No echo heading, mini-report, divider, table, or repeated recommendation"] },
   { id: "three-options-fast", request: "Kasih 3 ide workflow awal buat clinic assistant.", context: { room: clinicQualityRoom }, expected: ["Three short useful options", "No table merely because there are three options", "Capabilities remain suggestions"] },
+  { id: "open-ideation", request: "weekend date idea", expected: ["Several useful options, usually three to five, not one minimal suggestion", "Each option has enough detail to compare or act on", "No essay or long preamble"] },
+  { id: "single-idea", request: "give me one weekend date idea", expected: ["Exactly one idea", "No extra alternatives"] },
+  { id: "explain-simply", request: "explain closures in javascript simply", expected: ["Short, simple explanation", "One small example at most", "No list of options"] },
+  { id: "one-sentence", request: "Answer in one sentence: what is a Room in Nibie?", expected: ["Exactly one sentence"] },
   { id: "explicit-table", request: "Compare clinic FAQ and appointment reminders in a table: value, integration effort, and risks.", context: { room: clinicQualityRoom }, expected: ["Requested comparison table", "Unconfirmed capabilities and integration requirements labelled", "Fast mode follows explicit format"] },
 ];

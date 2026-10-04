@@ -244,6 +244,12 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     }
   }
 
+  // Only the view that streams a reply can finish it. A reply the server still reports as streaming with no stream here (the thread
+  // was opened or reloaded mid-reply, or a hard navigation dropped the live stream) is followed like a recovery until the server
+  // reports how it ended; otherwise it stays on the claim placeholder without Stop or Copy until a manual reload.
+  const unownedReply = !preview && activeId && !sending && !streaming && !recovery ? activeAssistantId(messages) : null;
+  if (unownedReply && activeId) setRecovery({ conversationId: activeId, assistantId: unownedReply, baseline: initialData });
+
   useEffect(() => () => { if (shouldStopLiveChatOnLeave(window.location.pathname)) abortLiveChatStream(); }, []);
   useEffect(() => { if (drafting) composerRef.current?.focus(); }, [drafting, selectedRoomId]);
   useEffect(() => subscribeChatPreferences(() => {
