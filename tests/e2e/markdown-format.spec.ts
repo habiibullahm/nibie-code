@@ -78,9 +78,17 @@ test("the code block copy icon copies the exact code and confirms it", async ({ 
   await openSample(page);
   const copy = page.getByRole("button", { name: "Copy ts code block" });
   await expect(copy.locator("svg.lucide-copy")).toBeVisible();
+  // Icon only: no visible label, a compact square target.
+  const hiddenLabel = async () => (await copy.locator("span").boundingBox())!.width;
+  expect(await hiddenLabel()).toBeLessThanOrEqual(1);
+  const box = (await copy.boundingBox())!;
+  expect(box.width).toBeLessThanOrEqual(34);
   await copy.click();
   await expect(copy.locator("svg.lucide-check")).toBeVisible();
+  // "Copied" is announced to screen readers and shown as the tooltip, not as visible text.
   await expect(copy).toContainText("Copied");
+  await expect(copy).toHaveAttribute("title", "Copied");
+  expect(await hiddenLabel()).toBeLessThanOrEqual(1);
   const copied = await page.evaluate(() => navigator.clipboard.readText());
   expect(copied.startsWith("export async function cachedFetch(url: string, etag?: string)")).toBe(true);
   expect(copied.endsWith("}")).toBe(true);

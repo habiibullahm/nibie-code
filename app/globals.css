@@ -503,6 +503,10 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .copy-button, .message-action { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 3px 9px; border: 0; border-radius: 7px; background: transparent; color: var(--text-3); font: inherit; font-size: 11.5px; cursor: pointer; }
 .copy-button:hover, .message-action:hover:not(:disabled) { background: var(--hover); color: var(--text); }
 .copy-button.is-compact { min-height: 24px; padding: 2px 7px; }
+.copy-button.is-icon-only { justify-content: center; width: 28px; min-height: 26px; padding: 0; }
+.copy-button.is-icon-only:focus-visible { outline: 2px solid var(--link); outline-offset: 1px; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+@media (max-width: 760px) { .copy-button.is-icon-only { width: 34px; min-height: 32px; } }
 .message-action:disabled { opacity: .45; cursor: not-allowed; }
 .message-action.is-primary { background: var(--primary-bg); color: var(--primary-fg); }
 .message-action.is-primary:hover:not(:disabled) { background: var(--primary-bg-hover); color: var(--primary-fg); }
