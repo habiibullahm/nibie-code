@@ -1,5 +1,6 @@
 // Geometry for the Nibie mark: a cream ribbon "n" with the terracotta fold showing between the stems.
 // The in-app mark uses these paths with theme tokens; icon.svg and apple-icon.tsx use the same outlines.
+import { darkPalette } from "@/lib/theme/palette";
 
 export const logoViewBox = "24 8 460 340";
 
@@ -11,6 +12,6 @@ export const logoBodyPath =
 
 export const logoCap = { x: 330, y: 104, width: 130, height: 190, rx: 65 };
 
-export const logoBodyColor = "#F4EFE6";
-export const logoFoldColor = "#E17A4D";
-export const logoBodyOnLight = "#2A2823";
+export const logoBodyColor = darkPalette.logoBody;
+export const logoFoldColor = darkPalette.terracotta;
+export const logoBodyOnLight = darkPalette.logoBodyOnLight;
