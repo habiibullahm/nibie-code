@@ -117,7 +117,7 @@ Public, no account:
 Signed in:
 
 - Send a message and refresh; the reply is still there
-- Stop a long reply; the conversation is not left spinning after refresh
+- Stop a long reply; the conversation is not left spinning after refresh, and the reply keeps the stopped text with a Stopped label (never the finished answer)
 - Retry and Regenerate only affect the latest turn
 - Change Fast / Balanced / Reasoning; the request body mode is one of those three names
 - Context panel names profile, room, pinned context, file context, summary, and recent messages without quoting About you, the brief, pin text, or file text

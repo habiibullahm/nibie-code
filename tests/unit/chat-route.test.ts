@@ -3,19 +3,34 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const { createClient, stream, claim, modelOptions, contextCapabilities } = vi.hoisted(() => ({ createClient: vi.fn(), stream: vi.fn(), claim: vi.fn(), modelOptions: vi.fn(), contextCapabilities: vi.fn(() => ({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 })) }));
 // The chat route also reads this conversation's attachments. Tests that are not about attachments see none, while every
 // other table still goes to the test's own mock.
-const { withoutAttachments, attachmentState } = vi.hoisted(() => {
+// The generation also re-reads its reply's status to notice a server-side Stop; that read answers from `stopState`
+// (still streaming unless a test stops it) and never consumes a test's own queued message results.
+const { withoutAttachments, attachmentState, stopState } = vi.hoisted(() => {
   const attachmentState: { result: { data: unknown; error: unknown }; reads: unknown[][] } = { result: { data: [], error: null }, reads: [] };
+  const stopState = { status: "streaming" as string | null, reads: 0 };
+  const statusRead = () => {
+    const builder: Record<string, unknown> = {};
+    builder.eq = () => builder;
+    builder.maybeSingle = async () => { stopState.reads++; return { data: stopState.status ? { status: stopState.status } : null, error: null }; };
+    return builder;
+  };
   const none = () => {
     const builder: Record<string, unknown> = {};
     for (const method of ["select", "eq", "order", "limit"]) builder[method] = (...args: unknown[]) => { attachmentState.reads.push([method, ...args]); return builder; };
     builder.then = (resolve: (value: unknown) => unknown) => Promise.resolve(attachmentState.result).then(resolve);
     return builder;
   };
-  return { attachmentState, withoutAttachments: (client: unknown) => {
+  return { attachmentState, stopState, withoutAttachments: (client: unknown) => {
     const value = client as { from?: (table: string) => unknown } | undefined;
     if (!value || typeof value.from !== "function") return client;
     const from = value.from;
-    return { ...value, from: (table: string) => table === "message_attachments" ? none() : from(table) };
+    type Table = { select: (...args: unknown[]) => unknown; update: (...args: unknown[]) => unknown; insert: (...args: unknown[]) => unknown };
+    const messages = () => ({
+      select: (...args: unknown[]) => args[0] === "status" ? statusRead() : (from("messages") as Table).select(...args),
+      update: (...args: unknown[]) => (from("messages") as Table).update(...args),
+      insert: (...args: unknown[]) => (from("messages") as Table).insert(...args),
+    });
+    return { ...value, from: (table: string) => table === "message_attachments" ? none() : table === "messages" ? messages() : from(table) };
   } };
 });
 vi.mock("@/lib/supabase/server", () => ({ createSupabaseServerClient: async () => withoutAttachments(await createClient()) }));
@@ -33,7 +48,7 @@ const assistantId = "e3b624e6-d792-47a8-8ff2-46724452c1ca";
 const assistant = { id: assistantId, position: 3, content: "…", status: "streaming", replayed: false };
 
 describe("POST /api/chat", () => {
-  beforeEach(() => { attachmentState.result = { data: [], error: null }; attachmentState.reads = []; preferenceResult = { data: null, error: null }; createClient.mockReset(); stream.mockReset(); modelOptions.mockReset().mockReturnValue(allModes); contextCapabilities.mockReset().mockReturnValue({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 }); claim.mockReset().mockReturnValue(query({ data: assistant, error: null })); });
+  beforeEach(() => { attachmentState.result = { data: [], error: null }; attachmentState.reads = []; stopState.status = "streaming"; stopState.reads = 0; preferenceResult = { data: null, error: null }; createClient.mockReset(); stream.mockReset(); modelOptions.mockReset().mockReturnValue(allModes); contextCapabilities.mockReset().mockReturnValue({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 }); claim.mockReset().mockReturnValue(query({ data: assistant, error: null })); });
   afterEach(() => vi.useRealTimers());
 
   it.each(["stop", "length", "content_filter"])("finalizes %s explicitly, with sanitized persistence", async (reason) => {
