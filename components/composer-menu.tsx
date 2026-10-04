@@ -11,13 +11,14 @@ type Props<T extends string> = {
   items: MenuItem<T>[];
   onChange: (value: T) => void;
   disabled?: boolean;
+  description?: string;
   // Why the control is unavailable; shown as a tooltip and announced.
   disabledReason?: string;
 };
 
 // A small single-choice popover (menuitemradio) that opens above the composer. Keyboard: Enter/Space/Arrow opens, arrows move,
 // Home/End jump, Enter/Space chooses, Escape closes and returns focus, Tab closes.
-export function ComposerMenu<T extends string>({ name, value, items, onChange, disabled = false, disabledReason }: Props<T>) {
+export function ComposerMenu<T extends string>({ name, value, items, onChange, disabled = false, disabledReason, description }: Props<T>) {
   const [openRequested, setOpen] = useState(false);
   // A menu cannot stay open on a control that has just become unavailable.
   const open = openRequested && !disabled;
@@ -52,13 +53,14 @@ export function ComposerMenu<T extends string>({ name, value, items, onChange, d
   }
 
   return <div className="composer-menu" ref={rootRef}>
-    <button ref={buttonRef} type="button" className="composer-menu-button" disabled={disabled} title={disabled ? disabledReason : undefined}
+    <button ref={buttonRef} type="button" className="composer-menu-button" disabled={disabled} title={disabled ? disabledReason : description ? `Select ${name.toLowerCase()}` : undefined}
       aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined}
       aria-label={disabled && disabledReason ? `${name}: ${current.label} (${disabledReason})` : `${name}: ${current.label}`}
       onClick={() => setOpen((state) => !state)} onKeyDown={openFromKey}>
       <span>{current.label}</span><ChevronDown size={13} aria-hidden="true" />
     </button>
-    {open && <div id={menuId} className="composer-menu-list" role="menu" aria-label={name} onKeyDown={moveFocus}>
+    {open && <div id={menuId} className="composer-menu-list" role="menu" aria-label={description ? `Select ${name.toLowerCase()}` : name} onKeyDown={moveFocus}>
+      {description ? <div className="composer-menu-heading" role="presentation"><strong>Select {name.toLowerCase()}</strong><small>{description}</small></div> : null}
       {items.map((item, index) => <button key={item.value} ref={(element) => { itemRefs.current[index] = element; }} type="button" role="menuitemradio" aria-checked={item.value === value} tabIndex={-1} className="composer-menu-item" onClick={() => choose(item.value)}>
         <span className="composer-menu-text"><span>{item.label}</span>{item.detail && <small>{item.detail}</small>}</span>
         {item.value === value && <Check size={14} aria-hidden="true" />}

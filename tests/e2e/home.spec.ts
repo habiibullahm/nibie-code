@@ -17,7 +17,7 @@ test("the public landing page does not require authentication", async ({ page })
 
 test("landing page has no horizontal overflow", async ({ page }) => {
   await page.goto("/");
-  for (const width of [390, 768, 1024, 1440]) {
+  for (const width of [320, 390, 768, 1024, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
   }

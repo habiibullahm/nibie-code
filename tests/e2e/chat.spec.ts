@@ -28,6 +28,13 @@ test("authenticated provider response survives refresh, reopen, and sign-in agai
     await page.getByRole("button", { name: "Send message" }).click();
     const response = await responsePromise;
     expect(response.status()).toBe(200);
+    await expect(page.getByRole("button", { name: "Stop response" })).toBeVisible({ timeout: 60_000 });
+    const streamingLayout = await page.evaluate(() => {
+      const viewport = document.querySelector<HTMLElement>(".conversation-scroll.has-messages")!;
+      const dock = document.querySelector<HTMLElement>(".chat-main > .composer-dock")!;
+      return { viewportBottom: viewport.getBoundingClientRect().bottom, composerTop: dock.getBoundingClientRect().top };
+    });
+    expect(streamingLayout.viewportBottom).toBeLessThanOrEqual(streamingLayout.composerTop + 1);
     // New chat is lazy: the conversation (and its URL) is created together with the first message.
     await expect(page).toHaveURL((url) => url.pathname === "/chat" && Boolean(url.searchParams.get("conversation")));
     conversationUrl = page.url();
@@ -54,7 +61,7 @@ test("authenticated provider response survives refresh, reopen, and sign-in agai
     await expect(page).toHaveURL((url) => url.pathname === "/chat" && url.searchParams.get("conversation") === conversationId);
     await expect(page.locator(".message-row.assistant .markdown").last()).toHaveText(answer!);
     await page.locator(".desktop-sidebar .account-profile").hover();
-    await page.locator(".desktop-sidebar").getByRole("button", { name: "Sign out everywhere", exact: true }).click();
+    await page.locator(".desktop-sidebar").getByRole("menuitem", { name: "Sign out", exact: true }).click();
     await expect(page).toHaveURL((url) => url.pathname === "/login");
     await login();
     await page.goto(conversationUrl);
