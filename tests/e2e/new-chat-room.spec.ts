@@ -18,8 +18,7 @@ test("new chat starts in General; initial selection survives typing and becomes 
   await expect(roomSelector(page)).toHaveAccessibleName("Room: General");
   await expect(page.getByRole("textbox", { name: "Message Nibie" })).toHaveAttribute("placeholder", "Ask Nibie...");
   await send(page, "General hello");
-  await expect(page.getByLabel("Room context: General", { exact: true })).toBeVisible();
-  await expect(roomSelector(page)).toHaveCount(0);
+  await expect(roomSelector(page)).toHaveAccessibleName("Room: General");
   await newChat(page);
   await chooseRoom(page, roomName);
   await page.getByRole("textbox", { name: "Message Nibie" }).fill("Room hello");
@@ -27,15 +26,14 @@ test("new chat starts in General; initial selection survives typing and becomes 
   await page.getByRole("menuitemradio", { name: /^Fast/ }).click();
   await expect(roomSelector(page)).toHaveAccessibleName(`Room: ${roomName}`);
   await page.getByRole("button", { name: "Send message" }).click();
-  await expect(page.getByLabel(`Room context: Room · ${roomName}`, { exact: true })).toBeVisible();
-  await expect(roomSelector(page)).toHaveCount(0);
+  await expect(roomSelector(page)).toHaveAccessibleName(`Room: ${roomName}`);
   await newChat(page);
   await expect(roomSelector(page)).toHaveAccessibleName("Room: General");
   await page.locator('.desktop-sidebar [data-conversation-id]').filter({ hasText: "Room hello" }).locator(".history-item").click();
-  await expect(page.getByLabel(`Room context: Room · ${roomName}`, { exact: true })).toBeVisible();
+  await expect(roomSelector(page)).toHaveAccessibleName(`Room: ${roomName}`);
   await page.getByRole("button", { name: "Model: Fast", exact: true }).click();
   await page.getByRole("menuitemradio", { name: /^Balanced/ }).click();
-  await expect(page.getByLabel(`Room context: Room · ${roomName}`, { exact: true })).toBeVisible();
+  await expect(roomSelector(page)).toHaveAccessibleName(`Room: ${roomName}`);
 });
 
 test("room changes preserve the message draft and keyboard Escape restores focus", async ({ page }) => {
@@ -43,19 +41,19 @@ test("room changes preserve the message draft and keyboard Escape restores focus
   await textbox.fill("Keep this draft");
   await roomSelector(page).focus();
   await page.keyboard.press("ArrowDown");
-  await expect(page.getByRole("menu", { name: "Room", exact: true })).toBeVisible();
+  await expect(page.getByRole("menu", { name: "Select room", exact: true })).toBeVisible();
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
   await expect(roomSelector(page)).toHaveAccessibleName(`Room: ${roomName}`);
   await expect(textbox).toHaveValue("Keep this draft");
   await roomSelector(page).click();
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("menu", { name: "Room", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("menu", { name: "Select room", exact: true })).toHaveCount(0);
   await expect(roomSelector(page)).toBeFocused();
   await chooseRoom(page, "General");
   await expect(textbox).toHaveValue("Keep this draft");
   await send(page, "General again");
-  await expect(page.getByLabel("Room context: General", { exact: true })).toBeVisible();
+  await expect(roomSelector(page)).toHaveAccessibleName("Room: General");
 });
 
 test("an unavailable draft room blocks sending until a context is explicitly chosen", async ({ page }) => {
@@ -67,7 +65,7 @@ test("an unavailable draft room blocks sending until a context is explicitly cho
   await expect(page.locator(".message-row.user")).toHaveCount(0);
   await chooseRoom(page, "General");
   await send(page, "Keep this message");
-  await expect(page.getByLabel("Room context: General", { exact: true })).toBeVisible();
+  await expect(roomSelector(page)).toHaveAccessibleName("Room: General");
 });
 
 test("the existing sidebar Room → New thread path still chooses the Room", async ({ page }) => {
@@ -75,7 +73,7 @@ test("the existing sidebar Room → New thread path still chooses the Room", asy
   await page.getByRole("button", { name: "New thread", exact: true }).click();
   await expect(roomSelector(page)).toHaveAccessibleName(`Room: ${roomName}`);
   await send(page, "Old flow hello");
-  await expect(page.getByLabel(`Room context: Room · ${roomName}`, { exact: true })).toBeVisible();
+  await expect(roomSelector(page)).toHaveAccessibleName(`Room: ${roomName}`);
 });
 
 test("no Rooms still offers General", async ({ page }) => {
@@ -96,29 +94,38 @@ for (const width of [320, 390, 768, 1024, 1440]) {
     await expect(page.getByRole("button", { name: "Attach file", exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: /^Model:/ })).toBeVisible();
     await expect(page.getByRole("button", { name: /^Reasoning:/ })).toHaveCount(0);
-    const controls = page.locator(".composer-left-tools");
+    const composer = page.locator(".composer");
     const textarea = page.getByRole("textbox", { name: "Message Nibie" });
-    const controlBox = await controls.boundingBox();
+    const composerBox = await composer.boundingBox();
     const textareaBox = await textarea.boundingBox();
-    expect(controlBox!.y).toBeGreaterThanOrEqual(textareaBox!.y + textareaBox!.height);
+    const secondary = page.locator(".composer-secondary-tools");
+    const secondaryBox = await secondary.boundingBox();
+    expect(secondaryBox!.y).toBeGreaterThanOrEqual(composerBox!.y + composerBox!.height);
+    expect(textareaBox!.y).toBeGreaterThanOrEqual(composerBox!.y);
+    const actionsBox = await page.locator(".composer-actions").boundingBox();
     const plus = await page.getByRole("button", { name: "Attach file", exact: true }).boundingBox();
     const room = await roomSelector(page).boundingBox();
-    const effort = await page.getByRole("button", { name: /^Model:/ }).boundingBox();
+    const model = await page.getByRole("button", { name: /^Model:/ }).boundingBox();
     const sendButton = await page.getByRole("button", { name: "Send message", exact: true }).boundingBox();
-    expect(plus!.x + plus!.width).toBeLessThanOrEqual(room!.x);
-    if (Math.abs(effort!.y - room!.y) < 4) {
-      expect(room!.x + room!.width).toBeLessThanOrEqual(effort!.x);
-      expect(effort!.x + effort!.width).toBeLessThanOrEqual(sendButton!.x);
+    expect(plus!.x).toBeGreaterThanOrEqual(composerBox!.x);
+    expect(plus!.x + plus!.width).toBeLessThanOrEqual(composerBox!.x + composerBox!.width);
+    expect(sendButton!.x + sendButton!.width).toBeLessThanOrEqual(composerBox!.x + composerBox!.width);
+    expect(Math.abs(plus!.y + plus!.height / 2 - actionsBox!.y - actionsBox!.height / 2)).toBeLessThanOrEqual(1);
+    expect(room!.y).toBeGreaterThanOrEqual(composerBox!.y + composerBox!.height);
+    expect(room!.x).toBeGreaterThanOrEqual(0);
+    expect(room!.x + room!.width).toBeLessThanOrEqual(width);
+    if (Math.abs(model!.y - room!.y) < 4) {
+      expect(room!.x + room!.width).toBeLessThanOrEqual(model!.x);
+      expect(model!.x + model!.width).toBeLessThanOrEqual(width);
     } else {
       // On the narrowest phones a long room name pushes the mode picker onto a second row; it must stay fully on screen.
       expect(width).toBeLessThanOrEqual(320);
-      expect(effort!.y).toBeGreaterThan(room!.y);
-      expect(effort!.x).toBeGreaterThanOrEqual(0);
-      expect(effort!.x + effort!.width).toBeLessThanOrEqual(width);
+      expect(model!.y).toBeGreaterThan(room!.y);
+      expect(model!.x).toBeGreaterThanOrEqual(0);
+      expect(model!.x + model!.width).toBeLessThanOrEqual(width);
     }
-    expect(Math.abs(plus!.y + plus!.height / 2 - room!.y - room!.height / 2)).toBeLessThanOrEqual(1);
     await roomSelector(page).click();
-    const menu = await page.getByRole("menu", { name: "Room", exact: true }).boundingBox();
+    const menu = await page.getByRole("menu", { name: "Select room", exact: true }).boundingBox();
     expect(menu!.x).toBeGreaterThanOrEqual(0);
     expect(menu!.x + menu!.width).toBeLessThanOrEqual(width);
     await page.keyboard.press("Escape");
@@ -134,7 +141,7 @@ for (const width of [320, 390, 768, 1024, 1440]) {
 
 test("Room threads appear once and opening one expands its parent", async ({ page }) => {
   const sidebar = page.locator(".desktop-sidebar");
-  const general = sidebar.getByRole("region", { name: "General", exact: true });
+  const general = sidebar.getByRole("region", { name: "Chat history", exact: true });
   await expect(general.getByRole("button", { name: "Learning the basics of astronomy", exact: true })).toHaveCount(0);
   await sidebar.getByRole("button", { name: `Expand ${roomName}`, exact: true }).click();
   await expect(sidebar.getByRole("group", { name: `Threads in ${roomName}`, exact: true }).getByRole("button", { name: "Learning the basics of astronomy", exact: true })).toBeVisible();
@@ -162,18 +169,18 @@ test("desktop moves General → Room → another Room → General without changi
   const clinic = sidebar.locator("[data-room-id]").filter({ has: page.getByRole("button", { name: "Clinic AI Assistant", exact: true }) });
   await thread.dragTo(clinic);
   await expect(clinic.locator("[data-conversation-id]").filter({ hasText: "Help me draft pricing" })).toHaveCount(1);
-  await expect(sidebar.getByRole("region", { name: "General", exact: true }).locator("[data-conversation-id]").filter({ hasText: "Help me draft pricing" })).toHaveCount(0);
-  await expect(page.getByLabel("Room context: Room · Clinic AI Assistant", { exact: true })).toBeVisible();
+  await expect(sidebar.getByRole("region", { name: "Chat history", exact: true }).locator("[data-conversation-id]").filter({ hasText: "Help me draft pricing" })).toHaveCount(0);
+  await expect(roomSelector(page)).toHaveAccessibleName("Room: Clinic AI Assistant");
   expect(await page.locator(".message-row").allTextContents()).toEqual(messages);
   const otherRoom = sidebar.locator("[data-room-id]").filter({ has: page.getByRole("button", { name: roomName, exact: true }) });
   await thread.dragTo(otherRoom);
   await expect(otherRoom.locator("[data-conversation-id]").filter({ hasText: "Help me draft pricing" })).toHaveCount(1);
   await expect(clinic.locator("[data-conversation-id]")).toHaveCount(0);
-  await expect(page.getByLabel(`Room context: Room · ${roomName}`, { exact: true })).toBeVisible();
+  await expect(roomSelector(page)).toHaveAccessibleName(`Room: ${roomName}`);
   expect(await page.locator(".message-row").allTextContents()).toEqual(messages);
-  await thread.dragTo(sidebar.getByRole("region", { name: "General", exact: true }));
-  await expect(sidebar.getByRole("region", { name: "General", exact: true }).locator("[data-conversation-id]").filter({ hasText: "Help me draft pricing" })).toHaveCount(1);
-  await expect(page.getByLabel("Room context: General", { exact: true })).toBeVisible();
+  await thread.dragTo(sidebar.getByRole("region", { name: "Chat history", exact: true }));
+  await expect(sidebar.getByRole("region", { name: "Chat history", exact: true }).locator("[data-conversation-id]").filter({ hasText: "Help me draft pricing" })).toHaveCount(1);
+  await expect(roomSelector(page)).toHaveAccessibleName("Room: General");
   expect(await page.locator(".message-row").allTextContents()).toEqual(messages);
 });
 
@@ -193,9 +200,9 @@ test("mobile offers Move to without drag and drop", async ({ page }) => {
   await page.getByRole("menuitem", { name: "Move to…", exact: true }).click();
   await page.getByRole("combobox", { name: "Move to", exact: true }).selectOption({ label: "General" });
   await page.getByRole("button", { name: "Move thread", exact: true }).click();
-  await expect(sidebar.getByRole("region", { name: "General", exact: true }).getByRole("button", { name: "Mobile pricing", exact: true })).toBeVisible();
+  await expect(sidebar.getByRole("region", { name: "Chat history", exact: true }).getByRole("button", { name: "Mobile pricing", exact: true })).toBeVisible();
   await sidebar.getByRole("button", { name: "Close menu", exact: true }).click();
-  await expect(page.getByLabel("Room context: General", { exact: true })).toBeVisible();
+  await expect(roomSelector(page)).toHaveAccessibleName("Room: General");
 });
 
 test("deleting a Room detaches its threads into General", async ({ page }) => {
@@ -205,8 +212,8 @@ test("deleting a Room detaches its threads into General", async ({ page }) => {
   await sidebar.getByRole("button", { name: roomName, exact: true }).click();
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Delete room", exact: true }).click();
-  await expect(sidebar.getByRole("region", { name: "General", exact: true }).getByRole("button", { name: "Keep this room thread", exact: true })).toBeVisible();
-  await expect(sidebar.getByRole("region", { name: "General", exact: true }).getByRole("button", { name: "Learning the basics of astronomy", exact: true })).toBeVisible();
+  await expect(sidebar.getByRole("region", { name: "Chat history", exact: true }).getByRole("button", { name: "Keep this room thread", exact: true })).toBeVisible();
+  await expect(sidebar.getByRole("region", { name: "Chat history", exact: true }).getByRole("button", { name: "Learning the basics of astronomy", exact: true })).toBeVisible();
   await sidebar.getByRole("button", { name: "Keep this room thread", exact: true }).click();
   await expect(page.getByLabel("Room context: General", { exact: true })).toBeVisible();
   await expect(page.locator(".message-row.user")).toContainText("Keep this room thread");

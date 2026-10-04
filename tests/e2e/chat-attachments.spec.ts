@@ -149,7 +149,7 @@ for (const [width, height] of [[390, 844], [1440, 900]] as const) {
       expect(box.x + box.width).toBeLessThanOrEqual(composer.x + composer.width + 0.5);
     }
     // The action row stays below the text and chips, and the page never scrolls sideways.
-    const tools = (await page.locator(".composer-tools").boundingBox())!;
+    const tools = (await page.locator(".composer-actions").boundingBox())!;
     const chips = (await page.locator(".attachment-chips").boundingBox())!;
     expect(tools.y).toBeGreaterThanOrEqual(chips.y + chips.height);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
@@ -164,14 +164,14 @@ test("files dropped on the composer are attached like chosen ones", async ({ pag
     const data = new DataTransfer();
     data.items.add(new File(["Launch window: Tuesday morning."], "dropped.md", { type: "text/markdown" }));
     const event = new DragEvent(eventType, { dataTransfer: data, bubbles: true, cancelable: true });
-    document.querySelector("form.composer")!.dispatchEvent(event);
+    document.querySelector("form.composer-form")!.dispatchEvent(event);
     return event.defaultPrevented;
   }, type);
   // Retried until the page has hydrated and the composer listens.
   await expect.poll(() => drag("dragover")).toBe(true);
-  await expect(page.locator("form.composer")).toHaveClass(/is-dropping/);
+  await expect(page.locator(".composer")).toHaveClass(/is-dropping/);
   expect(await drag("drop")).toBe(true);
   await expect(page.locator(".attachment-chip.is-ready")).toContainText("dropped.md");
-  await expect(page.locator("form.composer")).not.toHaveClass(/is-dropping/);
+  await expect(page.locator(".composer")).not.toHaveClass(/is-dropping/);
   expect(server.uploads).toEqual(["dropped.md"]);
 });

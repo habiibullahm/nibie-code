@@ -152,6 +152,8 @@
 }
 .landing-frame .chat-workspace { height: 100%; min-height: 0; }
 .landing-frame .send-button { background: var(--disabled-bg); color: var(--disabled-fg); }
+.landing-frame .composer-dock { position: absolute; right: 0; bottom: 0; left: 0; flex: initial; }
+.landing-frame .composer { display: block; }
 .landing-frame .conversation-scroll { padding-bottom: 148px; }
 .landing-composer-placeholder { margin: 0; padding: 4px 2px 6px; color: var(--text-4); font-size: 13px; line-height: 1.55; }
 .landing-frame-modes { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }

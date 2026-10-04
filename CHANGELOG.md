@@ -8,6 +8,7 @@ What's new in Nibie.
 
 ### Added
 
+- Expandable chat composer with a compact default for long prompts.
 - Deployment identity from the Vercel git commit, exposed safely at `GET /api/health`.
 - Structured server logs for chat generation, with one request id across start, context build, and completion or failure.
 - Release checklist, version policy, migration inventory rules, hotfix steps, and rollback notes.
@@ -40,6 +41,7 @@ What's new in Nibie.
 ### Chat
 
 - Streaming replies, with stop, retry, regenerate, and edit-and-resend
+- Composer grows for multiline prompts; Expand composer opens more editing space, and Collapse returns to the compact view
 - Fast, Balanced, and Reasoning, plus reasoning effort where a mode supports it
 
 ### Account
