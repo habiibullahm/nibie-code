@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { PanelLeftOpen, SquarePen, X } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, SquarePen, X } from "lucide-react";
 import { addUserMessageAction, archiveConversationAction, editLastUserMessageAction, moveConversationAction, renameConversationAction, restoreConversationAction, startConversationAction, updateConversationModelAction } from "@/app/actions/chat";
 import { createPinAction, deletePinAction, updatePinAction } from "@/app/actions/pins";
 import { createRoomAction, deleteRoomAction, updateRoomAction, updateRoomBriefAction } from "@/app/actions/rooms";
@@ -156,11 +156,18 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   // The conversation follows new content while auto-follow is on and the reader is near the bottom (see lib/chat/scroll.ts).
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
+  const scrollViewportHeightRef = useRef<number | null>(null);
   const followRef = useRef(true);
   const autoFollowRef = useRef(readChatFlag("autoFollow"));
   const pinLatestRef = useRef(true);
   const restoredRef = useRef(false);
-  const handleScroll = useStableCallback(() => { if (scrollRef.current) followRef.current = trackNearBottom(autoFollowRef.current, isNearBottom(scrollRef.current)); });
+  const handleScroll = useStableCallback(() => {
+    const viewport = scrollRef.current;
+    if (!viewport) return;
+    // A composer resize can fire scroll before ResizeObserver restores the bottom; it is not a reader scrolling up.
+    if (scrollViewportHeightRef.current !== null && scrollViewportHeightRef.current !== viewport.clientHeight) return;
+    followRef.current = trackNearBottom(autoFollowRef.current, isNearBottom(viewport));
+  });
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const closeMenuRef = useRef<HTMLButtonElement>(null);
   const drawerRef = useRef<HTMLElement>(null);
@@ -216,16 +223,19 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   }, [messages, activeId, loadingConversation]);
 
   useEffect(() => {
-    if (centeredComposer) return;
+    if (centeredComposer || showRoom) return;
     const viewport = scrollRef.current;
     const dock = composerDockRef.current;
     if (!viewport || !dock || typeof ResizeObserver === "undefined") return;
+    scrollViewportHeightRef.current = viewport.clientHeight;
     const observer = new ResizeObserver(() => {
+      scrollViewportHeightRef.current = viewport.clientHeight;
       if (autoFollowRef.current && followRef.current) viewport.scrollTop = viewport.scrollHeight;
     });
     observer.observe(dock);
-    return () => observer.disconnect();
-  }, [centeredComposer]);
+    observer.observe(viewport);
+    return () => { observer.disconnect(); scrollViewportHeightRef.current = null; };
+  }, [centeredComposer, showRoom]);
 
   // The navigation the user asked for has landed once the URL matches it; from then on the URL is the source of truth again.
   if (pendingId !== undefined && conversationParam === pendingId) setPendingId(undefined);
@@ -870,7 +880,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     {drawerOpen && <div className="mobile-drawer"><button className="drawer-scrim" aria-label="Dismiss menu backdrop" onClick={closeDrawer} /><ChatSidebar {...sidebarProps} mobile drawerRef={drawerRef} closeMenuRef={closeMenuRef} /></div>}
     <section className="chat-main" aria-label="Chat workspace">
       <header className="chat-header">
-        <button ref={menuButtonRef} className="icon-button mobile-menu-button sidebar-logo-toggle" aria-label="Open conversation menu" onClick={() => setDrawerOpen(true)}><BrandMark activity={assistantActivity} /><PanelLeftOpen className="menu-toggle-mark" size={18} aria-hidden="true" /></button>
+        <button ref={menuButtonRef} type="button" className="icon-button mobile-menu-button" aria-label={drawerOpen ? "Close conversation menu" : "Open conversation menu"} title="Toggle sidebar" aria-haspopup="dialog" aria-expanded={drawerOpen} onClick={() => setDrawerOpen((open) => !open)}>{drawerOpen ? <PanelLeftClose size={18} aria-hidden="true" /> : <PanelLeftOpen size={18} aria-hidden="true" />}</button>
         <div className="header-model">{headerRoomName ? <span className="header-context is-room-name">{headerRoomName}</span> : null}</div>
         <button type="button" className="header-new-chat" aria-label="New chat" title="New chat" disabled={controlsDisabled} onClick={newChat}><SquarePen size={17} /></button>
       </header>

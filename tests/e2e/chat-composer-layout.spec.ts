@@ -31,6 +31,8 @@ async function expectComposerGeometry(page: Page) {
     const dock = document.querySelector<HTMLElement>(".chat-main > .composer-dock")!;
     const composer = dock.querySelector<HTMLElement>(".composer")!;
     const actions = composer.querySelector<HTMLElement>(".composer-actions")!;
+    const attach = composer.querySelector<HTMLElement>(".composer-attach button")!;
+    const promptLabel = composer.querySelector<HTMLElement>(".composer-prompt-label");
     const message = viewport.querySelector<HTMLElement>(".message-row:last-child")!;
     const textarea = dock.querySelector<HTMLTextAreaElement>("textarea")!;
     return {
@@ -38,8 +40,12 @@ async function expectComposerGeometry(page: Page) {
       composerTop: dock.getBoundingClientRect().top,
       composerBottom: dock.getBoundingClientRect().bottom,
       textareaBottom: textarea.getBoundingClientRect().bottom,
+      textareaTop: textarea.getBoundingClientRect().top,
       actionsTop: actions.getBoundingClientRect().top,
       actionsBottom: actions.getBoundingClientRect().bottom,
+      attachTop: attach.getBoundingClientRect().top,
+      attachBottom: attach.getBoundingClientRect().bottom,
+      promptLabelBottom: promptLabel?.getBoundingClientRect().bottom ?? null,
       composerBoxBottom: composer.getBoundingClientRect().bottom,
       messageBottom: message.getBoundingClientRect().bottom,
       textareaHeight: textarea.getBoundingClientRect().height,
@@ -55,7 +61,10 @@ async function expectComposerGeometry(page: Page) {
   expect(metrics.viewportBottom).toBeLessThanOrEqual(metrics.composerTop + 1);
   expect(metrics.messageBottom).toBeLessThanOrEqual(metrics.viewportBottom + 1);
   expect(metrics.composerBottom).toBeLessThanOrEqual(metrics.viewportHeight + 1);
+  expect(metrics.promptLabelBottom).not.toBeNull();
+  expect(metrics.promptLabelBottom!).toBeLessThanOrEqual(metrics.textareaTop);
   expect(metrics.textareaBottom).toBeLessThanOrEqual(metrics.actionsTop + 1);
+  expect(Math.abs(metrics.attachTop + (metrics.attachBottom - metrics.attachTop) / 2 - metrics.actionsTop - (metrics.actionsBottom - metrics.actionsTop) / 2)).toBeLessThanOrEqual(1);
   expect(metrics.actionsBottom).toBeLessThanOrEqual(metrics.composerBoxBottom + 1);
   expect(metrics.textareaHeight).toBeLessThanOrEqual(metrics.maxTextareaHeight + 2);
   expect(metrics.horizontalOverflow).toBe(false);
@@ -116,6 +125,8 @@ test("expand and collapse preserve draft, focus, selection, and send reset", asy
   const textarea = page.getByRole("textbox", { name: "Message Nibie" });
   const draft = Array.from({ length: 20 }, (_, index) => `Prompt line ${index + 1}`).join("\n");
   await textarea.fill(draft);
+  await expect(page.getByRole("button", { name: "Collapse composer" })).toBeVisible();
+  await page.getByRole("button", { name: "Collapse composer" }).click();
   await textarea.evaluate((element: HTMLTextAreaElement) => { element.focus(); element.setSelectionRange(12, 24); });
   const compactHeight = await textarea.evaluate((element) => Number.parseFloat(getComputedStyle(element).maxHeight));
   await page.getByRole("button", { name: "Expand composer" }).click();
@@ -140,7 +151,7 @@ test("expand and collapse preserve draft, focus, selection, and send reset", asy
   await expect(page.getByText("Your message is shown in this local preview.")).toBeVisible();
 });
 
-test("Room and model menus align to the left edge of their controls", async ({ page }) => {
+test("Room and model menus align to their controls", async ({ page }) => {
   await openSampleConversation(page, 1440, 900);
   const controls = page.locator(".composer-secondary-tools");
   for (const { name, menuName } of [{ name: /^Room:/, menuName: "Select room" }, { name: /^Model:/, menuName: "Model" }]) {
@@ -151,7 +162,8 @@ test("Room and model menus align to the left edge of their controls", async ({ p
     const menuBox = await menu.boundingBox();
     expect(buttonBox).not.toBeNull();
     expect(menuBox).not.toBeNull();
-    expect(Math.abs(menuBox!.x - buttonBox!.x)).toBeLessThan(1);
+    if (menuName === "Select room") expect(Math.abs(menuBox!.x - buttonBox!.x)).toBeLessThan(1);
+    else expect(Math.abs(menuBox!.x + menuBox!.width - buttonBox!.x - buttonBox!.width)).toBeLessThan(1);
     await page.keyboard.press("Escape");
     await expect(menu).toHaveCount(0);
   }
