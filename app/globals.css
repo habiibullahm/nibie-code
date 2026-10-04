@@ -490,6 +490,30 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .composer-left-tools .composer-menu-list { max-height: min(320px, 45dvh); overflow-y: auto; }
 .composer-left-tools > .composer-menu:last-child .composer-menu-list { right: 0; left: auto; }
 .composer-room-context { max-width: min(220px, 100%); padding: 6px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: 11.5px; }
+.composer-file-input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; opacity: 0; pointer-events: none; }
+.composer.is-dropping { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+.composer-attachments { margin: 2px 0 8px; }
+.attachment-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.attachment-chip { display: flex; align-items: center; gap: 7px; min-width: 0; max-width: min(100%, 260px); min-height: 38px; padding: 5px 4px 5px 9px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-subtle); color: var(--text-3); }
+.attachment-chip.is-error { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); color: var(--danger); }
+.attachment-chip > svg { flex: none; }
+.attachment-chip-text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; line-height: 1.25; }
+.attachment-chip-name { overflow: hidden; color: var(--text); font-size: 12px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-chip-meta { overflow: hidden; font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-chip.is-uploading .attachment-chip-meta { color: var(--text-4); }
+.attachment-chip-action { display: grid; place-items: center; flex: none; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--text-4); cursor: pointer; }
+.attachment-chip-action:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.attachment-chip-action:disabled { cursor: default; opacity: .5; }
+.attachment-error { margin: 6px 0 0; color: var(--danger); font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
+.composer-attach { position: relative; display: inline-flex; }
+.attach-menu { position: absolute; z-index: 6; left: 0; bottom: calc(100% + 6px); display: flex; flex-direction: column; width: 200px; padding: 5px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-raised); box-shadow: var(--shadow-menu); }
+.attach-menu button { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 9px; border: 0; border-radius: 7px; background: transparent; color: var(--text-2); font-size: 12.5px; text-align: left; cursor: pointer; }
+.attach-menu button:hover, .attach-menu button:focus-visible { background: var(--hover); color: var(--text); }
+.message-attachments { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; max-width: 100%; margin: 0; padding: 0; list-style: none; }
+.message-attachment { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; padding: 4px 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-raised); color: var(--text-3); font-size: 11.5px; }
+.message-attachment > svg { flex: none; }
+.message-attachment span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 760px) { .attachment-chip { max-width: 100%; } .attachment-chip-action { width: 32px; height: 32px; } }
 .composer-room-notice { margin: 0 0 8px; color: var(--text-3); font-size: 11px; line-height: 1.5; }
 .composer-menu { position: relative; }
 .composer-menu-button { display: inline-flex; align-items: center; gap: 5px; max-width: 150px; min-height: 30px; padding: 0 8px 0 10px; border: 0; border-radius: 8px; background: var(--bg-subtle); color: var(--text-3); font-size: 11.5px; cursor: pointer; }

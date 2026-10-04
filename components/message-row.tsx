@@ -2,6 +2,8 @@
 
 import { memo, useState, type KeyboardEvent } from "react";
 import { FileText, Pencil, RefreshCw } from "lucide-react";
+import { attachmentTypeLabel, formatBytes } from "@/lib/attachments/limits";
+import type { AttachmentSummary } from "@/lib/attachments/types";
 import { CopyButton } from "@/components/copy-button";
 import { MessageMarkdown } from "@/components/message-markdown";
 import { useChatFlag } from "@/components/use-chat-preferences";
@@ -44,6 +46,15 @@ function MessageEditor({ message, disabled, onCancel, onSave }: { message: Persi
   </div>;
 }
 
+// Names only: a sent attachment is shown as a small chip, never as a preview or a link.
+function MessageAttachments({ attachments }: { attachments: AttachmentSummary[] }) {
+  return <ul className="message-attachments" aria-label="Attachments">
+    {attachments.map((attachment) => <li key={attachment.id} className="message-attachment" title={`${attachment.name} · ${attachmentTypeLabel(attachment.mimeType)} · ${formatBytes(attachment.sizeBytes)}${attachment.truncated ? " · partly read" : ""}`}>
+      <FileText size={13} aria-hidden="true" /><span>{attachment.name}</span>
+    </li>)}
+  </ul>;
+}
+
 function MessageTime({ value }: { value: string | undefined }) {
   const [showTimestamps] = useChatFlag("showTimestamps");
   if (!showTimestamps || !value) return null;
@@ -75,6 +86,7 @@ export const MessageRow = memo(function MessageRow({ message, initial, isLast, i
     {editing
       ? <div className="message-column user"><MessageEditor message={message} disabled={disabled} onCancel={onCancelEdit} onSave={(content) => onSaveEdit(message.id, content)} /></div>
       : <div className="message-column user">
+        {message.attachments?.length ? <MessageAttachments attachments={message.attachments} /> : null}
         <div className="message-content user"><p>{message.content}</p></div>
         <MessageTime value={message.created_at} />
         {canMutate && isLastUser && <div className="message-actions">

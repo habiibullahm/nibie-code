@@ -19,6 +19,7 @@ import { MessageRow } from "@/components/message-row";
 import { forgetLastConversationId, readChatFlag, readLastConversationId, subscribeChatPreferences, writeLastConversationId } from "@/components/use-chat-preferences";
 import { useStableCallback } from "@/components/use-stable-callback";
 import type { ConversationSummary, PersistedMessage, RoomSummary } from "@/lib/chat/read";
+import type { AttachmentSummary } from "@/lib/attachments/types";
 import type { ModelChoice, ModelOption } from "@/lib/chat/models";
 import { decideRestoredConversation } from "@/lib/chat/preferences";
 import { roomContextFromRows } from "@/lib/rooms/map";
@@ -131,7 +132,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const [streaming, setStreaming] = useState(false);
   const [assistantActivity, setAssistantActivity] = useState<BrandActivity>("idle");
   const busy = useRef(false);
-  const submission = useRef<{ id: string; content: string; conversationId: string | null } | null>(null);
+  const submission = useRef<{ id: string; content: string; conversationId: string | null; attachmentIds: string } | null>(null);
   const streamController = useRef<AbortController | null>(null);
   const stopGeneration = useRef<(() => void) | null>(null);
   const userStopEpoch = useRef(0);
@@ -501,7 +502,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
       }
     }
   }
-  const submitMessage = useStableCallback(async (content: string) => {
+  const submitMessage = useStableCallback(async (content: string, attachments: AttachmentSummary[] = []) => {
     if (!content || busy.current || recovery || movePending.current) return;
     if (!activeId && selectedRoomId && !activeRoom) {
       setNotice("That room is no longer available. Choose General or another room before sending.");
@@ -522,21 +523,25 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
         return;
       }
       // The same submission keeps the same message id, so a retry after a failure can never save the message twice.
-      const messageId = submission.current && submission.current.content === content && submission.current.conversationId === id ? submission.current.id : crypto.randomUUID();
-      submission.current = { id: messageId, content, conversationId: id };
+      const attachmentIds = attachments.map((attachment) => attachment.id);
+      const attachmentKey = attachmentIds.join(",");
+      const messageId = submission.current && submission.current.content === content && submission.current.conversationId === id && submission.current.attachmentIds === attachmentKey ? submission.current.id : crypto.randomUUID();
+      submission.current = { id: messageId, content, conversationId: id, attachmentIds: attachmentKey };
+      // Attachment ids are sent only with attachments, so a plain message keeps its existing action arguments.
+      const withAttachments = attachmentIds.length ? [attachmentIds] as const : [] as const;
       const placeholderId = `pending-${messageId}`;
       const basePosition = lastMessage?.position ?? 0;
       const withoutPending = (rows: PersistedMessage[] = []) => rows.filter((row) => row.id !== messageId && row.id !== placeholderId);
       // Show the message and a thinking row immediately; the server confirms (or we roll back and restore the draft) below.
       const key = id ?? "";
       const stamped = new Date().toISOString();
-      setLocalMessages((items) => ({ ...items, [key]: [...withoutPending(items[key]), { id: messageId, role: "user", content, position: basePosition + 1, status: "complete", created_at: stamped }, { id: placeholderId, role: "assistant", content: "", position: basePosition + 2, status: "streaming", created_at: stamped }] }));
+      setLocalMessages((items) => ({ ...items, [key]: [...withoutPending(items[key]), { id: messageId, role: "user", content, position: basePosition + 1, status: "complete", created_at: stamped, ...(attachments.length ? { attachments } : {}) }, { id: placeholderId, role: "assistant", content: "", position: basePosition + 2, status: "streaming", created_at: stamped }] }));
       composerRef.current?.clear();
-      const rollback = (message: string, from: string) => { setLocalMessages((items) => ({ ...items, [from]: withoutPending(items[from]) })); composerRef.current?.restore(content); setNotice(message); };
+      const rollback = (message: string, from: string) => { setLocalMessages((items) => ({ ...items, [from]: withoutPending(items[from]) })); composerRef.current?.restore(content, attachments); setNotice(message); };
       let saved: { id: string; position: number };
       if (!id) {
         // The first message of a new chat creates the conversation and saves the message in a single round trip.
-        const started = await startConversationAction(mode, messageId, content, drafting ? selectedRoomId : null);
+        const started = await startConversationAction(mode, messageId, content, drafting ? selectedRoomId : null, ...withAttachments);
         if (started.error || !started.data) { rollback(started.error ?? "Conversation couldn't be created.", key); return; }
         const { conversation } = started.data;
         saved = started.data.message;
@@ -549,7 +554,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
         router.push(conversationPath(conversation.id));
       } else {
         const stopped = [...(stoppedReplies.current.get(id) ?? [])];
-        const result = await addUserMessageAction(id, content, messageId, stopped);
+        const result = await addUserMessageAction(id, content, messageId, stopped, ...withAttachments);
         if (result.error || !result.data) { rollback(result.error ?? "Message couldn't be saved.", id); return; }
         saved = result.data;
         const pendingStops = stoppedReplies.current.get(id);
@@ -833,6 +838,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     setSelectedFileIds([]);
     setFilePickerOpen(false);
   }
+  const toggleRoomFiles = useStableCallback(() => setFilePickerOpen((open) => !open));
   const attach = useStableCallback(() => {
     if (preview || !threadRoom) {
       setNotice(preview ? "This preview isn't connected." : "Add a file on the room page, then choose it from a thread in that room.");
@@ -864,7 +870,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
         <button type="button" className="header-new-chat" aria-label="New chat" title="New chat" disabled={controlsDisabled} onClick={newChat}><SquarePen size={17} /></button>
       </header>
       <div ref={scrollRef} onScroll={handleScroll} className={`conversation-scroll ${showRoom ? "is-room" : messages.length || loadingConversation ? "has-messages" : "is-empty"}`}>{showRoom && activeRoom ? <RoomDetail key={activeRoom.id} room={activeRoom} threads={roomThreads} busy={controlsDisabled} preview={preview} onOpenThread={openConversation} onNewThread={() => newThreadInRoom(activeRoom.id)} onSaveRoom={saveRoom} onSaveBrief={saveBrief} onCreatePin={createPin} onUpdatePin={updatePin} onDeletePin={removePin} onDelete={removeRoom} /> : loadingConversation ? <div className="message-list conversation-skeleton" role="status" aria-busy="true" aria-label="Loading conversation"><div className="skeleton-line is-short" /><div className="skeleton-line" /><div className="skeleton-line" /><div className="skeleton-line is-medium" /></div> : messages.length ? <div className="message-list" aria-live="polite">{messages.map((message) => <MessageRow key={message.id} message={message} initial={initial} isLast={message.id === lastMessage?.id} isLastUser={message.id === lastUser?.id} canMutate={!preview} disabled={messageActionsLocked} editing={editingId === message.id} responseFailed={notice === failureNotice} onRegenerate={regenerate} onStartEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} onContinueInWorkbench={preview ? undefined : continueInWorkbench} workbenchPending={workbenchPending} />)}{notice && <p className="local-notice" role="status">{notice}</p>}</div> : <div className="welcome-panel">{notice && <p className="local-notice" role="status">{notice}</p>}<div className="welcome-icon"><BrandMark activity={assistantActivity} /></div><p className="welcome-eyebrow">{drafting && activeRoom ? "NEW THREAD" : "A LITTLE ROOM TO THINK"}</p><h1>{drafting && activeRoom ? activeRoom.name : "What’s on your mind?"}</h1><p className="welcome-copy">{drafting && activeRoom ? "This thread starts inside the room. Nibie will use its instructions, brief, and pins." : "A fresh page for ideas, questions, and whatever you’re working through."}</p>{drafting ? null : <div className="suggestion-list" aria-label="Suggestions">{suggestions.map((suggestion) => <button key={suggestion} onClick={() => { composerRef.current?.set(suggestion); composerRef.current?.focus(); }}>{suggestion}<span>↗</span></button>)}</div>}</div>}</div>
-      {showRoom ? null : <ChatComposer ref={composerRef} sending={sending || recovering || movingThread !== null} streaming={streaming} mode={mode} models={models} onModelChange={changeModel} savingMode={savingMode} caption={caption} diagnostics={contextDiagnostics ?? contextPreview} onEditProfile={editProfile} onSubmit={submitMessage} onStop={stopStream} onAttach={attach} roomItems={roomItems} roomId={selectedRoomId ?? ""} roomLabel={roomLabel} roomSelectionNotice={roomSelectionNotice} roomsLoading={roomsLoading} onRoomChange={activeId ? undefined : chooseDraftRoom} attachmentPanel={filePickerOpen && threadRoom ? <RoomFilePicker roomId={threadRoom.id} selectedIds={selectedFileIds} disabled={controlsDisabled || sending || streaming} onChange={setSelectedFileIds} /> : null} />}    </section>
+      {showRoom ? null : <ChatComposer ref={composerRef} sending={sending || recovering || movingThread !== null} streaming={streaming} mode={mode} models={models} onModelChange={changeModel} savingMode={savingMode} caption={caption} diagnostics={contextDiagnostics ?? contextPreview} onEditProfile={editProfile} onSubmit={submitMessage} onStop={stopStream} onAttach={attach} attachmentsEnabled={!preview} onRoomFiles={threadRoom && !preview ? toggleRoomFiles : undefined} roomItems={roomItems} roomId={selectedRoomId ?? ""} roomLabel={roomLabel} roomSelectionNotice={roomSelectionNotice} roomsLoading={roomsLoading} onRoomChange={activeId ? undefined : chooseDraftRoom} attachmentPanel={filePickerOpen && threadRoom ? <RoomFilePicker roomId={threadRoom.id} selectedIds={selectedFileIds} disabled={controlsDisabled || sending || streaming} onChange={setSelectedFileIds} /> : null} />}    </section>
     {renaming && <dialog ref={renameDialogRef} className="room-setup-dialog" aria-labelledby={renameTitleId} aria-busy={renameSaving} onCancel={(event) => { event.preventDefault(); if (!renameSaving) setRenaming(null); }}>
       <header className="settings-header"><h1 id={renameTitleId}>Rename conversation</h1><button type="button" className="icon-button" aria-label="Close rename dialog" disabled={renameSaving} onClick={() => setRenaming(null)}><X size={18} /></button></header>
       <form className="room-setup-form" onSubmit={(event) => { event.preventDefault(); void saveRename(); }}>

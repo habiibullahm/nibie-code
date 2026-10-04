@@ -10,6 +10,7 @@ function wideLabel(diagnostics: ContextDiagnostics) {
   if (included.has("room")) parts.push("Room");
   if (included.has("pins")) parts.push("Pinned context");
   if (included.has("file")) parts.push("File context");
+  if (included.has("attachment")) parts.push("Attachments");
   if (included.has("thread_summary")) parts.push("Summary");
   if (included.has("recent_messages")) parts.push("Recent conversation");
   return parts.join(" · ");
@@ -20,7 +21,7 @@ function narrowLabel(diagnostics: ContextDiagnostics) {
   const profile = included.has("profile");
   const room = included.has("room");
   const pins = included.has("pins");
-  const file = included.has("file");
+  const file = included.has("file") || included.has("attachment");
   const summary = included.has("thread_summary");
   const recent = included.has("recent_messages");
   if (summary && (profile || recent || room || pins || file)) return "Context · Summary + thread";
