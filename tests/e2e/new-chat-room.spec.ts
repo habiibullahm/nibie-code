@@ -134,7 +134,7 @@ for (const width of [320, 390, 768, 1024, 1440]) {
 
 test("Room threads appear once and opening one expands its parent", async ({ page }) => {
   const sidebar = page.locator(".desktop-sidebar");
-  const general = sidebar.getByRole("region", { name: "General", exact: true });
+  const general = sidebar.getByRole("region", { name: "Chat history", exact: true });
   await expect(general.getByRole("button", { name: "Learning the basics of astronomy", exact: true })).toHaveCount(0);
   await sidebar.getByRole("button", { name: `Expand ${roomName}`, exact: true }).click();
   await expect(sidebar.getByRole("group", { name: `Threads in ${roomName}`, exact: true }).getByRole("button", { name: "Learning the basics of astronomy", exact: true })).toBeVisible();
@@ -162,7 +162,7 @@ test("desktop moves General → Room → another Room → General without changi
   const clinic = sidebar.locator("[data-room-id]").filter({ has: page.getByRole("button", { name: "Clinic AI Assistant", exact: true }) });
   await thread.dragTo(clinic);
   await expect(clinic.locator("[data-conversation-id]").filter({ hasText: "Help me draft pricing" })).toHaveCount(1);
-  await expect(sidebar.getByRole("region", { name: "General", exact: true }).locator("[data-conversation-id]").filter({ hasText: "Help me draft pricing" })).toHaveCount(0);
+  await expect(sidebar.getByRole("region", { name: "Chat history", exact: true }).locator("[data-conversation-id]").filter({ hasText: "Help me draft pricing" })).toHaveCount(0);
   await expect(page.getByLabel("Room context: Room · Clinic AI Assistant", { exact: true })).toBeVisible();
   expect(await page.locator(".message-row").allTextContents()).toEqual(messages);
   const otherRoom = sidebar.locator("[data-room-id]").filter({ has: page.getByRole("button", { name: roomName, exact: true }) });
@@ -171,8 +171,8 @@ test("desktop moves General → Room → another Room → General without changi
   await expect(clinic.locator("[data-conversation-id]")).toHaveCount(0);
   await expect(page.getByLabel(`Room context: Room · ${roomName}`, { exact: true })).toBeVisible();
   expect(await page.locator(".message-row").allTextContents()).toEqual(messages);
-  await thread.dragTo(sidebar.getByRole("region", { name: "General", exact: true }));
-  await expect(sidebar.getByRole("region", { name: "General", exact: true }).locator("[data-conversation-id]").filter({ hasText: "Help me draft pricing" })).toHaveCount(1);
+  await thread.dragTo(sidebar.getByRole("region", { name: "Chat history", exact: true }));
+  await expect(sidebar.getByRole("region", { name: "Chat history", exact: true }).locator("[data-conversation-id]").filter({ hasText: "Help me draft pricing" })).toHaveCount(1);
   await expect(page.getByLabel("Room context: General", { exact: true })).toBeVisible();
   expect(await page.locator(".message-row").allTextContents()).toEqual(messages);
 });
@@ -193,7 +193,7 @@ test("mobile offers Move to without drag and drop", async ({ page }) => {
   await page.getByRole("menuitem", { name: "Move to…", exact: true }).click();
   await page.getByRole("combobox", { name: "Move to", exact: true }).selectOption({ label: "General" });
   await page.getByRole("button", { name: "Move thread", exact: true }).click();
-  await expect(sidebar.getByRole("region", { name: "General", exact: true }).getByRole("button", { name: "Mobile pricing", exact: true })).toBeVisible();
+  await expect(sidebar.getByRole("region", { name: "Chat history", exact: true }).getByRole("button", { name: "Mobile pricing", exact: true })).toBeVisible();
   await sidebar.getByRole("button", { name: "Close menu", exact: true }).click();
   await expect(page.getByLabel("Room context: General", { exact: true })).toBeVisible();
 });
@@ -205,8 +205,8 @@ test("deleting a Room detaches its threads into General", async ({ page }) => {
   await sidebar.getByRole("button", { name: roomName, exact: true }).click();
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Delete room", exact: true }).click();
-  await expect(sidebar.getByRole("region", { name: "General", exact: true }).getByRole("button", { name: "Keep this room thread", exact: true })).toBeVisible();
-  await expect(sidebar.getByRole("region", { name: "General", exact: true }).getByRole("button", { name: "Learning the basics of astronomy", exact: true })).toBeVisible();
+  await expect(sidebar.getByRole("region", { name: "Chat history", exact: true }).getByRole("button", { name: "Keep this room thread", exact: true })).toBeVisible();
+  await expect(sidebar.getByRole("region", { name: "Chat history", exact: true }).getByRole("button", { name: "Learning the basics of astronomy", exact: true })).toBeVisible();
   await sidebar.getByRole("button", { name: "Keep this room thread", exact: true }).click();
   await expect(page.getByLabel("Room context: General", { exact: true })).toBeVisible();
   await expect(page.locator(".message-row.user")).toContainText("Keep this room thread");

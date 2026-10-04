@@ -1,12 +1,13 @@
 import { expect, test } from "@playwright/test";
 
-for (const width of [390, 644]) {
+for (const width of [320, 390]) {
   for (const route of ["/", "/docs", "/privacy"]) {
     test(`mobile navigation on ${route} at ${width}px`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width, height: 844 });
       await page.goto(route);
       const primary = page.getByRole("navigation", { name: "Primary", exact: true });
       const toggle = primary.getByRole("button", { name: /navigation menu/ });
+      await expect(primary.getByRole("link", { name: "Workbench", exact: true })).toHaveCount(0);
       await expect(primary.getByRole("link", { name: "Docs", exact: true })).toBeHidden();
       await page.screenshot({ path: testInfo.outputPath("mobile-header.png"), animations: "disabled" });
       await toggle.click();
@@ -29,6 +30,7 @@ for (const width of [390, 644]) {
       await page.setViewportSize({ width: 1024, height: 900 });
       await expect(toggle).toBeHidden();
       await expect(primary.getByRole("link", { name: "Docs", exact: true })).toBeVisible();
+      await expect(primary.getByRole("link", { name: "Workbench", exact: true })).toHaveCount(0);
     });
   }
 }

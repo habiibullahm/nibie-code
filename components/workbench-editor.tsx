@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { ArrowLeft, Trash2 } from "lucide-react";
 import { deleteWorkbenchDocumentAction, updateWorkbenchDocumentAction } from "@/app/actions/workbench";
 import { useStableCallback } from "@/components/use-stable-callback";
 import { workbenchPath } from "@/lib/routes";
@@ -110,9 +111,9 @@ export function WorkbenchEditor({ document, roomName }: { document: WorkbenchDoc
 
   return <main className="workbench-shell">
     <header className="workbench-top">
-      <Link className="workbench-back" href={workbenchPath}>Documents</Link>
+      <Link className="workbench-back" href={workbenchPath} aria-label="Back to documents" title="Back to documents"><ArrowLeft size={16} aria-hidden="true" /></Link>
       <p className={`workbench-status${state.phase === "failed" || deleteError ? " is-failed" : ""}`} role="status">{deleteError || label}{!deleteError && state.phase === "failed" && state.detail ? ` · ${state.detail}` : ""}{!deleteError && state.phase === "failed" ? <button type="button" onClick={() => void persist()}>Retry</button> : null}</p>
-      <button type="button" className="workbench-delete" disabled={deleting} onClick={() => void remove()}>{deleting ? "Deleting…" : "Delete"}</button>
+      <button type="button" className="workbench-delete" aria-label={deleting ? "Deleting document" : "Delete document"} title={deleting ? "Deleting document" : "Delete document"} disabled={deleting} onClick={() => void remove()}><Trash2 size={16} aria-hidden="true" /></button>
     </header>
     <form className="workbench-stage" onSubmit={(event) => event.preventDefault()} onBlur={handleBlur}>
       {roomName ? <p className="workbench-room">Room · {roomName}</p> : null}

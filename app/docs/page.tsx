@@ -161,6 +161,7 @@ export default function DocsPage() {
             <li><strong>Auto-follow streaming:</strong> follows new text while you are near the bottom. Turn it off to keep your place.</li>
             <li><strong>Show timestamps:</strong> displays a short time beside each message.</li>
             <li><strong>Restore last conversation:</strong> reopens your last accessible chat when you return. It is off by default.</li>
+            <li><strong>Long prompts:</strong> the composer grows as you write. Choose <strong>Expand composer</strong> for more space, then <strong>Collapse composer</strong> to return to compact view. After its height limit, the text area scrolls internally.</li>
           </ul>
           <p>Choose Dark, Light, or the device setting under <strong>Settings → General → Theme</strong>. Theme and chat preferences stay on this device.</p>
         </section>

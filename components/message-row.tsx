@@ -1,12 +1,11 @@
 "use client";
 
 import { memo, useState, type KeyboardEvent } from "react";
-import { FileText, Pencil, RefreshCw } from "lucide-react";
+import { Pencil, RefreshCw } from "lucide-react";
 import { CopyButton } from "@/components/copy-button";
 import { MessageMarkdown } from "@/components/message-markdown";
 import { useChatFlag } from "@/components/use-chat-preferences";
 import type { PersistedMessage } from "@/lib/chat/read";
-import { canContinueInWorkbench } from "@/lib/workbench/offer";
 import { formatMessageTimestamp } from "@/lib/chat/timestamps";
 
 const placeholderResponses = new Set(["Response stopped.", "Response unavailable."]);
@@ -21,8 +20,6 @@ type Props = {
   editing: boolean;
   responseFailed?: boolean;
   onRegenerate: () => void;
-  onContinueInWorkbench?: (message: PersistedMessage) => void;
-  workbenchPending?: boolean;
   onStartEdit: (id: string) => void;
   onCancelEdit: () => void;
   onSaveEdit: (id: string, content: string) => void;
@@ -51,20 +48,18 @@ function MessageTime({ value }: { value: string | undefined }) {
 }
 
 // Memoized per message: while a reply streams, only the row whose message object changed re-renders.
-export const MessageRow = memo(function MessageRow({ message, initial, isLast, isLastUser, canMutate, disabled, editing, responseFailed = false, onRegenerate, onContinueInWorkbench, workbenchPending = false, onStartEdit, onCancelEdit, onSaveEdit }: Props) {
+export const MessageRow = memo(function MessageRow({ message, initial, isLast, isLastUser, canMutate, disabled, editing, responseFailed = false, onRegenerate, onStartEdit, onCancelEdit, onSaveEdit }: Props) {
   if (message.role === "assistant") {
     const waiting = message.status === "streaming" && !message.content;
     const canCopy = message.status !== "streaming" && message.status !== "error" && Boolean(message.content) && !placeholderResponses.has(message.content);
     const canRetry = canMutate && isLast && (message.status === "error" || message.status === "interrupted");
-    const showWorkbench = Boolean(onContinueInWorkbench) && canContinueInWorkbench(message);
     return <article className="message-row assistant">
       <div className="message-content assistant">
         <div className="message-author">Nibie{message.status === "interrupted" ? " · Stopped" : message.status === "error" ? " · Couldn't respond" : ""}<MessageTime value={message.created_at} /></div>
         {waiting ? <span className="thinking-dots" role="status" aria-label="Nibie is responding"><i /><i /><i /></span> : <><MessageMarkdown content={message.content} />{message.status === "streaming" && <span className="thinking-dots is-inline" role="status" aria-label="Nibie is responding"><i /><i /><i /></span>}</>}
-        {(canCopy || canRetry || showWorkbench) && <div className="message-actions">
+        {(canCopy || canRetry) && <div className="message-actions">
           {canCopy && <CopyButton text={message.content} label="Copy response" />}
           {canRetry && <button type="button" className="message-action" disabled={disabled} onClick={onRegenerate}><RefreshCw size={13} aria-hidden="true" /><span>Retry</span></button>}
-          {showWorkbench && <button type="button" className="message-action" disabled={disabled || workbenchPending} onClick={() => onContinueInWorkbench?.(message)}><FileText size={13} aria-hidden="true" /><span>{workbenchPending ? "Opening…" : "Continue in Workbench"}</span></button>}
         </div>}
       </div>
     </article>;
