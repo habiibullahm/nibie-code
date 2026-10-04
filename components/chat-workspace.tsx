@@ -33,6 +33,7 @@ import { previewContextDiagnostics } from "@/lib/context/profile-context";
 import type { ContextDiagnostics } from "@/lib/context/context-types";
 import { followAfterSending, followStreamedContent, isNearBottom, trackNearBottom } from "@/lib/chat/scroll";
 import { ChatStreamServerError, readChatSse } from "@/lib/ai/sse";
+import { compareNames, compareText } from "@/lib/chat/order";
 import { readRoomFileSelection, rememberRoomFileSelection } from "@/lib/files/selection-memory";
 import { abortLiveChatStream, finishLiveChatStream, liveChatConversationId, shouldStopLiveChatOnLeave, startLiveChatStream } from "@/lib/chat/live-stream";
 import { activeAssistantId, classifyStreamFailure, hasActiveGeneration, isRecoverySettled, isRegressiveSnapshot, latestReplyFailed, messagePersistenceConfirmed, needsServerCheck, recoveryPollAction, recoveryPollMs, unseenGenerationSettled } from "@/lib/chat/recovery";
@@ -163,7 +164,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const drawerRef = useRef<HTMLElement>(null);
   const shownConversations = useMemo(() => [...new Map([...conversations, ...localConversations].map((item) => [item.id, item])).values()]
     .filter((item) => !locallyArchivedIds.includes(item.id))
-    .sort((left, right) => right.updated_at.localeCompare(left.updated_at) || left.id.localeCompare(right.id)), [conversations, localConversations, locallyArchivedIds]);
+    .sort((left, right) => compareText(right.updated_at, left.updated_at) || compareText(left.id, right.id)), [conversations, localConversations, locallyArchivedIds]);
   const rooms = useMemo(() => {
     const source = preview ? mockRooms : (serverRooms ?? []);
     const map = new Map(source.map((room) => [room.id, room]));
@@ -171,7 +172,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
       if (override) map.set(id, override);
       else map.delete(id);
     }
-    return [...map.values()].sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
+    return [...map.values()].sort((left, right) => compareNames(left.name, right.name) || compareText(left.id, right.id));
   }, [preview, roomOverrides, serverRooms]);
   const paramActiveId = shownConversations.some((item) => item.id === conversationParam) ? conversationParam : null;
   const activeId = preview ? previewActiveId : pendingId !== undefined ? pendingId : paramActiveId;
@@ -721,7 +722,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     if (!activeRoom) return { error: "That room is no longer available." };
     if (preview) {
       const pins = activeRoom.pins.map((pin) => pin.id === id ? { ...pin, title: draft.title, content: draft.content, updated_at: new Date().toISOString() } : pin)
-        .sort((left, right) => right.updated_at.localeCompare(left.updated_at) || left.id.localeCompare(right.id));
+        .sort((left, right) => compareText(right.updated_at, left.updated_at) || compareText(left.id, right.id));
       setRoomOverrides((items) => ({ ...items, [activeRoom.id]: { ...activeRoom, pins } }));
       return {};
     }
