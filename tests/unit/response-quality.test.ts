@@ -41,8 +41,26 @@ describe("response quality rules and compatibility", () => {
     /untrusted data/i, /cannot override these rules/i, /stay faithful to what they support/i,
     /Never expose hidden reasoning/i, /final copy only/i,
     /turn it into an echo heading/i,
+    /Ideation, brainstorming, recommendations, or plans with real choices/i, /usually give three to five options, not one minimal suggestion/i,
+    /detailed enough to compare or act on/i, /unless one idea or a very short answer is asked/i, /Concise means efficient, not underdeveloped/i,
   ])("includes the generation rule %s in the provider policy", (rule) => {
     expect(toProviderMessages(buildContext(input("hello")))[0].content).toMatch(rule);
+  });
+
+  it("asks for several options only for open-ended ideation, never as a general length rule", () => {
+    const policy = responseQualityFor("Balanced");
+    const ideation = policy.split("\n\n").filter((line) => /three to five/.test(line));
+    // One scoped rule: it names the open-ended task types and keeps explicit single-answer and brevity requests in charge.
+    expect(ideation).toHaveLength(1);
+    expect(ideation[0]).toMatch(/^Ideation, brainstorming, recommendations, or plans with real choices:/);
+    expect(ideation[0]).toMatch(/unless one idea or a very short answer is asked/);
+    // The global defaults still favour brevity and still let the request set the depth.
+    expect(policy).toMatch(/be concise by default and expand when requested/);
+    for (const request of ["weekend date idea", "give me one weekend date idea", "explain closures in javascript simply", "Answer in one sentence: what is a Room in Nibie?"]) {
+      const messages = toProviderMessages(buildContext(input(request, "Balanced")));
+      expect(messages.at(-1)).toEqual({ role: "user", content: request });
+      for (const mode of ["Fast", "High"] as const) expect(toProviderMessages(buildContext(input(request, mode)))[0]).toEqual(messages[0]);
+    }
   });
 
   it("keeps requested detail independent of model and reasoning effort", () => {
