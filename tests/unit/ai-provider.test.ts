@@ -73,4 +73,22 @@ describe("provider adapter routes each mode server-side", () => {
     configure(); vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("socket detail with secret"); }));
     await expect(openAiCompatibleProvider.stream("Fast", messages, new AbortController().signal)).rejects.toThrow("AI provider request failed.");
   });
+
+  it("Fast still reaches Sumopod when the OpenAI configuration is broken, while Balanced and High fail closed without any request", async () => {
+    configure(); const { fetchMock, sent } = stubFetch();
+    vi.stubEnv("OPENAI_BASE_URL", "http://not-https.example"); vi.stubEnv("OPENAI_BALANCED_REASONING_EFFORT", "nonsense"); vi.stubEnv("OPENAI_HIGH_REASONING_EFFORT", "nonsense");
+    await openAiCompatibleProvider.stream("Fast", messages, new AbortController().signal);
+    expect(sent(0)).toEqual({ url: "https://gateway.invalid/v1/chat/completions", authorization: "Bearer gateway-key", body: { model: "deepseek-v4.1-flash:netra", messages, stream: true, max_tokens: 8192 } });
+    for (const mode of ["Balanced", "High"] as const) await expect(openAiCompatibleProvider.stream(mode, messages, new AbortController().signal)).rejects.toThrow(`Unavailable model mode: ${mode}`);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("Balanced and High still reach OpenAI when the Sumopod configuration is broken", async () => {
+    configure(); const { sent } = stubFetch();
+    vi.stubEnv("SUMOPOD_BASE_URL", "not a url");
+    await expect(openAiCompatibleProvider.stream("Fast", messages, new AbortController().signal)).rejects.toThrow("Unavailable model mode: Fast");
+    await openAiCompatibleProvider.stream("Balanced", messages, new AbortController().signal);
+    await openAiCompatibleProvider.stream("High", messages, new AbortController().signal);
+    expect([0, 1].map((call) => sent(call).body.model)).toEqual(["gpt-6-luna", "gpt-6.1-sol"]);
+  });
 });

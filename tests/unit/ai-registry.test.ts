@@ -52,29 +52,51 @@ describe("authoritative server routing registry", () => {
     expect(resolveRoute("Fast", getAiConfig({ ...all, OPENAI_BALANCED_REASONING_EFFORT: "medium", OPENAI_HIGH_REASONING_EFFORT: "high" }))).not.toHaveProperty("reasoningEffort");
   });
 
-  it("rejects an unrecognised reasoning effort instead of silently changing what is sent, naming the variable but not the value", () => {
-    for (const name of ["OPENAI_HIGH_REASONING_EFFORT", "OPENAI_BALANCED_REASONING_EFFORT"]) {
-      for (const value of ["maximum", "xhigh", "med1um", "auto", "0"]) {
-        let message = "";
-        try { getAiConfig({ ...all, [name]: value }); } catch (error) { message = (error as Error).message; }
-        expect(message).toBe(`${name} must be low, medium or high.`);
-        expect(message).not.toContain(value);
-      }
+  it("a bad variable removes only the routes that depend on it, and the issue names the variable but never the value", () => {
+    const cases: [string, Record<string, string>, string[], string][] = [
+      ["bad Balanced effort", { OPENAI_BALANCED_REASONING_EFFORT: "super-secret-typo" }, ["Fast", "High"], "OPENAI_BALANCED_REASONING_EFFORT must be low, medium or high."],
+      ["bad High effort", { OPENAI_HIGH_REASONING_EFFORT: "super-secret-typo" }, ["Fast", "Balanced"], "OPENAI_HIGH_REASONING_EFFORT must be low, medium or high."],
+      ["bad OpenAI base URL", { OPENAI_BASE_URL: "http://super-secret-typo.example" }, ["Fast"], "OPENAI_BASE_URL must use HTTPS."],
+      ["unparseable OpenAI base URL", { OPENAI_BASE_URL: "super secret typo" }, ["Fast"], "OPENAI_BASE_URL must be a valid URL."],
+      ["bad Sumopod base URL", { SUMOPOD_BASE_URL: "super secret typo" }, ["Balanced", "High"], "SUMOPOD_BASE_URL must be a valid URL."],
+      ["unsupported legacy gateway type", { AI_PROVIDER: "super-secret-typo" }, ["Balanced", "High"], "Unsupported AI_PROVIDER; expected openai-compatible."],
+    ];
+    for (const [label, broken, surviving, issue] of cases) {
+      const config = getAiConfig({ ...all, ...broken });
+      expect(Object.keys(config.routes), label).toEqual(surviving);
+      expect(config.issues, label).toEqual([issue]);
+      expect(JSON.stringify(config.issues), label).not.toContain("super");
+      expect(getModelOptions({ ...all, ...broken }).models.map((model) => model.id), label).toEqual(surviving);
     }
   });
 
-  it("an invalid effort hides OpenAI modes and logs only the variable name, so the problem is visible but nothing leaks", () => {
+  it("a broken OpenAI variable can never disable Fast, and a broken Sumopod variable can never disable Balanced or High", () => {
+    const brokenOpenAi = { OPENAI_BASE_URL: "http://nope.example", OPENAI_BALANCED_REASONING_EFFORT: "nope", OPENAI_HIGH_REASONING_EFFORT: "nope" };
+    expect(Object.keys(getAiConfig({ ...all, ...brokenOpenAi }).routes)).toEqual(["Fast"]);
+    expect(resolveRoute("Fast", getAiConfig({ ...all, ...brokenOpenAi })).model).toBe("deepseek-v4.1-flash:netra");
+    const brokenSumopod = { SUMOPOD_BASE_URL: "not a url", AI_PROVIDER: "nope" };
+    expect(Object.keys(getAiConfig({ ...all, ...brokenSumopod }).routes)).toEqual(["Balanced", "High"]);
+    expect(resolveRoute("High", getAiConfig({ ...all, ...brokenSumopod })).reasoningEffort).toBe("high");
+  });
+
+  it("logs each broken route by variable name only, and still offers the routes that work", () => {
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
-      expect(getModelOptions({ ...all, OPENAI_BALANCED_REASONING_EFFORT: "super-secret-typo" })).toEqual({ models: [] });
-      const line = logged.mock.calls.map((call) => String(call[0])).join("\n");
-      expect(line).toContain("ai.config.invalid");
-      expect(line).toContain("OPENAI_BALANCED_REASONING_EFFORT must be low, medium or high.");
-      expect(line).not.toContain("super-secret-typo");
+      expect(getModelOptions({ ...all, OPENAI_BALANCED_REASONING_EFFORT: "super-secret-typo" }).models.map((model) => model.id)).toEqual(["Fast", "High"]);
+      const lines = logged.mock.calls.map((call) => String(call[0])).join("\n");
+      expect(lines).toContain("ai.config.invalid");
+      expect(lines).toContain("OPENAI_BALANCED_REASONING_EFFORT must be low, medium or high.");
+      expect(lines).not.toContain("super-secret-typo");
       logged.mockClear();
       getModelOptions({});
       expect(logged).not.toHaveBeenCalled();
     } finally { logged.mockRestore(); }
+  });
+
+  it("when no route is usable at all, says why by variable name and offers nothing", () => {
+    expect(() => getAiConfig({ ...openai, OPENAI_BASE_URL: "http://nope.example", OPENAI_HIGH_REASONING_EFFORT: "nope" })).toThrow("OPENAI_BASE_URL must use HTTPS.");
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    try { expect(getModelOptions({ ...openai, OPENAI_BASE_URL: "http://nope.example" })).toEqual({ models: [] }); } finally { logged.mockRestore(); }
   });
 
   it("reports which provider serves a mode, for logs only", () => {

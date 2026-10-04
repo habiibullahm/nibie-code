@@ -26,8 +26,10 @@ export type ModelRoute = {
 };
 
 export type AiConfig = {
-  // Only modes whose provider is actually configured appear here.
+  // Only modes whose provider is configured and valid appear here.
   routes: Partial<Record<ChatModel, ModelRoute>>;
+  // One line per route that is configured but invalid. Each names a variable, never its value.
+  issues: string[];
 };
 
 // Fast → the Sumopod gateway (SUMOPOD_API_KEY / SUMOPOD_BASE_URL) running DeepSeek V4.1 Flash. The earlier AI_API_KEY / AI_BASE_URL
@@ -44,6 +46,14 @@ const sumopodMaxOutputTokens = 8192;
 
 function trimmed(value: string | undefined) {
   return value?.trim() || undefined;
+}
+
+function sumopodBaseUrl(env: Env) {
+  const name = trimmed(env.SUMOPOD_BASE_URL) ? "SUMOPOD_BASE_URL" : "AI_BASE_URL";
+  const configured = trimmed(env.SUMOPOD_BASE_URL) ?? trimmed(env.AI_BASE_URL);
+  if (!configured) return undefined;
+  try { new URL(configured); } catch { throw new Error(`${name} must be a valid URL.`); }
+  return configured.replace(/\/+$/, "");
 }
 
 function openAiBaseUrl(env: Env) {
@@ -74,24 +84,51 @@ function balancedReasoningEffort(env: Env): ReasoningEffortSetting | undefined {
   return configuredEffort("OPENAI_BALANCED_REASONING_EFFORT", env.OPENAI_BALANCED_REASONING_EFFORT);
 }
 
-export function getAiConfig(env: Env = process.env): AiConfig {
-  const routes: AiConfig["routes"] = {};
+// Each route is built and validated on its own, so one provider's bad variable removes only the routes that depend on it:
+// a broken OpenAI variable can never take Fast (Sumopod) down, and a broken Sumopod variable can never take Balanced or High down.
+// Returning normally means at least one mode is usable; `issues` lists the ones that are not.
+function fastRoute(env: Env): ModelRoute | undefined {
   const gatewayProvider = trimmed(env.AI_PROVIDER);
   if (gatewayProvider && gatewayProvider !== "openai-compatible") throw new Error("Unsupported AI_PROVIDER; expected openai-compatible.");
-  const gatewayUrl = trimmed(env.SUMOPOD_BASE_URL) ?? trimmed(env.AI_BASE_URL);
-  const gatewayKey = trimmed(env.SUMOPOD_API_KEY) ?? trimmed(env.AI_API_KEY);
-  if (gatewayUrl && gatewayKey) {
-    routes.Fast = { provider: "sumopod", baseUrl: gatewayUrl.replace(/\/+$/, ""), apiKey: gatewayKey, model: trimmed(env.SUMOPOD_MODEL_FAST) ?? defaultFastModel, maxOutputTokens: sumopodMaxOutputTokens };
+  const baseUrl = sumopodBaseUrl(env);
+  const apiKey = trimmed(env.SUMOPOD_API_KEY) ?? trimmed(env.AI_API_KEY);
+  if (!baseUrl || !apiKey) return undefined;
+  return { provider: "sumopod", baseUrl, apiKey, model: trimmed(env.SUMOPOD_MODEL_FAST) ?? defaultFastModel, maxOutputTokens: sumopodMaxOutputTokens };
+}
+
+function balancedRoute(env: Env): ModelRoute | undefined {
+  const apiKey = trimmed(env.OPENAI_API_KEY);
+  if (!apiKey) return undefined;
+  const baseUrl = openAiBaseUrl(env);
+  const reasoningEffort = balancedReasoningEffort(env);
+  return { provider: "openai", baseUrl, apiKey, model: trimmed(env.OPENAI_MODEL_BALANCED) ?? defaultBalancedModel, ...(reasoningEffort ? { reasoningEffort } : {}) };
+}
+
+function highRoute(env: Env): ModelRoute | undefined {
+  const apiKey = trimmed(env.OPENAI_API_KEY);
+  if (!apiKey) return undefined;
+  const baseUrl = openAiBaseUrl(env);
+  return { provider: "openai", baseUrl, apiKey, model: trimmed(env.OPENAI_MODEL_HIGH) ?? defaultHighModel, reasoningEffort: highReasoningEffort(env) };
+}
+
+const routeBuilders: readonly [ChatModel, (env: Env) => ModelRoute | undefined][] = [["Fast", fastRoute], ["Balanced", balancedRoute], ["High", highRoute]];
+
+export function getAiConfig(env: Env = process.env): AiConfig {
+  const routes: AiConfig["routes"] = {};
+  const issues = new Set<string>();
+  for (const [mode, build] of routeBuilders) {
+    try {
+      const route = build(env);
+      if (route) routes[mode] = route;
+    } catch (error) {
+      issues.add(error instanceof Error ? error.message : `The ${mode} configuration is invalid.`);
+    }
   }
-  const openAiKey = trimmed(env.OPENAI_API_KEY);
-  if (openAiKey) {
-    const baseUrl = openAiBaseUrl(env);
-    const balancedEffort = balancedReasoningEffort(env);
-    routes.Balanced = { provider: "openai", baseUrl, apiKey: openAiKey, model: trimmed(env.OPENAI_MODEL_BALANCED) ?? defaultBalancedModel, ...(balancedEffort ? { reasoningEffort: balancedEffort } : {}) };
-    routes.High = { provider: "openai", baseUrl, apiKey: openAiKey, model: trimmed(env.OPENAI_MODEL_HIGH) ?? defaultHighModel, reasoningEffort: highReasoningEffort(env) };
+  if (!Object.keys(routes).length) {
+    // Nothing usable at all: say why, by variable name, so the failure is actionable.
+    throw new Error(issues.size ? [...issues].join(" ") : "Missing AI configuration: SUMOPOD_API_KEY, SUMOPOD_BASE_URL (Fast) or OPENAI_API_KEY (Balanced, High)");
   }
-  if (!Object.keys(routes).length) throw new Error("Missing AI configuration: SUMOPOD_API_KEY, SUMOPOD_BASE_URL (Fast) or OPENAI_API_KEY (Balanced, High)");
-  return { routes };
+  return { routes, issues: [...issues] };
 }
 
 export type ModelContextCapabilities = {
@@ -125,5 +162,7 @@ export function getModelOptions(env: Env = process.env): { models: ModelOption[]
     if (error instanceof Error && !error.message.startsWith("Missing AI configuration")) logError("ai.config.invalid", { reason: error.message });
     return { models: [] };
   }
+  // Modes that are still usable are offered; the ones that are not are reported, by variable name only.
+  for (const issue of config.issues) logError("ai.config.invalid", { reason: issue });
   return { models: modeOrder.filter((mode) => config.routes[mode]).map((mode) => ({ id: mode, ...modelPickerCopy[mode] })) };
 }
