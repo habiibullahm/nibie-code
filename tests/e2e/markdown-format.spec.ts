@@ -72,3 +72,17 @@ test("a stray H1 is no larger than H2", async ({ page }) => {
   });
   expect(sizes[0]).toBeLessThanOrEqual(sizes[1]);
 });
+
+test("the code block copy icon copies the exact code and confirms it", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await openSample(page);
+  const copy = page.getByRole("button", { name: "Copy ts code block" });
+  await expect(copy.locator("svg.lucide-copy")).toBeVisible();
+  await copy.click();
+  await expect(copy.locator("svg.lucide-check")).toBeVisible();
+  await expect(copy).toContainText("Copied");
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  expect(copied.startsWith("export async function cachedFetch(url: string, etag?: string)")).toBe(true);
+  expect(copied.endsWith("}")).toBe(true);
+  expect(copied).not.toContain("```");
+});

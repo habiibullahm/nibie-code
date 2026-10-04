@@ -27,7 +27,7 @@ const components: Components = {
     const language = /language-([\w+#.-]+)/.exec(code?.props.className ?? "")?.[1];
     const text = textOf(children).replace(/\n$/, "");
     return <div className="code-block">
-      <div className="code-block-header"><span>{language ?? "text"}</span><CopyButton text={text} label={`Copy ${language ?? "code"} code block`} compact /></div>
+      <div className="code-block-header"><span>{language ?? "text"}</span><CopyButton text={text} label={language ? `Copy ${language} code block` : "Copy code block"} compact /></div>
       <pre tabIndex={0}><code>{text}</code></pre>
     </div>;
   },
