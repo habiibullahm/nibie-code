@@ -18,6 +18,7 @@ What's new in Nibie.
 
 ### Changed
 
+- Assistant answers use adaptive formatting: plain prose for simple answers, `##`/`###` headings only when sections help, numbered steps, small tables for comparisons, and fenced code with its language. Answer text is slightly larger and calmer, headings stay compact, inline code is quieter, and tables scroll inside their frame on phones instead of breaking words.
 - Chat and room-draft failure logs now use stable event names and operational codes. User-facing errors are unchanged.
 
 ### Fixed

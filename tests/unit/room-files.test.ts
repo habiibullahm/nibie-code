@@ -183,7 +183,8 @@ describe("file context", () => {
   it("drops file text that does not fit the file budget", () => {
     const plan = buildContext(input({
       files: [{ name: "notes.txt", text: "f".repeat(20_000) }],
-      capabilities: { contextWindowTokens: 800, maxOutputTokens: 4 },
+      // The smallest window in the suite: it still fits the core policy and the request, but never all of this file.
+      capabilities: { contextWindowTokens: 920, maxOutputTokens: 4 },
     }));
     const fileBlock = plan.blocks.find((block) => block.id === "file");
     expect(fileBlock?.text.length ?? 0).toBeLessThan(20_000);

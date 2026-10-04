@@ -17,7 +17,9 @@ async function writeClipboard(text: string) {
   if (!copied) throw new Error("Copy failed.");
 }
 
-export function CopyButton({ text, label, compact = false }: { text: string; label: string; compact?: boolean }) {
+// iconOnly shows just the icon (a check once copied); the label stays the accessible name and tooltip, and the
+// result is still announced to screen readers.
+export function CopyButton({ text, label, compact = false, iconOnly = false }: { text: string; label: string; compact?: boolean; iconOnly?: boolean }) {
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
@@ -29,8 +31,9 @@ export function CopyButton({ text, label, compact = false }: { text: string; lab
     timer.current = setTimeout(() => setState("idle"), 2000);
   }
 
-  return <button type="button" className={`copy-button${compact ? " is-compact" : ""}`} aria-label={label} title={label} onClick={() => void copy()}>
-    {state === "copied" ? <Check size={13} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />}
-    <span aria-live="polite">{state === "copied" ? "Copied" : state === "failed" ? "Copy failed" : "Copy"}</span>
+  const status = state === "copied" ? "Copied" : state === "failed" ? "Copy failed" : "Copy";
+  return <button type="button" className={`copy-button${compact ? " is-compact" : ""}${iconOnly ? " is-icon-only" : ""}`} aria-label={label} title={state === "idle" ? label : status} onClick={() => void copy()}>
+    {state === "copied" ? <Check size={iconOnly ? 14 : 13} aria-hidden="true" /> : <Copy size={iconOnly ? 14 : 13} aria-hidden="true" />}
+    <span className={iconOnly ? "visually-hidden" : undefined} aria-live="polite">{iconOnly && state === "idle" ? "" : status}</span>
   </button>;
 }
