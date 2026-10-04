@@ -1,10 +1,12 @@
 # V1 release checklist
 
+A release is done only when code is on `main`, production is Ready, signed-in smoke passes, the changelog and release note match that production SHA, stale product docs are corrected, known issues are current, and the version tag is created after those docs. Docs are not optional polish.
+
 Run this against a frozen SHA. Do not point production at a moving staging branch.
 
 Application code that needs a new database schema must not receive production traffic before that migration is applied.
 
-Copy [V1_RELEASE_TEMPLATE.md](V1_RELEASE_TEMPLATE.md) to `docs/releases/vX.Y.Z.md` only after production smoke tests pass. Do not claim Pins, Files, or Workbench unless those migrations and features are in the frozen SHA.
+Copy [V1_RELEASE_TEMPLATE.md](V1_RELEASE_TEMPLATE.md) to `docs/releases/vX.Y.Z.md` after production smoke tests pass and before the tag. Do not claim a capability unless it is in the frozen SHA and verified in production. Do not list planned work as shipped.
 
 `npm run release:check` does not migrate, deploy, tag, or push. At freeze time, run it with `--require-clean`.
 
@@ -24,7 +26,7 @@ Copy [V1_RELEASE_TEMPLATE.md](V1_RELEASE_TEMPLATE.md) to `docs/releases/vX.Y.Z.m
    - `npm run release:check -- --require-clean`
 5. Inventory `drizzle/*.sql` against `drizzle/meta/_journal.json`. Write every filename into the release notes. Duplicate numeric prefixes fail `release:check`. Do not hardcode filenames that are not in this SHA.
 
-The baseline this checklist was added on ends at `0005_superb_frank_castle.sql`. Later V1 work may add files. The frozen SHA wins.
+The frozen SHA wins. Inventory the journal in that SHA. Do not copy filenames from an older note.
 
 ## DATABASE
 
@@ -74,16 +76,42 @@ If `main` cannot fast-forward to `RC_SHA`, stop. Do not merge the staging branch
 | Sign out | Session ends and a protected page asks for sign-in |
 
 14. Inspect runtime logs for the smoke request ids. A healthy chat looks like `chat.response.started`, then `context.built`, then `chat.response.completed`. Follow [OBSERVABILITY.md](../engineering/OBSERVABILITY.md).
-15. Tag the deployed SHA, not a later commit:
+
+## DOCS
+
+Use merged `main` and the verified production deployment as the source of truth. Document only what that SHA shipped. Do not write API keys, credentials, secret values, or private tokens. Environment variables may be named only.
+
+15. Update `CHANGELOG.md` with the version, release date, Added, Changed, Fixed, Removed or Deprecated when relevant, Known issues, and important user-visible behavior.
+16. Copy [V1_RELEASE_TEMPLATE.md](V1_RELEASE_TEMPLATE.md) to `docs/releases/vX.Y.Z.md`. Record the production SHA, production URL, what shipped, user-visible changes, technical changes, migrations, verification, known issues, deferred work, and the next milestone.
+17. Review the product docs this release touches. Correct or remove outdated behavior, architecture, UX, Room and Thread behavior, model modes, provider config, context rules, safety, persistence, navigation, limitations, known issues, and deferred work.
+18. Confirm known issues in the changelog and the release note still happen in production. Remove issues this release fixed.
+
+## TAG
+
+19. Tag only after steps 15–18 match production. Tag the deployed SHA, not a later commit:
 
 ```text
 git tag -a v1.0.0 PRODUCTION_SHA -m "Nibie v1.0.0"
 git push origin v1.0.0
 ```
 
-Use `v1.0.1` for a hotfix and `v1.1.0` for a backward-compatible feature. See [releases/README.md](README.md).
+Use `v1.0.1` for a hotfix and `v1.1.0` for a backward-compatible feature. See [releases/README.md](README.md). If the docs do not match production, do not tag.
 
-16. Write `docs/releases/v1.0.0.md` from the template, including the migration log, gate results, smoke results, and the production SHA.
+20. End the release report with:
+
+```text
+PRODUCTION: PASS / FAIL
+SMOKE: PASS / FAIL
+CHANGELOG UPDATED: YES / NO
+RELEASE DOC UPDATED: YES / NO
+STALE DOCS CLEANED: YES / NO
+KNOWN ISSUES CURRENT: YES / NO
+TAG: ...
+DOCS MATCH PRODUCTION: YES / NO
+RELEASE COMPLETE: YES / NO
+```
+
+If `DOCS MATCH PRODUCTION` is `NO`, `RELEASE COMPLETE` is `NO`.
 
 ## MONITORING
 
@@ -102,7 +130,7 @@ Application rollback: in Vercel, promote the previous READY deployment whose com
 
 Database rollback: do not run down migrations unless that down path was designed and tested for production data. Prefer a forward migration. If the new schema is already applied, only roll the application back to a build that still runs on that schema.
 
-If smoke tests fail before the tag, do not tag. Roll the application back or fix forward, then record the result.
+If smoke tests fail before the tag, do not tag. Roll the application back or fix forward, then record the result. If the changelog or product docs disagree with the deployed SHA, do not tag.
 
 ## Hotfix
 
@@ -114,6 +142,7 @@ v1.0.0
 → same gates
 → preview or staging verification
 → production
+→ changelog, release note, and product docs match that SHA
 → tag v1.0.1
 ```
 

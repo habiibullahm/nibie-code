@@ -1,4 +1,4 @@
-<!-- Newest entry first. Use a version heading only for a release that actually shipped. -->
+<!-- Newest entry first. Use a version heading only for a release that actually shipped. Each shipped entry includes the date, Added, Changed, Fixed, Removed or Deprecated when relevant, Known issues, and important user-visible behavior. -->
 
 # Changelog
 
@@ -12,6 +12,7 @@ What's new in Nibie.
 - Structured server logs for chat generation, with one request id across start, context build, and completion or failure.
 - Release checklist, version policy, migration inventory rules, hotfix steps, and rollback notes.
 - `npm run release:check`, which fails on duplicate migration numbers, a journal that does not match `drizzle/*.sql`, missing release docs, or unresolved merge markers.
+- A release stays incomplete until the changelog, release note, and current product docs match verified production. The version tag comes after that.
 
 ### Changed
 
