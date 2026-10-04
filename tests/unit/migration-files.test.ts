@@ -13,3 +13,16 @@ describe.each(files)("migration %s", (name) => {
     expect(glued).toEqual([]);
   });
 });
+
+// drizzle-orm's migrator applies only entries whose journal "when" is later than the newest row in
+// __drizzle_migrations. An entry dated earlier than one already applied is skipped silently on a hosted database,
+// while a fresh database runs it, so local tests can't catch it.
+describe("migration journal", () => {
+  it("dates every entry later than the one before it", () => {
+    const { entries } = JSON.parse(readFileSync(join(directory, "meta", "_journal.json"), "utf8")) as {
+      entries: { tag: string; when: number }[];
+    };
+    const outOfOrder = entries.filter((entry, index) => index > 0 && entry.when <= entries[index - 1].when).map((entry) => entry.tag);
+    expect(outOfOrder).toEqual([]);
+  });
+});
