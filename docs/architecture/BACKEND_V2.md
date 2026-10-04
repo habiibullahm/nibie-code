@@ -2,7 +2,7 @@
 
 Status: architecture and scope. This document records the decision that Fastify becomes Nibie's dedicated backend. It does not implement that backend.
 
-[`docs/starter/ARCHITECTURE.md`](../starter/ARCHITECTURE.md) remains the description of production. That file locked the backend as Next.js on 2026-09-30. Production keeps that behavior until a later change explicitly amends the starter architecture. This document does not amend it.
+The archived starter note [`docs/archive/starter/ARCHITECTURE.md`](../archive/starter/ARCHITECTURE.md) locked the backend as Next.js on 2026-09-30. Production still runs that Next.js app. What V1 ships is [docs/product/V1_RELEASE.md](../product/V1_RELEASE.md). This document does not move production traffic to Fastify.
 
 The first milestone is a foundation beside the current app. It adds no production traffic, no schema change, and no move of the Next.js tree.
 
@@ -75,7 +75,7 @@ Drizzle owns schema and migrations in [`lib/db/schema.ts`](../../lib/db/schema.t
 
 Tables: `users`, `conversations`, `messages`, `user_preferences`. RLS is enabled and forced in SQL. Owner policies use `auth.uid()`. Chat RPCs (`append_user_message`, `claim_assistant_message`, `regenerate_assistant_message`, `edit_last_user_message`, `recover_stale_chat`) are `SECURITY INVOKER` and granted to `authenticated`.
 
-The client sends logical modes `Fast`, `Balanced`, and `Reasoning`. [`lib/ai/registry.ts`](../../lib/ai/registry.ts) maps those modes to `AI_MODEL_FAST`, `AI_MODEL_BALANCED`, and `AI_MODEL_REASONING`. [`lib/ai/provider.ts`](../../lib/ai/provider.ts) calls the OpenAI-compatible API with the resolved provider model id. The browser never receives that id or `AI_API_KEY`.
+The client sends logical modes `Fast`, `Balanced`, and `High`. Server-side only, [`lib/chat/legacy-mode.ts`](../../lib/chat/legacy-mode.ts) still accepts the old id `Reasoning` (as `High`) from older clients and saved conversations. [`lib/ai/registry.ts`](../../lib/ai/registry.ts) holds one route per mode: Fast → the Sumopod gateway (`SUMOPOD_BASE_URL`, `SUMOPOD_API_KEY`) running DeepSeek V4.1 Flash; Balanced → OpenAI `gpt-6-luna`; High → OpenAI `gpt-6.1-sol` (`OPENAI_API_KEY`, optional `OPENAI_BASE_URL`). High's route always carries `reasoning_effort` (`high` by default, overridable with `OPENAI_HIGH_REASONING_EFFORT`); Balanced sends one only when `OPENAI_BALANCED_REASONING_EFFORT` is set; Fast never does. [`lib/ai/provider.ts`](../../lib/ai/provider.ts) calls that route's Chat Completions endpoint. The browser never receives a model id, a base URL, or any key, and it cannot request a reasoning effort.
 
 ### Deployment and tests
 
@@ -241,7 +241,7 @@ These schemas live in `packages/contracts/src/health.ts` and `packages/contracts
 
 Until a schema moves, Next.js keeps importing the `lib/` module. After it moves, `lib/` may re-export the contract until the Next.js caller is gone. Two copies of the same object are not allowed.
 
-Account preference values stay lowercase (`fast`, `balanced`, `reasoning`). Chat modes stay PascalCase (`Fast`, `Balanced`, `Reasoning`). [`lib/preferences/model.ts`](../../lib/preferences/model.ts) remains the bridge.
+Account preference values stay lowercase (`fast`, `balanced`, `reasoning`). Chat modes are PascalCase (`Fast`, `Balanced`, `High`); the stored preference value `reasoning` maps to `High`. [`lib/preferences/model.ts`](../../lib/preferences/model.ts) remains the bridge.
 
 ## 11. Error response contract
 
@@ -320,7 +320,7 @@ The API process reads server names only. It does not read `NEXT_PUBLIC_*`. Opera
 | `API_PORT` | No | Default `4000` |
 | `LOG_LEVEL` | No | Default `info` |
 
-The API schema does not include `DATABASE_URL`, `AI_PROVIDER`, `AI_BASE_URL`, `AI_API_KEY`, `AI_MODEL_*`, `AI_REASONING_MODES`, `TEST_DATABASE_URL`, `E2E_*`, or any service-role variable. Chat migration is the milestone that adds `AI_*` to the API process, still server-only.
+The API schema does not include `DATABASE_URL`, `AI_PROVIDER`, `AI_BASE_URL`, `AI_API_KEY`, `SUMOPOD_*`, `OPENAI_*`, `TEST_DATABASE_URL`, `E2E_*`, or any service-role variable. Chat migration is the milestone that adds `AI_*` to the API process, still server-only.
 
 Missing required variables, an invalid URL, or a service-role publishable key throw during env plugin setup. The process does not listen.
 
@@ -557,7 +557,7 @@ These stay Next.js responsibilities:
 
 - UI under `app/` pages and `components/`, including Settings (`components/settings/`) and branding (`components/brand.tsx`, `lib/config/branding.ts`, `lib/config/logo-mark.ts`)
 - Session owner: `app/actions/auth.ts`, `app/auth/callback/route.ts`, `proxy.ts`, `lib/supabase/server.ts`, `lib/auth/require-user.ts`
-- Browser-only state: `lib/chat/preferences.ts`, `lib/privacy/local-state.ts`, `lib/privacy/sign-out.ts`, `components/use-chat-preferences.ts`, `components/use-reasoning-preference.ts`
+- Browser-only state: `lib/chat/preferences.ts`, `lib/privacy/local-state.ts`, `lib/privacy/sign-out.ts`, `components/use-chat-preferences.ts`
 - Presentation helpers: `lib/chat/groups.ts`, `lib/chat/timestamps.ts`, `lib/chat/scroll.ts`, `lib/chat/recovery.ts`
 - Database source of truth: `lib/db/schema.ts` and `drizzle/` (a later `packages/db` move copies this; the foundation does not)
 - RLS integration test: `tests/integration/rls.test.ts`

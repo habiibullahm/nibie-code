@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chatPath, conversationPath, legacyConversationPath } from "../../lib/routes";
+import { chatPath, conversationPath, legacyConversationPath, workbenchDocumentPath, workbenchPath } from "../../lib/routes";
 
 const id = "6f0c1c3e-9a0b-4d1e-8f2a-1b2c3d4e5f60";
 
@@ -18,5 +18,12 @@ describe("chat routes", () => {
     expect(legacyConversationPath(undefined)).toBeNull();
     expect(legacyConversationPath("")).toBeNull();
     expect(legacyConversationPath("not-a-conversation")).toBeNull();
+  });
+});
+
+describe("workbench routes", () => {
+  it("keeps documents on /workbench", () => {
+    expect(workbenchPath).toBe("/workbench");
+    expect(workbenchDocumentPath(id)).toBe(`/workbench/${id}`);
   });
 });

@@ -8,7 +8,7 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 import { addUserMessageAction, createConversationAction, deleteConversationAction, editLastUserMessageAction, renameConversationAction, startConversationAction, updateConversationModelAction } from "../../app/actions/chat";
 
 describe("chat server action input boundaries", () => {
-  beforeEach(() => { createClient.mockReset(); modelOptions.mockReset().mockReturnValue({ models: [{ id: "Fast" }, { id: "Balanced" }], reasoningModes: [] }); });
+  beforeEach(() => { createClient.mockReset(); modelOptions.mockReset().mockReturnValue({ models: [{ id: "Fast" }, { id: "Balanced" }] }); });
 
   it("rejects unsupported models before opening an authenticated client", async () => {
     await expect(createConversationAction("default")).resolves.toEqual({ error: "Choose a valid response mode." });
@@ -17,8 +17,8 @@ describe("chat server action input boundaries", () => {
   });
 
   it("rejects a mode that is not configured on the server before opening an authenticated client", async () => {
-    await expect(createConversationAction("Reasoning")).resolves.toEqual({ error: "That model isn't available." });
-    await expect(updateConversationModelAction("5e9bdcca-9205-4fea-a773-13952bb78c44", "Reasoning")).resolves.toEqual({ error: "That model isn't available." });
+    await expect(createConversationAction("High")).resolves.toEqual({ error: "That model isn't available." });
+    await expect(updateConversationModelAction("5e9bdcca-9205-4fea-a773-13952bb78c44", "High")).resolves.toEqual({ error: "That model isn't available." });
     expect(createClient).not.toHaveBeenCalled();
   });
 
@@ -86,7 +86,7 @@ describe("chat server action input boundaries", () => {
       await expect(startConversationAction("default", message, "hello")).resolves.toEqual({ error: "Choose a valid response mode." });
       await expect(startConversationAction("Balanced", "bad", "hello")).resolves.toEqual({ error: "Choose a valid message." });
       await expect(startConversationAction("Balanced", message, "  ")).resolves.toMatchObject({ error: expect.any(String) });
-      await expect(startConversationAction("Reasoning", message, "hello")).resolves.toEqual({ error: "That model isn't available." });
+      await expect(startConversationAction("High", message, "hello")).resolves.toEqual({ error: "That model isn't available." });
       expect(createClient).not.toHaveBeenCalled();
     });
 

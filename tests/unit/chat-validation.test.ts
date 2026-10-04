@@ -5,7 +5,7 @@ describe("chat input validation", () => {
   it("accepts only the supported persisted response modes", () => {
     expect(modelSchema.safeParse("Fast").success).toBe(true);
     expect(modelSchema.safeParse("Balanced").success).toBe(true);
-    expect(modelSchema.safeParse("Reasoning").success).toBe(true);
+    expect(modelSchema.safeParse("High").success).toBe(true);
     expect(modelSchema.safeParse("default").success).toBe(false);
   });
 

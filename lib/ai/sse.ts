@@ -1,11 +1,25 @@
 import { z } from "zod";
 
-export type OpenAiStreamEvent = { type: "delta"; text: string } | { type: "done" };
+export type OpenAiStreamEvent = { type: "delta"; text: string } | { type: "done"; finishReason?: string };
+
+const finishErrors: Record<string, string> = {
+  length: "The model reached its output limit before finishing. Please retry or ask it to continue.",
+  content_filter: "The provider could not finish this response because of its content filter.",
+  tool_calls: "The provider requested a tool that is unavailable in this chat.",
+  function_call: "The provider requested a tool that is unavailable in this chat.",
+  unknown: "The provider did not finish this response normally. Please try again.",
+};
+export class ProviderStreamError extends Error {
+  constructor(public readonly finishReason: string) {
+    super(finishErrors[finishReason] ?? finishErrors.unknown);
+  }
+}
 
 export async function* readOpenAiSse(body: ReadableStream<Uint8Array>, signal?: AbortSignal): AsyncGenerator<OpenAiStreamEvent> {
   const reader = body.getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });
   let buffer = "";
+  let finishReason: string | undefined;
   const abort = () => { void reader.cancel().catch(() => undefined); };
   signal?.addEventListener("abort", abort, { once: true });
   try {
@@ -19,13 +33,30 @@ export async function* readOpenAiSse(body: ReadableStream<Uint8Array>, signal?: 
         if (!line.startsWith("data:")) continue;
         const payload = line.slice(5).trim();
         if (!payload) continue;
-        if (payload === "[DONE]") { yield { type: "done" }; return; }
-        const parsed = JSON.parse(payload) as { error?: unknown; choices?: { delta?: { content?: unknown } }[] } | null;
+        if (payload === "[DONE]") {
+          if (finishReason && finishReason !== "stop") throw new ProviderStreamError(finishReason);
+          yield { type: "done", ...(finishReason ? { finishReason } : {}) };
+          return;
+        }
+        const parsed = JSON.parse(payload) as { error?: unknown; choices?: { delta?: { content?: unknown }; finish_reason?: unknown }[] } | null;
         if (!parsed || parsed.error) throw new Error("AI provider stream failed.");
-        const text = parsed.choices?.[0]?.delta?.content;
-        if (typeof text === "string" && text) yield { type: "delta", text };
+        const choice = parsed.choices?.[0];
+        const text = choice?.delta?.content;
+        if (typeof text === "string" && text) {
+          if (finishReason) throw new Error("Invalid provider response stream.");
+          yield { type: "delta", text };
+        }
+        if (choice?.finish_reason != null) {
+          const reason = choice.finish_reason;
+          finishReason = typeof reason === "string" && (reason === "stop" || Object.hasOwn(finishErrors, reason)) ? reason : "unknown";
+        }
       }
-      if (done) return;
+      if (done) {
+        // Some compatible gateways close after the final finish_reason without a [DONE] line.
+        if (finishReason === "stop") { yield { type: "done", finishReason }; return; }
+        if (finishReason) throw new ProviderStreamError(finishReason);
+        throw new Error("Provider stream ended before completion.");
+      }
     }
   } finally {
     signal?.removeEventListener("abort", abort);
@@ -34,24 +65,24 @@ export async function* readOpenAiSse(body: ReadableStream<Uint8Array>, signal?: 
   }
 }
 
-const contextDiagnosticSchema = z.object({
-  type: z.enum(["profile", "room", "thread_summary", "recent_messages"]),
-  label: z.enum(["Your profile", "This room", "Thread summary", "Recent conversation"]),
+const contextDiagnosticSchema = z.strictObject({
+  type: z.enum(["profile", "room", "pins", "file", "thread_summary", "recent_messages"]),
+  label: z.enum(["Your profile", "This room", "Pinned context", "File context", "Thread summary", "Recent conversation"]),
   state: z.enum(["included", "not_used"]),
   reason: z.string(),
 });
 
 const chatEventSchema = z.discriminatedUnion("type", [
-  z.object({
+  z.strictObject({
     type: z.literal("start"),
     id: z.string().uuid(),
     position: z.number().int().positive(),
-    context: z.object({ sources: z.array(contextDiagnosticSchema), recentMessageCount: z.number().int().nonnegative() }).optional(),
+    context: z.strictObject({ sources: z.array(contextDiagnosticSchema), recentMessageCount: z.number().int().nonnegative() }).optional(),
   }),
-  z.object({ type: z.literal("delta"), text: z.string() }),
-  z.object({ type: z.literal("status"), status: z.enum(["complete", "interrupted"]) }),
-  z.object({ type: z.literal("error"), error: z.string() }),
-  z.object({ type: z.literal("done") }),
+  z.strictObject({ type: z.literal("delta"), text: z.string() }),
+  z.strictObject({ type: z.literal("status"), status: z.enum(["complete", "interrupted"]) }),
+  z.strictObject({ type: z.literal("error"), error: z.string() }),
+  z.strictObject({ type: z.literal("done") }),
 ]);
 export type ChatStreamEvent = z.infer<typeof chatEventSchema>;
 

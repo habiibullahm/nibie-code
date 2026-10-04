@@ -4,7 +4,7 @@ import { DataPrivacyPanel } from "@/components/data-privacy-dialog";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { useChatFlag } from "@/components/use-chat-preferences";
 import { SettingsChoice, SettingsSection, SettingsTextField } from "@/components/settings/settings-section";
-import type { ModelOption } from "@/lib/chat/models";
+import { modelPickerCopy, type ModelOption } from "@/lib/chat/models";
 import type { ChatPreferenceFlag } from "@/lib/chat/preferences";
 import { chatModelToPreferenceModel, preferenceModelToChatModel, resolveDefaultModel } from "@/lib/preferences/model";
 import { aboutYouLimit, preferredNameLimit, type PreferencePatch, type UserPreferences } from "@/lib/preferences/types";
@@ -51,13 +51,13 @@ export function GeneralSettingsSection({ preferences, disabled, onChange }: Sett
 
 export function NibieSettingsSection({ preferences, models, disabled, onChange }: SettingsSectionProps) {
   const available = models.map((option) => option.id);
-  const options = models.map((option) => ({ value: chatModelToPreferenceModel[option.id], label: option.label }));
+  const options = models.map((option) => ({ value: chatModelToPreferenceModel[option.id], label: modelPickerCopy[option.id].label }));
   const storedMode = preferenceModelToChatModel[preferences.defaultModel];
   const storedIsAvailable = available.includes(storedMode);
   const fallback = resolveDefaultModel(preferences.defaultModel, available);
   const hint = storedIsAvailable || !fallback
     ? "Used when you start a new chat. Conversations you already have keep their own model."
-    : `${storedMode} isn't available, so new chats use ${fallback}. Conversations you already have keep their own model.`;
+    : `${modelPickerCopy[storedMode].label} isn't available, so new chats use ${modelPickerCopy[fallback].label}. Conversations you already have keep their own model.`;
   return <SettingsSection title="Nibie" description="Defaults for new conversations. They do not change a chat you already started.">
     <SettingsChoice label="Default model" hint={hint} value={preferences.defaultModel} options={options} disabled={disabled || options.length === 0} onChange={(defaultModel) => onChange({ defaultModel })} />
     <SettingsChoice label="Response length" value={preferences.responseLength} options={[...lengthOptions]} disabled={disabled} onChange={(responseLength) => onChange({ responseLength })} />

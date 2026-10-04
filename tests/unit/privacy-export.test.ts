@@ -73,6 +73,34 @@ describe("conversation export", () => {
     expect(Object.keys(payload!.conversations[0])).toEqual(["id", "title", "selectedModel", "createdAt", "updatedAt", "messages"]);
   });
 
+  it("strips internal reasoning from assistant messages and leaves user text unchanged", () => {
+    const payload = buildConversationExport({
+      conversations: [conversation()],
+      messages: [
+        message(),
+        message({
+          id: "44444444-4444-4444-8444-444444444444",
+          role: "user",
+          content: "I think <think>this note</think> should stay.",
+          position: 2,
+        }),
+        message({
+          id: "55555555-5555-4555-8555-555555555555",
+          role: "assistant",
+          content: "<think>private reasoning</think>\n# Proposal",
+          position: 3,
+        }),
+      ],
+      exportedAt,
+    });
+    const contents = payload?.conversations[0]?.messages.map((item) => item.content);
+    expect(contents).toEqual([
+      "hello",
+      "I think <think>this note</think> should stay.",
+      "# Proposal",
+    ]);
+  });
+
   it("is deterministic regardless of input order", () => {
     const later = conversation({
       id: "33333333-3333-4333-8333-333333333333",

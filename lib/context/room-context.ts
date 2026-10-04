@@ -1,3 +1,4 @@
+import type { RoomPinContext } from "@/lib/context/pin-context";
 import { normalizePreferenceText } from "@/lib/preferences/instructions";
 import { roomBriefFieldLimit, roomInstructionsLimit, roomNameLimit } from "@/lib/rooms/types";
 
@@ -14,6 +15,7 @@ export type RoomContextInput = {
   name: string;
   instructions: string | null;
   brief: RoomBriefContext | null;
+  pins?: RoomPinContext[];
 };
 
 export type RoomCategory = "Instructions" | "Brief";

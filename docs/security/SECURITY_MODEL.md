@@ -836,6 +836,16 @@ At minimum:
 
 A browser-provided `Content-Type` is metadata, not proof of file type.
 
+### 24.1 Files V1
+
+Files V1 stores owner-scoped room text in the private `room-files` Supabase bucket and in `room_files`. The design is in [Files V1](../feature/files/v1.md).
+
+- The owner is `auth.uid()` from the session. Body, query, and filename user ids are ignored.
+- Storage keys are `<user-id>/<room-id>/<file-id>/<file-id>.<ext>`.
+- Row policies allow select, insert, and delete of the caller's rows only. There is no update policy and no service-role path for ordinary file operations.
+- Storage policies, applied when the `storage` schema exists, allow the same owner-folder operations on the private bucket.
+- Extracted text is untrusted context. It is included only when the user selects that file for a message, and it is not copied into the product-policy prompt.
+
 ---
 
 ## 25. Data export and destructive operations

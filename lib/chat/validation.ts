@@ -1,6 +1,7 @@
 import { z } from "zod";
 
-export const modelSchema = z.enum(["Fast", "Balanced", "Reasoning"]);
+// The logical modes the browser sees and sends. Older saved values are normalized server-side only (lib/chat/legacy-mode.ts).
+export const modelSchema = z.enum(["Fast", "Balanced", "High"]);
 export type ChatModel = z.infer<typeof modelSchema>;
 
 const conversationIdSchema = z.string().uuid();

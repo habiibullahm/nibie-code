@@ -1,6 +1,11 @@
 import { validateConversationId } from "@/lib/chat/validation";
 
 export const chatPath = "/chat";
+export const workbenchPath = "/workbench";
+
+export function workbenchDocumentPath(id: string) {
+  return `${workbenchPath}/${encodeURIComponent(id)}`;
+}
 
 export function conversationPath(id: string) {
   return `${chatPath}?conversation=${encodeURIComponent(id)}`;

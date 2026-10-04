@@ -62,7 +62,7 @@ function memoryClient(owner = "owner") {
 describe("preference read and write", () => {
   beforeEach(() => {
     createClient.mockReset();
-    modelOptions.mockReset().mockReturnValue({ models: [{ id: "Fast" }, { id: "Balanced" }], reasoningModes: [] });
+    modelOptions.mockReset().mockReturnValue({ models: [{ id: "Fast" }, { id: "Balanced" }] });
   });
 
   it("returns defaults when the owner has no row", async () => {

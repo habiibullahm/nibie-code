@@ -1,3 +1,4 @@
+import type { RoomPinContext } from "@/lib/context/pin-context";
 import type { RoomContextInput } from "@/lib/context/room-context";
 
 export type RoomBriefRow = {
@@ -13,8 +14,21 @@ export type RoomContextRow = {
   instructions: string | null;
 };
 
-export function roomContextFromRows(room: RoomContextRow | null, brief: RoomBriefRow | null): RoomContextInput | null {
+export type PinContextRow = {
+  id: string;
+  title: string;
+  content: string;
+  updated_at: string;
+};
+
+export function roomContextFromRows(room: RoomContextRow | null, brief: RoomBriefRow | null, pins: PinContextRow[] | null = []): RoomContextInput | null {
   if (!room) return null;
+  const mappedPins: RoomPinContext[] = (pins ?? []).map((pin) => ({
+    id: pin.id,
+    title: pin.title,
+    content: pin.content,
+    updatedAt: pin.updated_at,
+  }));
   return {
     name: room.name,
     instructions: room.instructions,
@@ -27,5 +41,6 @@ export function roomContextFromRows(room: RoomContextRow | null, brief: RoomBrie
         next: brief.next_step ?? "",
       }
       : null,
+    pins: mappedPins,
   };
 }

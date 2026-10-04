@@ -3,8 +3,11 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getAuthenticatedUser } from "@/lib/auth/get-user";
 import { schemaUnavailable } from "@/lib/chat/schema-error";
-import { modelSchema, validateConversationId, validateMessage, validateTitle, type ChatModel } from "@/lib/chat/validation";
+import { validateConversationId, validateMessage, validateTitle, type ChatModel } from "@/lib/chat/validation";
+import { modelInputSchema } from "@/lib/chat/legacy-mode";
 import { getModelOptions } from "@/lib/ai/registry";
+import { logError, logInfo } from "@/lib/observability/logger";
+import { operationalCodes } from "@/lib/observability/codes";
 
 export type ChatActionResult<T = undefined> = { data?: T; error?: string };
 type ConversationRow = { id: string; title: string; selected_model: string; room_id: string | null; created_at: string; updated_at: string };
@@ -46,11 +49,53 @@ async function insertConversation(supabase: Supabase, userId: string, model: Cha
   return { data: { ...(legacy.data as unknown as Omit<ConversationRow, "room_id">), room_id: null }, error: null };
 }
 
-// Returns the saved message, or the safe error message to show.
-async function appendMessage(supabase: Supabase, conversationId: string, messageId: string, content: string): Promise<{ data: SavedMessage } | { error: string }> {
-  const { data, error } = await supabase.rpc("append_user_message", {
+function parseStoppedReplies(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length > 32) return null;
+  const ids: string[] = [];
+  for (const id of value) {
+    const parsed = validateConversationId(id);
+    if (!parsed.success) return null;
+    ids.push(parsed.data);
+  }
+  return [...new Set(ids)];
+}
+
+// Retire only this owner's reply to the explicitly stopped user message.
+// No content is written here: the original stream owns that one final save.
+async function retireStoppedReplies(supabase: Supabase, conversationId: string, ids: readonly string[]) {
+  for (const id of ids) {
+    const owned = await supabase.from("messages").select("id").eq("id", id).eq("conversation_id", conversationId).eq("role", "user").maybeSingle();
+    if (owned.error || !owned.data) return false;
+    const retired = await supabase.from("messages").update({ status: "interrupted" })
+      .eq("conversation_id", conversationId).eq("reply_to_message_id", id).eq("role", "assistant").eq("status", "streaming").select("id");
+    if (retired.error) return false;
+    if (retired.data?.length) logInfo("chat.response.user_stopped", { reason: "user_stopped", status: "interrupted" });
+  }
+  return true;
+}
+
+export async function stopChatResponseAction(conversationId: unknown, userMessageId: unknown): Promise<ChatActionResult> {
+  const conversation = validateConversationId(conversationId);
+  const message = validateConversationId(userMessageId);
+  if (!conversation.success || !message.success) return { error: "Choose a valid message." };
+  try {
+    const { supabase } = await authenticatedClient();
+    if (await retireStoppedReplies(supabase, conversation.data, [message.data])) return {};
+  } catch { /* report a safe background-persistence failure below */ }
+  logError("chat.persistence.failed", { code: operationalCodes.assistantPersistFailed, reason: "user_stopped", stage: "stop" });
+  return failure();
+}
+
+// The same message id makes the append idempotent, including the one allowed
+// retry when a cancelled claim committed between stop retirement and append.
+async function appendMessage(supabase: Supabase, conversationId: string, messageId: string, content: string, stopped: readonly string[] = []): Promise<{ data: SavedMessage } | { error: string }> {
+  if (stopped.length && !await retireStoppedReplies(supabase, conversationId, stopped)) return { error: saveFailed };
+  const append = () => supabase.rpc("append_user_message", {
     p_conversation_id: conversationId, p_message_id: messageId, p_content: content,
   }).single<SavedMessage>();
+  let result = await append();
+  if (result.error?.code === "PT409" && stopped.length && await retireStoppedReplies(supabase, conversationId, stopped)) result = await append();
+  const { data, error } = result;
   if (error?.code === "PT409") return { error: "A response is already running or this submission changed. Refresh and try again." };
   if (error?.code === "PT404") return { error: "That conversation is no longer available." };
   if (error || !data) return { error: saveFailed };
@@ -58,7 +103,7 @@ async function appendMessage(supabase: Supabase, conversationId: string, message
 }
 
 export async function createConversationAction(model: unknown): Promise<ChatActionResult<ConversationRow>> {
-  const parsedModel = modelSchema.safeParse(model);
+  const parsedModel = modelInputSchema.safeParse(model);
   if (!parsedModel.success) return { error: "Choose a valid response mode." };
   if (!isModeAvailable(parsedModel.data)) return modelUnavailable;
   try {
@@ -74,7 +119,7 @@ export async function createConversationAction(model: unknown): Promise<ChatActi
 // The first message of a new chat: creates the conversation and saves the message in one round trip from the browser.
 // If the message cannot be saved, the empty conversation is removed again so history is not left with a blank "New chat".
 export async function startConversationAction(model: unknown, messageId: unknown, content: unknown, roomId: unknown = null): Promise<ChatActionResult<{ conversation: ConversationRow; message: SavedMessage }>> {
-  const parsedModel = modelSchema.safeParse(model);
+  const parsedModel = modelInputSchema.safeParse(model);
   const parsedMessageId = validateConversationId(messageId);
   const parsedContent = validateMessage(content);
   const parsedRoom = roomId === null || roomId === undefined ? { success: true as const, data: null } : validateConversationId(roomId);
@@ -101,7 +146,7 @@ export async function startConversationAction(model: unknown, messageId: unknown
 
 export async function updateConversationModelAction(id: unknown, model: unknown): Promise<ChatActionResult> {
   const parsedId = validateConversationId(id);
-  const parsedModel = modelSchema.safeParse(model);
+  const parsedModel = modelInputSchema.safeParse(model);
   if (!parsedId.success) return { error: "Choose a valid conversation." };
   if (!parsedModel.success) return { error: "Choose a valid response mode." };
   if (!isModeAvailable(parsedModel.data)) return modelUnavailable;
@@ -116,16 +161,18 @@ export async function updateConversationModelAction(id: unknown, model: unknown)
   }
 }
 
-export async function addUserMessageAction(id: unknown, content: unknown, messageId: unknown = crypto.randomUUID()): Promise<ChatActionResult<SavedMessage>> {
+export async function addUserMessageAction(id: unknown, content: unknown, messageId: unknown = crypto.randomUUID(), stoppedReplies: unknown = []): Promise<ChatActionResult<SavedMessage>> {
   const parsedId = validateConversationId(id);
   const parsedContent = validateMessage(content);
+  const stopped = parseStoppedReplies(stoppedReplies);
+  if (!stopped) return { error: "Choose a valid message." };
   if (!parsedId.success) return { error: "Choose a valid conversation." };
   if (!parsedContent.success) return { error: "Messages must be between 1 and 20,000 characters." };
   const parsedMessageId = validateConversationId(messageId);
   if (!parsedMessageId.success) return { error: "Choose a valid message." };
   try {
     const { supabase } = await authenticatedClient();
-    const saved = await appendMessage(supabase, parsedId.data, parsedMessageId.data, parsedContent.data);
+    const saved = await appendMessage(supabase, parsedId.data, parsedMessageId.data, parsedContent.data, stopped);
     return "error" in saved ? { error: saved.error } : { data: saved.data };
   } catch {
     return { error: "Your session has expired or the service is unavailable. Please try again." };

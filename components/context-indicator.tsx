@@ -8,6 +8,8 @@ function wideLabel(diagnostics: ContextDiagnostics) {
   const parts = ["Context"];
   if (included.has("profile")) parts.push("Profile");
   if (included.has("room")) parts.push("Room");
+  if (included.has("pins")) parts.push("Pinned context");
+  if (included.has("file")) parts.push("File context");
   if (included.has("thread_summary")) parts.push("Summary");
   if (included.has("recent_messages")) parts.push("Recent conversation");
   return parts.join(" · ");
@@ -17,10 +19,17 @@ function narrowLabel(diagnostics: ContextDiagnostics) {
   const included = new Set(diagnostics.sources.filter((source) => source.state === "included").map((source) => source.type));
   const profile = included.has("profile");
   const room = included.has("room");
+  const pins = included.has("pins");
+  const file = included.has("file");
   const summary = included.has("thread_summary");
   const recent = included.has("recent_messages");
-  if (summary && (profile || recent || room)) return "Context · Summary + thread";
+  if (summary && (profile || recent || room || pins || file)) return "Context · Summary + thread";
   if (summary) return "Context · Summary";
+  if (file && (profile || recent || room || pins)) return "Context · File + thread";
+  if (file) return "Context · File";
+  if (pins && room) return "Context · Room + pins";
+  if (pins && recent) return "Context · Pins + thread";
+  if (pins) return "Context · Pinned context";
   if (room && recent) return "Context · Room + thread";
   if (room && profile) return "Context · Profile + room";
   if (room) return "Context · Room";

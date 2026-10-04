@@ -77,6 +77,66 @@ export const roomBriefs = pgTable(
   ],
 );
 
+// A pin is one user-owned fact kept on purpose inside a room. Deleting the room deletes its pins.
+export const pins = pgTable(
+  "pins",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    roomId: uuid("room_id").notNull(),
+    title: text("title").notNull(),
+    content: text("content").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("pins_id_user_id_key").on(table.id, table.userId),
+    index("pins_room_updated_idx").on(table.roomId, table.updatedAt, table.id),
+    foreignKey({
+      name: "pins_room_owner_fk",
+      columns: [table.roomId, table.userId],
+      foreignColumns: [rooms.id, rooms.userId],
+    }).onDelete("cascade"),
+    check("pins_title_length", sql`char_length(${table.title}) between 1 and 80 and ${table.title} = btrim(${table.title})`),
+    check("pins_content_length", sql`char_length(${table.content}) between 1 and 1000 and ${table.content} = btrim(${table.content})`),
+  ],
+);
+
+// Explicit room source material. Extracted text is untrusted data, never an authorization input.
+export const roomFiles = pgTable(
+  "room_files",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    roomId: uuid("room_id").notNull(),
+    originalName: text("original_name").notNull(),
+    mimeType: text("mime_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    storagePath: text("storage_path").notNull(),
+    extractedText: text("extracted_text").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("room_files_id_user_id_key").on(table.id, table.userId),
+    unique("room_files_storage_path_key").on(table.storagePath),
+    foreignKey({
+      name: "room_files_room_owner_fk",
+      columns: [table.roomId, table.userId],
+      foreignColumns: [rooms.id, rooms.userId],
+    }).onDelete("cascade"),
+    index("room_files_user_room_idx").on(table.userId, table.roomId, table.createdAt),
+    check("room_files_name_length", sql`char_length(${table.originalName}) between 1 and 120 and ${table.originalName} = btrim(${table.originalName})`),
+    check("room_files_mime_allowlist", sql`${table.mimeType} in ('text/plain', 'text/markdown', 'text/csv')`),
+    check("room_files_size_bounds", sql`${table.sizeBytes} between 1 and 5242880`),
+    check("room_files_text_bounds", sql`char_length(${table.extractedText}) between 1 and 24000`),
+    check(
+      "room_files_owner_path",
+      sql`${table.storagePath} like (${table.userId})::text || '/' || (${table.roomId})::text || '/' || (${table.id})::text || '/%'`,
+    ),
+  ],
+);
+
 export const conversations = pgTable(
   "conversations",
   {
@@ -158,5 +218,34 @@ export const userPreferences = pgTable(
       "user_preferences_about_you_length",
       sql`${table.aboutYou} is null or (char_length(${table.aboutYou}) between 1 and 1500 and ${table.aboutYou} = btrim(${table.aboutYou}))`,
     ),
+  ],
+);
+
+// A workbench document is the owner's editable text. Room is optional.
+// Deleting a room nulls only room_id; the document stays with its owner.
+export const workbenchDocuments = pgTable(
+  "workbench_documents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    roomId: uuid("room_id"),
+    title: text("title").notNull().default("Untitled"),
+    content: text("content").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("workbench_documents_user_updated_idx").on(table.userId, table.updatedAt),
+    index("workbench_documents_user_room_idx").on(table.userId, table.roomId),
+    foreignKey({
+      name: "workbench_documents_room_owner_fk",
+      columns: [table.roomId, table.userId],
+      foreignColumns: [rooms.id, rooms.userId],
+    }).onDelete("set null"),
+    check(
+      "workbench_documents_title_length",
+      sql`char_length(${table.title}) between 1 and 120 and ${table.title} = btrim(${table.title})`,
+    ),
+    check("workbench_documents_content_length", sql`char_length(${table.content}) <= 100000`),
   ],
 );

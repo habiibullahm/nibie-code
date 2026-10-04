@@ -37,7 +37,7 @@ export const dynamic = "error";
 const topics = [
   ["getting-started", "Getting started"],
   ["conversations", "Conversations"],
-  ["models", "Models & reasoning"],
+  ["models", "Choosing a mode"],
   ["rooms", "Rooms & briefs"],
   ["context", "Understanding context"],
   ["personalization", "Personalization"],
@@ -103,16 +103,16 @@ export default function DocsPage() {
 
         <section id="models" className="docs-section" aria-labelledby="models-title">
           <p className="docs-section-number" aria-hidden="true">03 / Choose your pace</p>
-          <h2 id="models-title">Models &amp; reasoning</h2>
-          <p>Choose a model in the composer before sending. Nibie shows the modes configured for your workspace.</p>
+          <h2 id="models-title">Choosing a mode</h2>
+          <p>Choose a mode in the composer before sending. Nibie shows the modes configured for your workspace.</p>
           <div className="docs-table-wrap" role="region" aria-label="Model modes" tabIndex={0}>
             <table><caption>Which mode should I use?</caption><thead><tr><th scope="col">Mode</th><th scope="col">A good place to start</th></tr></thead><tbody>
               <tr><th scope="row">Fast</th><td>Quick questions, short drafts, and everyday tasks.</td></tr>
               <tr><th scope="row">Balanced</th><td>Daily thinking, writing, and most conversations.</td></tr>
-              <tr><th scope="row">Reasoning</th><td>Problems that benefit from a deeper pass, such as debugging or comparing trade-offs.</td></tr>
+              <tr><th scope="row">High</th><td>Problems that benefit from a deeper pass, such as debugging or comparing trade-offs.</td></tr>
             </tbody></table>
           </div>
-          <p>When the selected model supports it, the <strong>Reasoning</strong> control offers Auto, Low, Medium, and High. Auto lets the model decide; higher effort can take longer. This control may be hidden or disabled for models that do not support it.</p>
+          <p>The mode chooses how capable the model is, not how long the answer is. Ask for a short answer or a detailed one in your message and Nibie follows that in any mode; deeper modes can take longer to start answering.</p>
           <p>Set your default in <strong>Settings → Nibie</strong>. It applies to new chats; existing conversations keep their own model.</p>
         </section>
 

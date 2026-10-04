@@ -67,7 +67,7 @@ test("auto-follow stays with a sent message only while it is on", async ({ page 
 
 test("timestamps stay hidden until enabled, and the choice survives reload", async ({ page }) => {
   await page.goto("/preview");
-  await page.getByRole("button", { name: "A thoughtful note to the team" }).click();
+  await page.getByRole("button", { name: "A thoughtful note to the team", exact: true }).click();
   await expect(page.locator(".message-time")).toHaveCount(0);
 
   const dialog = await openChatSettings(page);
@@ -77,7 +77,7 @@ test("timestamps stay hidden until enabled, and the choice survives reload", asy
   await expect(page.locator(".message-time").first()).toHaveAttribute("dateTime", "2026-10-01T08:30:00.000Z");
 
   await page.reload();
-  await page.getByRole("button", { name: "A thoughtful note to the team" }).click();
+  await page.getByRole("button", { name: "A thoughtful note to the team", exact: true }).click();
   await expect(page.locator(".message-time")).toHaveCount(2);
   const reopened = await openChatSettings(page);
   await expect(reopened.getByRole("switch", { name: "Show timestamps" })).toHaveAttribute("aria-checked", "true");
@@ -92,7 +92,7 @@ test("invalid stored preferences keep the defaults", async ({ page }) => {
     localStorage.setItem("nibie-last-conversation", "<script>");
   });
   await page.goto("/preview");
-  await page.getByRole("button", { name: "A thoughtful note to the team" }).click();
+  await page.getByRole("button", { name: "A thoughtful note to the team", exact: true }).click();
   await expect(page.getByRole("heading", { name: "What’s on your mind?" })).toHaveCount(0);
   await expect(page.locator(".message-time")).toHaveCount(0);
   const box = composer(page);

@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { Brand, BrandMark } from "@/components/brand";
 import { SiteHeader } from "@/components/site-header";
+import { changelogPreview } from "@/lib/changelog";
 import { chatPath } from "@/lib/routes";
 
 const useCases: { title: string; copy: string; visual: ReactNode }[] = [
@@ -49,9 +50,9 @@ const statements = [
 ] as const;
 
 const modes = [
-  ["Fast", "For everyday questions and quick work."],
-  ["Balanced", "For most conversations and daily thinking."],
-  ["Reasoning", "For problems that benefit from a deeper pass."],
+  ["Fast", "Quick answers"],
+  ["Balanced", "Best for everyday work"],
+  ["High", "Deeper reasoning"],
 ] as const;
 
 const boundaries = [
@@ -116,7 +117,7 @@ function WorkspaceFrame() {
             <div className="composer">
               <p className="landing-composer-placeholder">Message Nibie…</p>
               <div className="composer-tools">
-                <div className="landing-frame-modes"><span>Fast</span><span className="is-selected">Balanced</span><span>Reasoning</span></div>
+                <div className="landing-frame-modes"><span>Fast</span><span className="is-selected">Balanced</span><span>High</span></div>
                 <div className="send-button"><ArrowUp size={18} strokeWidth={2.3} /></div>
               </div>
             </div>
@@ -181,7 +182,7 @@ export function LandingPage() {
           </div>
           <div className="landing-settings">
             <SettingChoice label="Preferred language" options={["Auto", "English", "Bahasa Indonesia"]} selected="Auto" />
-            <SettingChoice label="Default model" options={["Fast", "Balanced", "Reasoning"]} selected="Balanced" />
+            <SettingChoice label="Default model" options={["Fast", "Balanced", "High"]} selected="Balanced" />
             <SettingChoice label="Response length" options={["Concise", "Balanced", "Detailed"]} selected="Balanced" />
             <SettingChoice label="Response style" options={["Natural", "Professional", "Direct"]} selected="Natural" />
             <div className="landing-setting">
@@ -203,7 +204,7 @@ export function LandingPage() {
         <div className="landing-mode-switch" aria-hidden="true">
           <span>Fast</span>
           <span className="is-selected">Balanced</span>
-          <span>Reasoning</span>
+          <span>High</span>
         </div>
         <div className="landing-mode-list">
           {modes.map(([name, copy]) => <article key={name}>
@@ -226,6 +227,14 @@ export function LandingPage() {
         <p className="landing-privacy-link"><Link href="/privacy">Privacy details</Link></p>
       </section>
 
+      <section className="landing-shell landing-notes" aria-labelledby="landing-notes-title">
+        <h2 id="landing-notes-title">Now in Nibie</h2>
+        <ul>
+          {changelogPreview.map((line) => <li key={line}>{line}</li>)}
+        </ul>
+        <p><Link href="/changelog">Full changelog</Link></p>
+      </section>
+
       <section className="landing-final landing-shell" aria-labelledby="landing-final-title">
         <h2 id="landing-final-title">Make some room to think.</h2>
         <p>Start a conversation with Nibie.</p>
@@ -241,6 +250,7 @@ export function LandingPage() {
         <a href="#product">Product</a>
         <Link href="/privacy">Privacy</Link>
         <Link href="/docs">Docs</Link>
+        <Link href="/changelog">Changelog</Link>
         <Link href={chatPath}>Open Nibie</Link>
       </nav>
       <p className="landing-footer-meta">© 2026 Nibie</p>

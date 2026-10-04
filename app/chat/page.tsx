@@ -18,6 +18,6 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
     readOwnerPreferences(),
   ]);
   // Only configured modes are offered; this reads environment variable names, never the provider URL or key.
-  const { models, reasoningModes } = getModelOptions();
-  return <ChatWorkspace email={user.email ?? "Your account"} metadataName={user.name} initialData={data} models={models} reasoningModes={reasoningModes} renderedAt={requestTime()} preferences={preferenceState.preferences} preferencesError={preferenceState.error} />;
+  const { models } = getModelOptions();
+  return <ChatWorkspace email={user.email ?? "Your account"} metadataName={user.name} initialData={data} models={models} renderedAt={requestTime()} preferences={preferenceState.preferences} preferencesError={preferenceState.error} />;
 }

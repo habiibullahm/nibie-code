@@ -30,6 +30,11 @@ describe("Supabase row-level security", () => {
 
   beforeAll(async () => {
     await sql`drop schema if exists drizzle cascade`;
+    await sql`drop table if exists public.workbench_documents cascade`;
+    await sql`drop table if exists public.room_files cascade`;
+    await sql`drop function if exists public.set_room_files_updated_at() cascade`;
+    await sql`drop table if exists public.pins cascade`;
+    await sql`drop function if exists public.set_pins_updated_at() cascade`;
     await sql`drop table if exists public.room_briefs cascade`;
     await sql`drop table if exists public.rooms cascade`;
     await sql`drop function if exists public.set_rooms_updated_at() cascade`;
@@ -132,6 +137,104 @@ describe("Supabase row-level security", () => {
     await asUser(userA, (tx) => tx`delete from public.rooms where id = ${roomA}`);
     const [kept] = await asUser(userA, (tx) => tx`select room_id, title from public.conversations where id = ${thread}`);
     expect(kept).toEqual({ room_id: null, title: "In the room" });
+  });
+
+  it("keeps workbench documents owner-scoped, allows a null room, and detaches them when a room is deleted", async () => {
+    const roomA = randomUUID();
+    const roomB = randomUUID();
+    const docGeneral = randomUUID();
+    const docRoom = randomUUID();
+    const docB = randomUUID();
+    const docEmpty = randomUUID();
+
+    await asUser(userA, (tx) => tx`insert into public.workbench_documents (id, user_id, title, content) values (${docGeneral}, ${userA}, 'Notes', 'hello')`);
+    await asUser(userA, (tx) => tx`insert into public.workbench_documents (id, user_id, title, content) values (${docEmpty}, ${userA}, 'Blank', '')`);
+    const [general] = await asUser(userA, (tx) => tx`select room_id, title, content from public.workbench_documents where id = ${docGeneral}`);
+    expect(general).toEqual({ room_id: null, title: "Notes", content: "hello" });
+    const [blank] = await asUser(userA, (tx) => tx`select content from public.workbench_documents where id = ${docEmpty}`);
+    expect(blank).toEqual({ content: "" });
+
+    await asUser(userA, (tx) => tx`insert into public.rooms (id, user_id, name) values (${roomA}, ${userA}, 'Studio')`);
+    await sql`insert into public.rooms (id, user_id, name) values (${roomB}, ${userB}, 'Private studio')`;
+    await asUser(userA, (tx) => tx`insert into public.workbench_documents (id, user_id, room_id, title, content) values (${docRoom}, ${userA}, ${roomA}, 'In room', 'body')`);
+    await expect(asUser(userA, (tx) => tx`insert into public.workbench_documents (user_id, room_id, title, content) values (${userA}, ${roomB}, 'Cross', 'no')`)).rejects.toThrow();
+    await expect(asUser(userA, (tx) => tx`update public.workbench_documents set room_id = ${roomB} where id = ${docRoom}`)).rejects.toThrow();
+    await expect(asUser(userA, (tx) => tx`insert into public.workbench_documents (user_id, title, content) values (${userB}, 'Stolen', 'no')`)).rejects.toThrow();
+    await expect(asUser(userA, (tx) => tx`update public.workbench_documents set user_id = ${userB} where id = ${docGeneral}`)).rejects.toThrow();
+
+    await sql`insert into public.workbench_documents (id, user_id, title, content) values (${docB}, ${userB}, 'Secret', 'private body')`;
+    const hidden = await asUser(userA, (tx) => tx`select id from public.workbench_documents where id = ${docB}`);
+    expect(hidden).toHaveLength(0);
+    const { updated, deleted } = await asUser(userA, async (tx) => ({
+      updated: await tx`update public.workbench_documents set title = 'hijacked', content = 'hijacked' where id = ${docB} returning id`,
+      deleted: await tx`delete from public.workbench_documents where id = ${docB} returning id`,
+    }));
+    expect(updated).toHaveLength(0);
+    expect(deleted).toHaveLength(0);
+    const [ownerDoc] = await sql`select title, content from public.workbench_documents where id = ${docB}`;
+    expect(ownerDoc).toEqual({ title: "Secret", content: "private body" });
+
+    await asUser(userA, (tx) => tx`update public.workbench_documents set title = 'Renamed', content = 'edited' where id = ${docGeneral}`);
+    const [edited] = await asUser(userA, (tx) => tx`select title, content from public.workbench_documents where id = ${docGeneral}`);
+    expect(edited).toEqual({ title: "Renamed", content: "edited" });
+
+    await asUser(userA, (tx) => tx`delete from public.rooms where id = ${roomA}`);
+    const [detached] = await asUser(userA, (tx) => tx`select room_id, title, content from public.workbench_documents where id = ${docRoom}`);
+    expect(detached).toEqual({ room_id: null, title: "In room", content: "body" });
+
+    await asUser(userA, (tx) => tx`delete from public.workbench_documents where id = ${docGeneral}`);
+    const gone = await asUser(userA, (tx) => tx`select id from public.workbench_documents where id = ${docGeneral}`);
+    expect(gone).toHaveLength(0);
+  });
+
+  it("keeps room files owner-scoped, including extracted text", async () => {
+    const roomA = randomUUID();
+    const roomB = randomUUID();
+    const fileB = randomUUID();
+    const pathB = `${userB}/${roomB}/${fileB}/${fileB}.txt`;
+    const fileA = randomUUID();
+    const pathA = `${userA}/${roomA}/${fileA}/${fileA}.txt`;
+    const crossId = randomUUID();
+    const crossPath = `${userA}/${roomB}/${crossId}/${crossId}.txt`;
+    await asUser(userA, (tx) => tx`insert into public.rooms (id, user_id, name) values (${roomA}, ${userA}, 'Files')`);
+    await sql`insert into public.rooms (id, user_id, name) values (${roomB}, ${userB}, 'Private files')`;
+    await sql`insert into public.room_files (id, user_id, room_id, original_name, mime_type, size_bytes, storage_path, extracted_text) values (${fileB}, ${userB}, ${roomB}, 'secret.txt', 'text/plain', 12, ${pathB}, 'user b private note')`;
+    await asUser(userA, (tx) => tx`insert into public.room_files (id, user_id, room_id, original_name, mime_type, size_bytes, storage_path, extracted_text) values (${fileA}, ${userA}, ${roomA}, 'notes.txt', 'text/plain', 5, ${pathA}, 'hello from a')`);
+    const visible = await asUser(userA, (tx) => tx`select id, extracted_text from public.room_files`);
+    expect(visible).toEqual([{ id: fileA, extracted_text: "hello from a" }]);
+    await expect(asUser(userA, (tx) => tx`insert into public.room_files (user_id, room_id, original_name, mime_type, size_bytes, storage_path, extracted_text) values (${userB}, ${roomB}, 'stolen.txt', 'text/plain', 4, ${`${userB}/${roomB}/${randomUUID()}/x.txt`}, 'nope')`)).rejects.toThrow();
+    await expect(asUser(userA, (tx) => tx`insert into public.room_files (id, user_id, room_id, original_name, mime_type, size_bytes, storage_path, extracted_text) values (${crossId}, ${userA}, ${roomB}, 'cross.txt', 'text/plain', 4, ${crossPath}, 'nope')`)).rejects.toThrow();
+    await expect(asUser(userA, (tx) => tx`update public.room_files set extracted_text = 'hijacked' where id = ${fileB} returning id`)).rejects.toThrow();
+    const deleted = await asUser(userA, (tx) => tx`delete from public.room_files where id = ${fileB} returning id`);
+    expect(deleted).toHaveLength(0);
+    const [ownerRow] = await sql`select extracted_text from public.room_files where id = ${fileB}`;
+    expect(ownerRow.extracted_text).toBe("user b private note");
+  });
+
+  it("keeps pins owner-scoped and deletes them with the room", async () => {
+    const roomA = randomUUID();
+    const roomB = randomUUID();
+    const pinA = randomUUID();
+    const pinB = randomUUID();
+    await asUser(userA, (tx) => tx`insert into public.rooms (id, user_id, name) values (${roomA}, ${userA}, 'Nibie')`);
+    await sql`insert into public.rooms (id, user_id, name) values (${roomB}, ${userB}, 'Private room')`;
+    await asUser(userA, (tx) => tx`insert into public.pins (id, user_id, room_id, title, content) values (${pinA}, ${userA}, ${roomA}, 'Deployment rule', 'Seoul')`);
+    await sql`insert into public.pins (id, user_id, room_id, title, content) values (${pinB}, ${userB}, ${roomB}, 'Secret', 'Do not read')`;
+    const visible = await asUser(userA, (tx) => tx`select id, title from public.pins`);
+    expect(visible).toEqual([{ id: pinA, title: "Deployment rule" }]);
+    await expect(asUser(userA, (tx) => tx`insert into public.pins (user_id, room_id, title, content) values (${userB}, ${roomB}, 'Stolen', 'No')`)).rejects.toThrow();
+    await expect(asUser(userA, (tx) => tx`insert into public.pins (user_id, room_id, title, content) values (${userA}, ${roomB}, 'Attached', 'No')`)).rejects.toThrow();
+    const hiddenUpdate = await asUser(userA, (tx) => tx`update public.pins set title = 'Hijacked' where id = ${pinB} returning id`);
+    const hiddenDelete = await asUser(userA, (tx) => tx`delete from public.pins where id = ${pinB} returning id`);
+    expect(hiddenUpdate).toHaveLength(0);
+    expect(hiddenDelete).toHaveLength(0);
+    const [stillPrivate] = await sql`select title, content from public.pins where id = ${pinB}`;
+    expect(stillPrivate).toEqual({ title: "Secret", content: "Do not read" });
+    await asUser(userA, (tx) => tx`delete from public.rooms where id = ${roomA}`);
+    const removed = await sql`select id from public.pins where id = ${pinA}`;
+    const kept = await sql`select id from public.pins where id = ${pinB}`;
+    expect(removed).toHaveLength(0);
+    expect(kept).toEqual([{ id: pinB }]);
   });
 
   it("allows users to read only their own profile row", async () => {

@@ -1,7 +1,8 @@
 import "server-only";
 
 import { chatProvider } from "@/lib/ai/provider";
-import { getModelOptions } from "@/lib/ai/registry";
+import { getAiConfig } from "@/lib/ai/registry";
+import { sanitizeModelOutput } from "@/lib/ai/sanitize-model-output";
 import { readOpenAiSse } from "@/lib/ai/sse";
 import { roomBriefSchema, roomDraftSchema } from "@/lib/rooms/validation";
 import type { RoomDraft, RoomOverview } from "@/lib/rooms/types";
@@ -10,7 +11,8 @@ const overviewSchema = roomDraftSchema.pick({ description: true }).required().ex
   .refine((overview) => overview.description !== null && Object.values(overview.brief).every((value) => value !== null), "Every generated room field must be filled.");
 
 export async function generateRoomOverview(draft: RoomDraft): Promise<RoomOverview> {
-  const mode = getModelOptions().models.find((model) => model.model === "gpt-6-luna")?.id;
+  const { routes } = getAiConfig();
+  const mode = (["Fast", "Balanced", "High"] as const).find((id) => routes[id]?.model === "gpt-6-luna");
   if (!mode) throw new Error("Room drafting requires gpt-6-luna.");
   const aborter = new AbortController();
   const timeout = setTimeout(() => aborter.abort(), 45_000);
@@ -33,7 +35,7 @@ export async function generateRoomOverview(draft: RoomDraft): Promise<RoomOvervi
     }
     if (!complete) throw new Error("Incomplete AI draft.");
     // Some configured models put a thinking block in content before the JSON draft.
-    const json = output.trim().replace(/^<think>[\s\S]*?<\/think>\s*/i, "").replace(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i, "$1");
+    const json = sanitizeModelOutput(output).text.trim().replace(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i, "$1");
     const overview = overviewSchema.parse(JSON.parse(json));
     return overview;
   } finally {

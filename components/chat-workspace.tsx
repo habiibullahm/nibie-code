@@ -2,27 +2,29 @@
 
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { PanelLeftOpen, SquarePen, X } from "lucide-react";
+import { PanelLeftOpen, Plus, SquarePen, X } from "lucide-react";
 import { addUserMessageAction, archiveConversationAction, editLastUserMessageAction, moveConversationAction, renameConversationAction, restoreConversationAction, startConversationAction, updateConversationModelAction } from "@/app/actions/chat";
+import { createPinAction, deletePinAction, updatePinAction } from "@/app/actions/pins";
 import { createRoomAction, deleteRoomAction, updateRoomAction, updateRoomBriefAction } from "@/app/actions/rooms";
-import { BrandMark } from "@/components/brand";
+import { createWorkbenchFromAssistantAction } from "@/app/actions/workbench";
+import { BrandMark, type BrandActivity } from "@/components/brand";
 import { ChatComposer, type ComposerHandle } from "@/components/chat-composer";
 import { ChatSidebar } from "@/components/chat-sidebar";
 import { RoomDetail } from "@/components/room-detail";
 import { RoomCreateDialog } from "@/components/room-create-dialog";
+import { RoomFilePicker } from "@/components/room-file-picker";
 import { SettingsDialog } from "@/components/settings/settings-dialog";
 import type { SettingsSectionId } from "@/components/settings/registry";
 import { MessageRow } from "@/components/message-row";
 import { forgetLastConversationId, readChatFlag, readLastConversationId, subscribeChatPreferences, writeLastConversationId } from "@/components/use-chat-preferences";
-import { useReasoningPreference } from "@/components/use-reasoning-preference";
 import { useStableCallback } from "@/components/use-stable-callback";
 import type { ConversationSummary, PersistedMessage, RoomSummary } from "@/lib/chat/read";
-import type { ChatModel } from "@/lib/chat/validation";
-import type { ModelOption } from "@/lib/chat/models";
+import type { ModelChoice, ModelOption } from "@/lib/chat/models";
 import { decideRestoredConversation } from "@/lib/chat/preferences";
 import { roomContextFromRows } from "@/lib/rooms/map";
+import type { PinDraft } from "@/lib/pins/types";
 import type { RoomBriefFields, RoomDraft } from "@/lib/rooms/types";
-import { chatPath, conversationPath, roomDraftPath, roomPath } from "@/lib/routes";
+import { chatPath, conversationPath, roomDraftPath, roomPath, workbenchDocumentPath } from "@/lib/routes";
 import { clearStoredConversationReference } from "@/lib/privacy/local-state";
 import { modelForComposer } from "@/lib/preferences/model";
 import { accountDisplayName } from "@/lib/auth/display-name";
@@ -30,12 +32,15 @@ import { defaultUserPreferences, type UserPreferences } from "@/lib/preferences/
 import { previewContextDiagnostics } from "@/lib/context/profile-context";
 import type { ContextDiagnostics } from "@/lib/context/context-types";
 import { followAfterSending, followStreamedContent, isNearBottom, trackNearBottom } from "@/lib/chat/scroll";
-import { readChatSse } from "@/lib/ai/sse";
-import { activeAssistantId, classifyStreamFailure, hasActiveGeneration, isRecoverySettled, isRegressiveSnapshot, latestReplyFailed, needsServerCheck, recoveryPollAction, recoveryPollMs, unseenGenerationSettled } from "@/lib/chat/recovery";
+import { ChatStreamServerError, readChatSse } from "@/lib/ai/sse";
+import { compareNames, compareText } from "@/lib/chat/order";
+import { readRoomFileSelection, rememberRoomFileSelection } from "@/lib/files/selection-memory";
+import { abortLiveChatStream, finishLiveChatStream, liveChatConversationId, shouldStopLiveChatOnLeave, startLiveChatStream } from "@/lib/chat/live-stream";
+import { activeAssistantId, classifyStreamFailure, hasActiveGeneration, isRecoverySettled, isRegressiveSnapshot, latestReplyFailed, messagePersistenceConfirmed, needsServerCheck, recoveryPollAction, recoveryPollMs, unseenGenerationSettled } from "@/lib/chat/recovery";
 
 type Conversation = ConversationSummary & { messages: PersistedMessage[] };
-type WorkspaceData = { conversations: ConversationSummary[]; archivedConversations?: ConversationSummary[]; rooms?: RoomSummary[]; messages: PersistedMessage[]; activeId: string | null; error: string | null };
-type GenerateOptions = { regenerate?: boolean; replaceIds?: string[]; placeholderId?: string };
+type WorkspaceData = { conversations: ConversationSummary[]; archivedConversations?: ConversationSummary[]; rooms?: RoomSummary[]; roomsError?: string | null; messages: PersistedMessage[]; activeId: string | null; error: string | null };
+type GenerateOptions = { regenerate?: boolean; replaceIds?: string[]; placeholderId?: string; fileIds?: string[] };
 // While a response's outcome is unknown, the server is polled until it reports a settled state (see lib/chat/recovery.ts).
 type Recovery = { conversationId: string; assistantId: string | null; baseline: WorkspaceData | undefined };
 const failureNotice = "Nibie couldn't complete that response. Please try again.";
@@ -46,11 +51,11 @@ const droppedConnectionNotice = "The connection dropped. Checking whether your r
 const suggestions = ["Help me think through an idea", "Write something with me", "Explain a new topic"];
 const noConversations: ConversationSummary[] = [];
 // Streamed text is applied in small batches so a long reply is not re-parsed as Markdown for every network chunk.
-const streamFlushMs = 80;
+const streamFlushMs = 40;
 const previewStamp = "2026-10-01T08:30:00.000Z";
 const previewRoomId = "preview-room-nibie";
 const mockRooms: RoomSummary[] = [
-  { id: previewRoomId, name: "Nibie Development", description: "The product and the context engine.", instructions: "Keep the voice calm and specific.", created_at: previewStamp, updated_at: previewStamp, brief: { goal: "Ship Rooms", current_focus: "Room detail", important_decisions: null, open_questions: null, next_step: "Keep general threads working" } },
+  { id: previewRoomId, name: "Nibie Development", description: "The product and the context engine.", instructions: "Keep the voice calm and specific.", created_at: previewStamp, updated_at: previewStamp, brief: { goal: "Ship Rooms", current_focus: "Room detail", important_decisions: null, open_questions: null, next_step: "Keep general threads working" }, pins: [{ id: "preview-pin-deploy", room_id: previewRoomId, title: "Deployment rule", content: "Production runs on Vercel Seoul and user data stays owner-scoped through Supabase RLS.", created_at: previewStamp, updated_at: previewStamp }] },
 ];
 const mockConversations: Conversation[] = [
   { id: "preview-writing", title: "A thoughtful note to the team", selected_model: "Balanced", room_id: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), messages: [{ id: "p1", role: "user", content: "Help me write a thoughtful note to my team after a busy launch week.", position: 1, created_at: previewStamp }, { id: "p2", role: "assistant", content: "A good note can recognize the effort, name what the team accomplished, and leave room for everyone to recharge.\n\nYou might start with what you noticed most: the care people brought to the final details, the way they supported one another, or a moment that made you proud.", position: 2, created_at: previewStamp }] },
@@ -59,9 +64,8 @@ const mockConversations: Conversation[] = [
 ];
 
 const noModels: ModelOption[] = [];
-const noReasoningModes: ChatModel[] = [];
 
-export function ChatWorkspace({ email, metadataName = null, initialData, preview = false, models = noModels, reasoningModes = noReasoningModes, renderedAt, preferences, preferencesError = null }: { email: string; metadataName?: string | null; initialData?: WorkspaceData; preview?: boolean; models?: ModelOption[]; reasoningModes?: ChatModel[]; renderedAt?: number; preferences?: UserPreferences; preferencesError?: string | null }) {
+export function ChatWorkspace({ email, metadataName = null, initialData, preview = false, models = noModels, renderedAt, preferences, preferencesError = null }: { email: string; metadataName?: string | null; initialData?: WorkspaceData; preview?: boolean; models?: ModelOption[]; renderedAt?: number; preferences?: UserPreferences; preferencesError?: string | null }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const conversationParam = searchParams.get("conversation");
@@ -97,36 +101,41 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   }
   // A conversation's saved mode is only used while that mode is still configured; otherwise the first available one is shown.
   const availableModes = useMemo(() => models.map((option) => option.id), [models]);
+  const [modelChoice, setModelChoice] = useState<ModelChoice>("Auto");
+  const [savingMode, setSavingMode] = useState(false);
   const [savedPreferences, setSavedPreferences] = useState(preferences ?? defaultUserPreferences());
   const [serverUpdatedAt, setServerUpdatedAt] = useState(preferences?.updatedAt ?? null);
   if (preferences && preferences.updatedAt !== serverUpdatedAt) {
     setServerUpdatedAt(preferences.updatedAt);
     setSavedPreferences(preferences);
   }
-  const pinnedNewChatMode = useRef(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [creatingRoom, setCreatingRoom] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId>("general");
   const [contextDiagnostics, setContextDiagnostics] = useState<ContextDiagnostics | null>(null);
+  const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
+  const [filePickerOpen, setFilePickerOpen] = useState(false);
   const modeFor = (saved: string | undefined, hasConversation: boolean) => modelForComposer({
     hasConversation,
     conversationModel: saved,
     accountDefault: savedPreferences.defaultModel,
     available: availableModes,
   }) ?? "Balanced";
-  const [mode, setMode] = useState<ChatModel>(() => modeFor(conversations.find((item) => item.id === initialData?.activeId)?.selected_model, Boolean(initialData?.activeId)));
-  const [reasoning, setReasoning] = useReasoningPreference();
-  // Reasoning effort is only sent for modes the server has verified; everywhere else it is Auto (nothing is sent).
-  const requestReasoning = reasoningModes.includes(mode) ? reasoning : "auto";
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false);
   const desktopCollapseButtonRef = useRef<HTMLButtonElement>(null);
   const desktopExpandButtonRef = useRef<HTMLButtonElement>(null);
   const [sending, setSending] = useState(false);
+  const [movingThread, setMovingThread] = useState<string | null>(null);
+  const movePending = useRef(false);
   const [streaming, setStreaming] = useState(false);
+  const [assistantActivity, setAssistantActivity] = useState<BrandActivity>("idle");
   const busy = useRef(false);
   const submission = useRef<{ id: string; content: string; conversationId: string | null } | null>(null);
   const streamController = useRef<AbortController | null>(null);
+  const stopGeneration = useRef<(() => void) | null>(null);
+  const userStopEpoch = useRef(0);
+  const stoppedReplies = useRef(new Map<string, Set<string>>());
   const recoveryEpoch = useRef(0);
   const [acceptedMessages, setAcceptedMessages] = useState<PersistedMessage[]>(initialData?.messages ?? []);
   const acceptedMessagesRef = useRef(acceptedMessages);
@@ -156,7 +165,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const drawerRef = useRef<HTMLElement>(null);
   const shownConversations = useMemo(() => [...new Map([...conversations, ...localConversations].map((item) => [item.id, item])).values()]
     .filter((item) => !locallyArchivedIds.includes(item.id))
-    .sort((left, right) => right.updated_at.localeCompare(left.updated_at) || left.id.localeCompare(right.id)), [conversations, localConversations, locallyArchivedIds]);
+    .sort((left, right) => compareText(right.updated_at, left.updated_at) || compareText(left.id, right.id)), [conversations, localConversations, locallyArchivedIds]);
   const rooms = useMemo(() => {
     const source = preview ? mockRooms : (serverRooms ?? []);
     const map = new Map(source.map((room) => [room.id, room]));
@@ -164,16 +173,19 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
       if (override) map.set(id, override);
       else map.delete(id);
     }
-    return [...map.values()].sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
+    return [...map.values()].sort((left, right) => compareNames(left.name, right.name) || compareText(left.id, right.id));
   }, [preview, roomOverrides, serverRooms]);
   const paramActiveId = shownConversations.some((item) => item.id === conversationParam) ? conversationParam : null;
   const activeId = preview ? previewActiveId : pendingId !== undefined ? pendingId : paramActiveId;
-  const paramRoomId = rooms.some((room) => room.id === roomParam) ? roomParam : null;
+  // Keep an unavailable draft room selected until the user explicitly changes it; never silently send in General.
+  const paramRoomId = draftParam || rooms.some((room) => room.id === roomParam) ? roomParam : null;
   const selectedRoomId = pendingRoomId !== undefined ? pendingRoomId : paramRoomId;
   const drafting = (pendingDraft !== undefined ? pendingDraft : draftParam) && Boolean(selectedRoomId) && !activeId;
   const showRoom = Boolean(selectedRoomId) && !activeId && !drafting;
   const activeRoom = rooms.find((room) => room.id === selectedRoomId) ?? null;
   const activeConversation = shownConversations.find((item) => item.id === activeId);
+  const selectedModel = modelChoice !== "Auto" && availableModes.includes(modelChoice) ? modelChoice : "Auto";
+  const mode = selectedModel === "Auto" ? modeFor(activeConversation?.selected_model, Boolean(activeId)) : selectedModel;
   const savedMessages = activeId === initialData?.activeId ? initialData?.messages : undefined;
   const activeLocal = localMessages[activeId ?? ""];
   const messages = useMemo(() => preview
@@ -184,7 +196,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const lastMessage = messages[messages.length - 1];
   const lastUser = useMemo(() => [...messages].reverse().find((message) => message.role === "user"), [messages]);
   const recovering = recovery !== null;
-  const controlsDisabled = sending || streaming;
+  const controlsDisabled = sending || streaming || movingThread !== null;
   // Message actions stay locked until the server confirms how the last response ended, so they cannot collide with it.
   const messageActionsLocked = controlsDisabled || recovering;
   const initial = email.slice(0, 1).toUpperCase();
@@ -221,11 +233,9 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
 
   if (!preview && serverSnapshot && serverSnapshot !== serverData && serverSnapshot.activeId === activeId && !sending && !streaming && !recoverySettled) {
     const pending = localMessages[serverSnapshot?.activeId ?? ""] ?? [];
-    const settled = pending.every((message) => serverSnapshot?.messages.some((saved) => saved.id === message.id && saved.status !== "streaming" && (message.role !== "user" || saved.content === message.content)));
+    const settled = pending.every((message) => serverSnapshot?.messages.some((saved) => saved.id === message.id && messagePersistenceConfirmed(message, saved)));
     if (settled && removedIds.every((id) => !serverSnapshot?.messages.some((saved) => saved.id === id))) {
       setServerData(serverSnapshot);
-      // A new chat has no saved mode. Adopting the empty server payload must not wipe the choice the user just made.
-      if (serverSnapshot?.activeId) setMode(modeFor(serverSnapshot.conversations.find((item) => item.id === serverSnapshot.activeId)?.selected_model, true));
       setLocalMessages({});
       setRemovedIds([]);
       setLocalConversations([]);
@@ -234,7 +244,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     }
   }
 
-  useEffect(() => () => streamController.current?.abort(), []);
+  useEffect(() => () => { if (shouldStopLiveChatOnLeave(window.location.pathname)) abortLiveChatStream(); }, []);
   useEffect(() => { if (drafting) composerRef.current?.focus(); }, [drafting, selectedRoomId]);
   useEffect(() => subscribeChatPreferences(() => {
     autoFollowRef.current = readChatFlag("autoFollow");
@@ -256,7 +266,6 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     if (!decision.conversationId) return;
     const item = history.find((conversation) => conversation.id === decision.conversationId);
     if (!item) return;
-    setMode(modelForComposer({ hasConversation: true, conversationModel: item.selected_model, accountDefault: savedPreferences.defaultModel, available: availableModes }) ?? "Balanced");
     pinLatestRef.current = true;
     setPendingId(item.id);
     router.replace(conversationPath(item.id), { scroll: false });
@@ -329,24 +338,13 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     return () => window.removeEventListener("keydown", handleKeydown);
   }, [drawerOpen]);
 
-  // An empty chat follows the account default. A model picked on that empty chat stays until New chat is opened again.
-  useEffect(() => {
-    if (activeId || pinnedNewChatMode.current) return;
-    setMode(modelForComposer({ hasConversation: false, accountDefault: savedPreferences.defaultModel, available: availableModes }) ?? "Balanced");
-  }, [activeId, availableModes, savedPreferences.defaultModel]);
-
+  // The backend mode comes from the persisted thread or the account default for a fresh chat.
   const openConversation = useStableCallback((id: string | null) => {
-    if (busy.current && !streamController.current) return;
-    streamController.current?.abort();
+    setModelChoice("Auto");
+    if (busy.current && !streamController.current && liveChatConversationId() !== id) return;
+    // Opening the thread that is already replying must not mark that reply stopped.
+    if (id !== liveChatConversationId()) abortLiveChatStream();
     setNotice(""); setDrawerOpen(false); setEditingId(null); setRecovery(null); setContextDiagnostics(null); setPendingRoomId(null); setPendingDraft(false); pinLatestRef.current = true;
-    const item = shownConversations.find((conversation) => conversation.id === id);
-    if (item) {
-      pinnedNewChatMode.current = false;
-      setMode(modeFor(item.selected_model, true));
-    } else if (!id) {
-      pinnedNewChatMode.current = false;
-      setMode(modeFor(undefined, false));
-    }
     if (preview) setPreviewActiveId(id);
     else { setPendingId(id); router.push(id ? conversationPath(id) : chatPath); }
     requestAnimationFrame(() => menuButtonRef.current?.focus());
@@ -357,16 +355,17 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     if (busy.current) return;
     composerRef.current?.clear();
     openConversation(null);
+    requestAnimationFrame(() => composerRef.current?.focus());
   });
   const openRoom = useStableCallback((id: string) => {
-    if (busy.current && !streamController.current) return;
-    streamController.current?.abort();
+    if (busy.current && !streamController.current && !liveChatConversationId()) return;
     setNotice(""); setDrawerOpen(false); setEditingId(null); setRecovery(null); setContextDiagnostics(null);
     setPendingId(null); setPendingRoomId(id); setPendingDraft(false); pinLatestRef.current = true;
     if (preview) setPreviewActiveId(null);
     else router.push(roomPath(id));
   });
   const newThreadInRoom = useStableCallback((id: string) => {
+    setModelChoice("Auto");
     if (busy.current) return;
     composerRef.current?.clear();
     setNotice(""); setDrawerOpen(false); setEditingId(null); setRecovery(null); setContextDiagnostics(null);
@@ -375,8 +374,16 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     else router.push(roomDraftPath(id));
     requestAnimationFrame(() => composerRef.current?.focus());
   });
+  const chooseDraftRoom = useStableCallback((id: string) => {
+    if (activeId || busy.current || recovery) return;
+    setPendingRoomId(id || null);
+    setPendingDraft(Boolean(id));
+    setContextDiagnostics(null);
+    setNotice("");
+    if (!preview) router.push(id ? roomDraftPath(id) : chatPath);
+  });
   const conversationsDeleted = useStableCallback(() => {
-    streamController.current?.abort();
+    abortLiveChatStream();
     busy.current = false;
     setSending(false);
     setStreaming(false);
@@ -393,9 +400,15 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     router.refresh();
   });
 
+  // A late Stop acknowledgement failure is surfaced, but never replaces a newer turn's notice.
+  const reportStopFailure = useStableCallback((id: string, error: string) => {
+    if (activeId === id) setNotice((current) => current || error);
+  });
+
   // Streams one assistant response for a saved user message. The caller owns the busy guard, which is released here.
   async function generate(id: string, userMessageId: string, options: GenerateOptions = {}) {
-    const controller = new AbortController();
+    const epoch = userStopEpoch.current;
+    const controller = startLiveChatStream(id);
     let assistantId: string | null = null;
     let httpStatus: number | undefined;
     let buffer = "";
@@ -408,12 +421,37 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
       setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === target ? { ...message, content: message.content + text } : message) }));
     };
     const clearPlaceholder = () => { if (options.placeholderId) setLocalMessages((items) => items[id]?.some((row) => row.id === options.placeholderId) ? { ...items, [id]: items[id].filter((row) => row.id !== options.placeholderId) } : items); };
-    setSending(false); setStreaming(true);
+    setSending(false); setStreaming(true); setAssistantActivity("thinking");
     streamController.current = controller;
+    const stopOwnedGeneration = () => {
+      if (streamController.current !== controller || controller.signal.aborted) return;
+      flush();
+      if (assistantId) setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId
+        ? { ...message, content: message.content || "Response stopped.", status: "interrupted", terminationReason: "user_stopped" } : message) }));
+      else clearPlaceholder();
+      const stops = stoppedReplies.current.get(id) ?? new Set<string>();
+      stops.add(userMessageId);
+      stoppedReplies.current.set(id, stops);
+      userStopEpoch.current += 1;
+      controller.abort("user_stopped");
+      finishLiveChatStream(controller);
+      streamController.current = null;
+      stopGeneration.current = null;
+      busy.current = false;
+      setSending(false); setStreaming(false); setAssistantActivity("idle");
+      // The background acknowledgement is never a condition for using the composer. It is a plain request, not a
+      // Server Action, because Next runs Server Actions one at a time and the next message's save must not queue behind it.
+      void fetch("/api/chat/stop", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: id, userMessageId }), keepalive: true })
+        .then(async (response) => {
+          if (!response.ok) reportStopFailure(id, (await response.json().catch(() => null))?.error ?? failureNotice);
+        }).catch(() => reportStopFailure(id, failureNotice));
+    };
+    stopGeneration.current = stopOwnedGeneration;
     try {
-      const response = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: id, userMessageId, model: mode, ...(requestReasoning !== "auto" ? { reasoning: requestReasoning } : {}), ...(options.regenerate ? { regenerate: true } : {}) }), signal: controller.signal });
+      const response = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: id, userMessageId, model: mode, ...(options.regenerate ? { regenerate: true } : {}), ...(options.fileIds?.length ? { fileIds: options.fileIds } : {}) }), signal: controller.signal });
       if (!response.ok || !response.body) { if (!response.ok) httpStatus = response.status; const payload = await response.json().catch(() => null); throw new Error(payload?.error ?? failureNotice); }
       for await (const data of readChatSse(response.body)) {
+        if (controller.signal.aborted) throw new DOMException("Response aborted.", "AbortError");
         if (data.type === "start") {
           assistantId = data.id;
           if (data.context) setContextDiagnostics(data.context);
@@ -422,13 +460,14 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
           const reply: PersistedMessage = { id: data.id, role: "assistant", content: "", position: data.position, status: "streaming", created_at: new Date().toISOString() };
           setLocalMessages((items) => { const rows = items[id] ?? []; return { ...items, [id]: options.placeholderId && rows.some((row) => row.id === options.placeholderId) ? rows.map((row) => row.id === options.placeholderId ? reply : row) : [...rows, reply] }; });
         }
-        if (data.type === "delta") { buffer += data.text; if (!shown) flush(); else if (!flushTimer) flushTimer = setTimeout(flush, streamFlushMs); }
+        if (data.type === "delta") { setAssistantActivity("streaming"); buffer += data.text; if (!shown) flush(); else if (!flushTimer) flushTimer = setTimeout(flush, streamFlushMs); }
         if (data.type === "status") { flush(); setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId ? { ...message, content: message.content || "Response stopped.", status: data.status } : message) })); }
       }
       flush();
       router.refresh();
     } catch (error) {
       flush();
+      if (controller.signal.reason === "user_stopped" || epoch !== userStopEpoch.current) return;
       const kind = classifyStreamFailure({ error, aborted: controller.signal.aborted, httpStatus });
       if (!assistantId) clearPlaceholder();
       if (needsServerCheck(kind)) {
@@ -441,13 +480,28 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
       } else {
         // The server reported this failure itself, so it is final.
         if (assistantId) setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId ? { ...message, content: message.content || "Response unavailable.", status: "error" } : message) }));
-        setNotice(failureNotice);
+        setNotice(error instanceof ChatStreamServerError ? error.message : failureNotice);
         router.refresh();
       }
-    } finally { clearPlaceholder(); if (flushTimer) clearTimeout(flushTimer); if (streamController.current === controller) streamController.current = null; busy.current = false; setSending(false); setStreaming(false); }
+    } finally {
+      clearPlaceholder();
+      if (flushTimer) clearTimeout(flushTimer);
+      finishLiveChatStream(controller);
+      if (stopGeneration.current === stopOwnedGeneration) stopGeneration.current = null;
+      if (epoch === userStopEpoch.current && streamController.current === controller) {
+        streamController.current = null;
+        busy.current = false;
+        setSending(false); setStreaming(false); setAssistantActivity("idle");
+      }
+    }
   }
   const submitMessage = useStableCallback(async (content: string) => {
-    if (!content || busy.current || recovery) return;
+    if (!content || busy.current || recovery || movePending.current) return;
+    if (!activeId && selectedRoomId && !activeRoom) {
+      setNotice("That room is no longer available. Choose General or another room before sending.");
+      return;
+    }
+    const epoch = userStopEpoch.current;
     busy.current = true;
     setSending(true); setNotice(""); setEditingId(null); followRef.current = followAfterSending(autoFollowRef.current);
     let id = activeId;
@@ -481,38 +535,45 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
         const { conversation } = started.data;
         saved = started.data.message;
         id = conversation.id;
-        const savedConversation = { ...conversation, room_id: conversation.room_id ?? (drafting ? selectedRoomId : null) };
-        setLocalConversations((items) => [savedConversation, ...items]);
+        setLocalConversations((items) => [conversation, ...items]);
         setLocalMessages((items) => { const { "": rows = [], ...rest } = items; return { ...rest, [conversation.id]: rows }; });
         setPendingId(conversation.id);
         setPendingRoomId(null);
         setPendingDraft(false);
         router.push(conversationPath(conversation.id));
       } else {
-        const result = await addUserMessageAction(id, content, messageId);
+        const stopped = [...(stoppedReplies.current.get(id) ?? [])];
+        const result = await addUserMessageAction(id, content, messageId, stopped);
         if (result.error || !result.data) { rollback(result.error ?? "Message couldn't be saved.", id); return; }
         saved = result.data;
+        const pendingStops = stoppedReplies.current.get(id);
+        for (const stoppedId of stopped) pendingStops?.delete(stoppedId);
+        if (!pendingStops?.size) stoppedReplies.current.delete(id);
       }
       submission.current = null;
       setLocalMessages((items) => ({ ...items, [id!]: (items[id!] ?? []).map((row) => row.id === messageId ? { ...row, position: saved.position } : row.id === placeholderId ? { ...row, position: saved.position + 1 } : row) }));
       setLocalConversations((items) => items.map((item) => item.id === id ? { ...item, title: item.title === "New chat" ? content.slice(0, 42) + (content.length > 42 ? "…" : "") : item.title, updated_at: new Date().toISOString() } : item));
-      await generate(id, messageId, { placeholderId });
+      const fileIds = selectedFileIds;
+      rememberRoomFileSelection(messageId, fileIds);
+      await generate(id, messageId, { placeholderId, fileIds });
     } catch {
       setNotice("Nibie couldn't complete that response. Please try again.");
       if (!preview) router.refresh();
-    } finally { busy.current = false; setSending(false); }
+    } finally { if (epoch === userStopEpoch.current) { busy.current = false; setSending(false); } }
   });
 
   // Last-turn controls: only the latest user message can be edited, and only its reply can be regenerated.
   function repliesAfter(message: PersistedMessage) { return messages.filter((item) => item.role === "assistant" && item.position > message.position).map((item) => item.id); }
   const regenerate = useStableCallback(async () => {
     if (preview || busy.current || recovery || !activeId || !lastUser) return;
+    const epoch = userStopEpoch.current;
     busy.current = true; setSending(true); setNotice(""); setEditingId(null); followRef.current = followAfterSending(autoFollowRef.current);
-    try { await generate(activeId, lastUser.id, { regenerate: true, replaceIds: repliesAfter(lastUser) }); }
-    finally { busy.current = false; setSending(false); }
+    try { await generate(activeId, lastUser.id, { regenerate: true, replaceIds: repliesAfter(lastUser), fileIds: readRoomFileSelection(lastUser.id) }); }
+    finally { if (epoch === userStopEpoch.current) { busy.current = false; setSending(false); } }
   });
   const saveEdit = useStableCallback(async (messageId: string, content: string) => {
     if (preview || busy.current || recovery || !activeId || !lastUser || lastUser.id !== messageId || !content || content === lastUser.content) return;
+    const epoch = userStopEpoch.current;
     const id = activeId; const target = lastUser; const replaceIds = repliesAfter(target);
     busy.current = true; setSending(true); setNotice(""); followRef.current = followAfterSending(autoFollowRef.current);
     try {
@@ -521,22 +582,12 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
       setEditingId(null);
       setRemovedIds((ids) => [...ids, ...replaceIds]);
       setLocalMessages((items) => ({ ...items, [id]: [{ id: target.id, role: "user", content, position: target.position, status: "complete", created_at: target.created_at }] }));
-      await generate(id, target.id);
+      rememberRoomFileSelection(target.id, selectedFileIds);
+      await generate(id, target.id, { fileIds: selectedFileIds });
     } catch {
       setNotice("Nibie couldn't complete that response. Please try again.");
       router.refresh();
-    } finally { busy.current = false; setSending(false); }
-  });
-  // Choosing a model never blocks Send: the choice applies to the next request immediately (it is sent with it), and saving it to the
-  // conversation happens in the background. A failed save puts the previous choice back.
-  const changeMode = useStableCallback((next: ChatModel) => {
-    if (next === mode) return;
-    const previous = mode;
-    if (!activeId) pinnedNewChatMode.current = true;
-    setMode(next);
-    if (!activeId || preview) return;
-    const revert = (message: string) => { setMode((current) => current === next ? previous : current); setNotice(message); };
-    updateConversationModelAction(activeId, next).then((result) => { if (result.error) revert(result.error); }, () => revert("Response mode couldn't be saved."));
+    } finally { if (epoch === userStopEpoch.current) { busy.current = false; setSending(false); } }
   });
   const rename = useStableCallback((item: ConversationSummary) => {
     if (preview) return;
@@ -584,31 +635,46 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     setLocallyArchivedIds((ids) => ids.filter((id) => id !== item.id));
     router.refresh();
   });
-  const moveThread = useStableCallback(async (roomId: string | null) => {
-    if (!activeId || !activeConversation || activeConversation.room_id === roomId) return;
-    const previous = activeConversation.room_id ?? null;
-    const next = { ...activeConversation, room_id: roomId, updated_at: new Date().toISOString() };
-    setLocalConversations((items) => items.some((item) => item.id === activeId) ? items.map((item) => item.id === activeId ? next : item) : [next, ...items]);
-    if (preview) return;
-    const result = await moveConversationAction(activeId, roomId);
-    if (result.error) {
-      setNotice(result.error);
-      setLocalConversations((items) => items.map((item) => item.id === activeId ? { ...next, room_id: previous } : item));
-      return;
-    }
-    router.refresh();
+  const moveThread = useStableCallback(async (item: ConversationSummary, roomId: string | null) => {
+    if (busy.current || recovery || movePending.current) return;
+    const previous = shownConversations.find((entry) => entry.id === item.id);
+    if (!previous || previous.room_id === roomId || previous.archived_at) return;
+    if (roomId && !rooms.some((room) => room.id === roomId)) { setNotice("That room is no longer available."); return; }
+    movePending.current = true;
+    setMovingThread(item.id);
+    const next = { ...previous, room_id: roomId, updated_at: new Date().toISOString() };
+    const rollback = (message: string) => {
+      setLocalConversations((items) => items.map((entry) => entry.id === item.id ? previous : entry));
+      setNotice(message);
+    };
+    if (activeId === item.id) setContextDiagnostics(null);
+    setNotice("");
+    setLocalConversations((items) => items.some((entry) => entry.id === item.id) ? items.map((entry) => entry.id === item.id ? next : entry) : [next, ...items]);
+    try {
+      if (!preview) {
+        const result = await moveConversationAction(item.id, roomId);
+        if (result.error) { rollback(result.error); return; }
+      }
+      // File choices belong to the room in which the message was sent; never reuse them after a context move.
+      for (const message of [...(localMessages[item.id] ?? []), ...(item.id === initialData?.activeId ? initialData.messages : [])]) {
+        if (message.role === "user") rememberRoomFileSelection(message.id, []);
+      }
+      if (!preview) router.refresh();
+    } catch {
+      rollback("We couldn't save that change. Please try again.");
+    } finally { movePending.current = false; setMovingThread(null); }
   });
   const createRoom = useStableCallback(async (draft: RoomDraft, brief: RoomBriefFields) => {
     const nextBrief = { goal: brief.goal, current_focus: brief.currentFocus, important_decisions: brief.importantDecisions, open_questions: brief.openQuestions, next_step: brief.next };
     if (preview) {
-      const room: RoomSummary = { id: `preview-room-${crypto.randomUUID()}`, name: draft.name.trim(), description: draft.description?.trim() || null, instructions: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), brief: nextBrief };
+      const room: RoomSummary = { id: `preview-room-${crypto.randomUUID()}`, name: draft.name.trim(), description: draft.description?.trim() || null, instructions: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), brief: nextBrief, pins: [] };
       setRoomOverrides((items) => ({ ...items, [room.id]: room }));
       openRoom(room.id);
       return {};
     }
     const result = await createRoomAction(draft, brief);
     if (result.error || !result.data) return { error: result.error ?? "We couldn't save that change. Please try again." };
-    const room: RoomSummary = result.data;
+    const room: RoomSummary = { ...result.data, pins: [] };
     setRoomOverrides((items) => ({ ...items, [room.id]: room }));
     openRoom(room.id);
     router.refresh();
@@ -623,7 +689,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     const result = await updateRoomAction(activeRoom.id, patch);
     if (result.error || !result.data) return { error: result.error ?? "We couldn't save that change. Please try again." };
     const saved = result.data;
-    setRoomOverrides((items) => ({ ...items, [activeRoom.id]: { ...activeRoom, ...saved, brief: activeRoom.brief } }));
+    setRoomOverrides((items) => ({ ...items, [activeRoom.id]: { ...activeRoom, ...saved, brief: activeRoom.brief, pins: activeRoom.pins } }));
     router.refresh();
     return {};
   });
@@ -638,6 +704,44 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     if (result.error) return { error: result.error };
     setRoomOverrides((items) => ({ ...items, [activeRoom.id]: { ...activeRoom, brief: nextBrief, updated_at: new Date().toISOString() } }));
     router.refresh();
+    return {};
+  });
+  const createPin = useStableCallback(async (draft: PinDraft) => {
+    if (!activeRoom) return { error: "That room is no longer available." };
+    if (preview) {
+      const pin = { id: `preview-pin-${crypto.randomUUID()}`, room_id: activeRoom.id, title: draft.title, content: draft.content, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+      setRoomOverrides((items) => ({ ...items, [activeRoom.id]: { ...activeRoom, pins: [pin, ...activeRoom.pins] } }));
+      return {};
+    }
+    const result = await createPinAction(activeRoom.id, draft);
+    if (result.error || !result.data) return { error: result.error ?? "We couldn't save that change. Please try again." };
+    setRoomOverrides((items) => ({ ...items, [activeRoom.id]: { ...activeRoom, pins: [result.data!, ...activeRoom.pins.filter((pin) => pin.id !== result.data!.id)] } }));
+    router.refresh();
+    return {};
+  });
+  const updatePin = useStableCallback(async (id: string, draft: PinDraft) => {
+    if (!activeRoom) return { error: "That room is no longer available." };
+    if (preview) {
+      const pins = activeRoom.pins.map((pin) => pin.id === id ? { ...pin, title: draft.title, content: draft.content, updated_at: new Date().toISOString() } : pin)
+        .sort((left, right) => compareText(right.updated_at, left.updated_at) || compareText(left.id, right.id));
+      setRoomOverrides((items) => ({ ...items, [activeRoom.id]: { ...activeRoom, pins } }));
+      return {};
+    }
+    const result = await updatePinAction(id, draft);
+    if (result.error || !result.data) return { error: result.error ?? "We couldn't save that change. Please try again." };
+    const saved = result.data;
+    setRoomOverrides((items) => ({ ...items, [activeRoom.id]: { ...activeRoom, pins: [saved, ...activeRoom.pins.filter((pin) => pin.id !== saved.id)] } }));
+    router.refresh();
+    return {};
+  });
+  const removePin = useStableCallback(async (id: string) => {
+    if (!activeRoom) return { error: "That room is no longer available." };
+    if (!preview) {
+      const result = await deletePinAction(id);
+      if (result.error) return { error: result.error };
+    }
+    setRoomOverrides((items) => ({ ...items, [activeRoom.id]: { ...activeRoom, pins: activeRoom.pins.filter((pin) => pin.id !== id) } }));
+    if (!preview) router.refresh();
     return {};
   });
   const removeRoom = useStableCallback(async () => {
@@ -665,31 +769,96 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const openSettings = useStableCallback(() => { setDrawerOpen(false); setSettingsSection("general"); setSettingsOpen(true); });
   const editProfile = useStableCallback(() => { setDrawerOpen(false); setSettingsSection("profile"); setSettingsOpen(true); });
   const closeSettings = useStableCallback(() => setSettingsOpen(false));
-  const stopStream = useStableCallback(() => streamController.current?.abort());
-  const attach = useStableCallback(() => setNotice("Attachments are not available yet."));
+  const changeModel = useStableCallback(async (choice: ModelChoice) => {
+    if (busy.current || recovery || movePending.current) return;
+    if (choice !== "Auto" && !availableModes.includes(choice)) return;
+    const previous = modelChoice;
+    setModelChoice(choice);
+    if (choice === "Auto" || preview || !activeConversation) return;
+    busy.current = true;
+    setSending(true);
+    setSavingMode(true);
+    try {
+      const result = await updateConversationModelAction(activeConversation.id, choice);
+      if (result.error) { setModelChoice(previous); setNotice(result.error); return; }
+      const updated = { ...activeConversation, selected_model: choice };
+      setLocalConversations((items) => [updated, ...items.filter((item) => item.id !== updated.id)]);
+      router.refresh();
+    } catch {
+      setModelChoice(previous);
+      setNotice("We couldn't save that model choice. Please try again.");
+    } finally { busy.current = false; setSending(false); setSavingMode(false); }
+  });
+  const stopStream = useStableCallback(() => stopGeneration.current?.());
+  const openingWorkbench = useRef(false);
+  const [workbenchPending, setWorkbenchPending] = useState(false);
+  const continueInWorkbench = useStableCallback(async (message: PersistedMessage) => {
+    if (openingWorkbench.current) return;
+    openingWorkbench.current = true;
+    setWorkbenchPending(true);
+    try {
+      const result = await createWorkbenchFromAssistantAction(message.id);
+      if (result.error || !result.data) {
+        setNotice(result.error ?? "That response couldn't be opened in Workbench.");
+        return;
+      }
+      router.push(workbenchDocumentPath(result.data.id));
+    } finally {
+      openingWorkbench.current = false;
+      setWorkbenchPending(false);
+    }
+  });
   const cancelEdit = useStableCallback(() => setEditingId(null));
   const startEdit = useStableCallback((id: string) => setEditingId(id));
 
   const history = activeId ? activeId : null;
   const caption = preview ? "Mock workspace · Messages stay in this tab and are not saved." : drafting && activeRoom ? `New thread in ${activeRoom.name}.` : streaming ? "Nibie is responding · You can stop at any time." : "Your conversations are saved to your account.";
-  const threadRoom = rooms.find((room) => room.id === (activeConversation?.room_id ?? (drafting ? selectedRoomId : null))) ?? null;
-  const contextRoom = threadRoom ? roomContextFromRows({ name: threadRoom.name, instructions: threadRoom.instructions }, threadRoom.brief) : null;
+  const threadRoomId = activeId ? activeConversation?.room_id ?? null : drafting ? selectedRoomId : null;
+  const threadRoom = rooms.find((room) => room.id === threadRoomId) ?? null;
+  const roomItems = [{ value: "", label: "General" }, ...rooms.map((room) => ({ value: room.id, label: room.name }))];
+  if (!activeId && selectedRoomId && !activeRoom) roomItems.push({ value: selectedRoomId, label: "Room unavailable" });
+  const roomsLoading = !preview && serverRooms === undefined;
+  const roomSelectionNotice = selectedRoomId && !activeRoom ? "That room is unavailable. Choose General or another room." : roomsLoading ? "Loading rooms… General is available." : initialData?.roomsError ?? null;
+  const roomLabel = threadRoom ? `Room · ${threadRoom.name}` : threadRoomId ? "Room unavailable" : "General";
+  const threadRoomKey = threadRoom?.id ?? null;
+  const [fileRoomKey, setFileRoomKey] = useState(threadRoomKey);
+  if (fileRoomKey !== threadRoomKey) {
+    setFileRoomKey(threadRoomKey);
+    setSelectedFileIds([]);
+    setFilePickerOpen(false);
+  }
+  const attach = useStableCallback(() => {
+    if (preview || !threadRoom) {
+      setNotice(preview ? "This preview isn't connected." : "Add a file on the room page, then choose it from a thread in that room.");
+      return;
+    }
+    setFilePickerOpen((open) => !open);
+  });
+  const contextRoom = threadRoom ? roomContextFromRows({ name: threadRoom.name, instructions: threadRoom.instructions }, threadRoom.brief, threadRoom.pins) : null;
   const contextPreview = previewContextDiagnostics({
     preferences: savedPreferences,
     preferenceReadFailed: Boolean(preferencesError),
     hasEarlierMessages: messages.some((message) => message.role === "user" || message.role === "assistant"),
     room: contextRoom,
+    selectedFileCount: selectedFileIds.length,
   });
   const accountName = accountDisplayName({ email, metadataName, preferredName: savedPreferences.preferredName });
   const headerRoomName = (showRoom ? activeRoom?.name : threadRoom?.name) ?? null;
   const roomThreads = activeRoom ? shownConversations.filter((item) => item.room_id === activeRoom.id) : [];
-  const sidebarProps = { conversations: shownConversations, archivedConversations, rooms, activeId: history, activeRoomId: showRoom ? selectedRoomId : threadRoom?.id ?? null, busy: controlsDisabled, preview, email, name: accountName, renderedAt, onClose: closeDrawer, onOpen: openConversation, onOpenRoom: openRoom, onCreateRoom: openRoomSetup, onNewChat: newChat, onOpenSettings: openSettings, onRename: rename, onArchive: archive, onRestore: restore };
+  const sidebarProps = { conversations: shownConversations, archivedConversations, rooms, activeId: history, activeRoomId: showRoom ? selectedRoomId : threadRoom?.id ?? null, busy: controlsDisabled || recovering, activity: assistantActivity, preview, email, name: accountName, renderedAt, settingsActive: settingsOpen, onClose: closeDrawer, onOpen: openConversation, onOpenRoom: openRoom, onCreateRoom: openRoomSetup, onNewChat: newChat, onOpenSettings: openSettings, onRename: rename, onArchive: archive, onRestore: restore, onMove: moveThread };
 
-  return <main className="chat-workspace">{desktopSidebarCollapsed ? null : <ChatSidebar {...sidebarProps} desktopToggleRef={desktopCollapseButtonRef} onCollapse={collapseDesktopSidebar} />}{drawerOpen && <div className="mobile-drawer"><button className="drawer-scrim" aria-label="Dismiss menu backdrop" onClick={closeDrawer} /><ChatSidebar {...sidebarProps} mobile drawerRef={drawerRef} closeMenuRef={closeMenuRef} /></div>}
-    <section className="chat-main" aria-label="Chat workspace"><header className="chat-header">{desktopSidebarCollapsed ? <button ref={desktopExpandButtonRef} type="button" className="icon-button desktop-sidebar-toggle" aria-label="Expand sidebar" title="Expand sidebar" onClick={expandDesktopSidebar}><PanelLeftOpen size={18} /></button> : null}<button ref={menuButtonRef} className="icon-button mobile-menu-button" aria-label="Open conversation menu" onClick={() => setDrawerOpen(true)}><BrandMark /></button><div className="header-model">{!activeId || !threadRoom ? <span className={`header-context${headerRoomName ? " is-room-name" : ""}`}>{headerRoomName ?? "A little room to think"}</span> : null}</div>{activeId && rooms.length ? <label className="thread-room"><span>Room</span><select aria-label="Move thread" value={activeConversation?.room_id ?? ""} disabled={controlsDisabled} onChange={(event) => void moveThread(event.target.value || null)}><option value="">General</option>{rooms.map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}</select></label> : null}<button type="button" className="header-new-chat" aria-label="New chat" title="New chat" disabled={controlsDisabled} onClick={newChat}><SquarePen size={17} /></button></header>
-      <div ref={scrollRef} onScroll={handleScroll} className={`conversation-scroll ${showRoom ? "is-room" : messages.length || loadingConversation ? "has-messages" : "is-empty"}`}>{showRoom && activeRoom ? <RoomDetail key={activeRoom.id} room={activeRoom} threads={roomThreads} busy={controlsDisabled} onOpenThread={openConversation} onNewThread={() => newThreadInRoom(activeRoom.id)} onSaveRoom={saveRoom} onSaveBrief={saveBrief} onDelete={removeRoom} /> : loadingConversation ? <div className="message-list conversation-skeleton" role="status" aria-busy="true" aria-label="Loading conversation"><div className="skeleton-line is-short" /><div className="skeleton-line" /><div className="skeleton-line" /><div className="skeleton-line is-medium" /></div> : messages.length ? <div className="message-list" aria-live="polite">{messages.map((message) => <MessageRow key={message.id} message={message} initial={initial} isLast={message.id === lastMessage?.id} isLastUser={message.id === lastUser?.id} canMutate={!preview} disabled={messageActionsLocked} editing={editingId === message.id} onRegenerate={regenerate} onStartEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} />)}{notice && <p className="local-notice" role="status">{notice}</p>}</div> : <div className="welcome-panel">{notice && <p className="local-notice" role="status">{notice}</p>}<div className="welcome-icon"><BrandMark /></div><p className="welcome-eyebrow">{drafting && activeRoom ? "NEW THREAD" : "A LITTLE ROOM TO THINK"}</p><h1>{drafting && activeRoom ? activeRoom.name : "What’s on your mind?"}</h1><p className="welcome-copy">{drafting && activeRoom ? "This thread starts inside the room. Nibie will use its instructions and brief." : "A fresh page for ideas, questions, and whatever you’re working through."}</p>{drafting ? null : <div className="suggestion-list" aria-label="Suggestions">{suggestions.map((suggestion) => <button key={suggestion} onClick={() => { composerRef.current?.set(suggestion); composerRef.current?.focus(); }}>{suggestion}<span>↗</span></button>)}</div>}</div>}</div>
-      {showRoom ? null : <ChatComposer ref={composerRef} sending={sending || recovering} streaming={streaming} models={models} mode={mode} reasoningModes={reasoningModes} reasoning={reasoning} caption={caption} diagnostics={contextDiagnostics ?? contextPreview} onEditProfile={editProfile} onSubmit={submitMessage} onStop={stopStream} onModeChange={changeMode} onReasoningChange={setReasoning} onAttach={attach} />}
-    </section>
+  return <main className="chat-workspace">
+    <ChatSidebar {...sidebarProps} collapsed={desktopSidebarCollapsed} desktopToggleRef={desktopCollapseButtonRef} desktopExpandRef={desktopExpandButtonRef} onCollapse={collapseDesktopSidebar} onExpand={expandDesktopSidebar} />
+    {drawerOpen && <div className="mobile-drawer"><button className="drawer-scrim" aria-label="Dismiss menu backdrop" onClick={closeDrawer} /><ChatSidebar {...sidebarProps} mobile drawerRef={drawerRef} closeMenuRef={closeMenuRef} /></div>}
+    <section className="chat-main" aria-label="Chat workspace">
+      <header className="chat-header">
+        <button ref={menuButtonRef} className="icon-button mobile-menu-button sidebar-logo-toggle" aria-label="Open conversation menu" onClick={() => setDrawerOpen(true)}><BrandMark activity={assistantActivity} /><PanelLeftOpen className="menu-toggle-mark" size={18} aria-hidden="true" /></button>
+        <div className="header-model">{!activeId || !threadRoom ? <span className={"header-context" + (headerRoomName ? " is-room-name" : "")}>{headerRoomName ?? "A little room to think"}</span> : null}</div>
+        {activeId ? <div className="thread-room">{rooms.length ? <><label htmlFor="thread-room-select">Room</label><select id="thread-room-select" aria-label="Move thread" value={activeConversation?.room_id ?? ""} disabled={controlsDisabled} onChange={(event) => activeConversation && void moveThread(activeConversation, event.target.value || null)}><option value="">General</option>{rooms.map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}</select></> : null}<button type="button" className="thread-room-add" aria-label="Create room" title="Create room" disabled={controlsDisabled} onClick={openRoomSetup}><Plus size={16} /></button></div> : null}
+        <button type="button" className="header-new-chat" aria-label="New chat" title="New chat" disabled={controlsDisabled} onClick={newChat}><SquarePen size={17} /></button>
+      </header>
+      <div ref={scrollRef} onScroll={handleScroll} className={`conversation-scroll ${showRoom ? "is-room" : messages.length || loadingConversation ? "has-messages" : "is-empty"}`}>{showRoom && activeRoom ? <RoomDetail key={activeRoom.id} room={activeRoom} threads={roomThreads} busy={controlsDisabled} preview={preview} onOpenThread={openConversation} onNewThread={() => newThreadInRoom(activeRoom.id)} onSaveRoom={saveRoom} onSaveBrief={saveBrief} onCreatePin={createPin} onUpdatePin={updatePin} onDeletePin={removePin} onDelete={removeRoom} /> : loadingConversation ? <div className="message-list conversation-skeleton" role="status" aria-busy="true" aria-label="Loading conversation"><div className="skeleton-line is-short" /><div className="skeleton-line" /><div className="skeleton-line" /><div className="skeleton-line is-medium" /></div> : messages.length ? <div className="message-list" aria-live="polite">{messages.map((message) => <MessageRow key={message.id} message={message} initial={initial} isLast={message.id === lastMessage?.id} isLastUser={message.id === lastUser?.id} canMutate={!preview} disabled={messageActionsLocked} editing={editingId === message.id} responseFailed={notice === failureNotice} onRegenerate={regenerate} onStartEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} onContinueInWorkbench={preview ? undefined : continueInWorkbench} workbenchPending={workbenchPending} />)}{notice && <p className="local-notice" role="status">{notice}</p>}</div> : <div className="welcome-panel">{notice && <p className="local-notice" role="status">{notice}</p>}<div className="welcome-icon"><BrandMark activity={assistantActivity} /></div><p className="welcome-eyebrow">{drafting && activeRoom ? "NEW THREAD" : "A LITTLE ROOM TO THINK"}</p><h1>{drafting && activeRoom ? activeRoom.name : "What’s on your mind?"}</h1><p className="welcome-copy">{drafting && activeRoom ? "This thread starts inside the room. Nibie will use its instructions, brief, and pins." : "A fresh page for ideas, questions, and whatever you’re working through."}</p>{drafting ? null : <div className="suggestion-list" aria-label="Suggestions">{suggestions.map((suggestion) => <button key={suggestion} onClick={() => { composerRef.current?.set(suggestion); composerRef.current?.focus(); }}>{suggestion}<span>↗</span></button>)}</div>}</div>}</div>
+      {showRoom ? null : <ChatComposer ref={composerRef} sending={sending || recovering || movingThread !== null} streaming={streaming} mode={mode} models={models} onModelChange={changeModel} savingMode={savingMode} caption={caption} diagnostics={contextDiagnostics ?? contextPreview} onEditProfile={editProfile} onSubmit={submitMessage} onStop={stopStream} onAttach={attach} roomItems={roomItems} roomId={selectedRoomId ?? ""} roomLabel={roomLabel} roomSelectionNotice={roomSelectionNotice} roomsLoading={roomsLoading} onRoomChange={activeId ? undefined : chooseDraftRoom} attachmentPanel={filePickerOpen && threadRoom ? <RoomFilePicker roomId={threadRoom.id} selectedIds={selectedFileIds} disabled={controlsDisabled || sending || streaming} onChange={setSelectedFileIds} /> : null} />}    </section>
     {renaming && <dialog ref={renameDialogRef} className="room-setup-dialog" aria-labelledby={renameTitleId} aria-busy={renameSaving} onCancel={(event) => { event.preventDefault(); if (!renameSaving) setRenaming(null); }}>
       <header className="settings-header"><h1 id={renameTitleId}>Rename conversation</h1><button type="button" className="icon-button" aria-label="Close rename dialog" disabled={renameSaving} onClick={() => setRenaming(null)}><X size={18} /></button></header>
       <form className="room-setup-form" onSubmit={(event) => { event.preventDefault(); void saveRename(); }}>

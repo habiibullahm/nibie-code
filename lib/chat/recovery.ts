@@ -30,6 +30,13 @@ export function needsServerCheck(kind: StreamFailureKind) {
 
 type StatusRow = { id: string; role: string; status?: string; position: number };
 
+// A stop-status acknowledgement can arrive before the partial text is persisted.
+export function messagePersistenceConfirmed(local: { role: string; content: string; terminationReason?: "user_stopped" }, saved: { content: string; status?: string }) {
+  if (saved.status === "streaming") return false;
+  if (local.role === "user") return saved.content === local.content;
+  return local.terminationReason !== "user_stopped" || saved.content.startsWith(local.content);
+}
+
 export function hasActiveGeneration(messages: readonly StatusRow[]) {
   return messages.some((message) => message.status === "streaming");
 }

@@ -43,6 +43,27 @@
       "when": 1791020000001,
       "tag": "0005_superb_frank_castle",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791110000000,
+      "tag": "0006_pins",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1791120000000,
+      "tag": "0007_room_files",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791130000000,
+      "tag": "0008_workbench",
+      "breakpoints": true
     }
   ]
 }

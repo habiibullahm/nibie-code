@@ -3,11 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const { createClient, stream, claim, modelOptions, contextCapabilities } = vi.hoisted(() => ({ createClient: vi.fn(), stream: vi.fn(), claim: vi.fn(), modelOptions: vi.fn(), contextCapabilities: vi.fn(() => ({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 })) }));
 vi.mock("@/lib/supabase/server", () => ({ createSupabaseServerClient: createClient }));
 vi.mock("@/lib/ai/provider", () => ({ chatProvider: { stream } }));
-vi.mock("@/lib/ai/registry", () => ({ getModelOptions: modelOptions, contextCapabilitiesFor: contextCapabilities }));
-const allModes = { models: ["Fast", "Balanced", "Reasoning"].map((id) => ({ id, label: id, model: `${id.toLowerCase()}-id` })), reasoningModes: ["Reasoning"] };
+vi.mock("@/lib/ai/registry", () => ({ getModelOptions: modelOptions, contextCapabilitiesFor: contextCapabilities, providerFor: (mode: string) => mode === "Fast" ? "sumopod" : "openai" }));
+const allModes = { models: ["Fast", "Balanced", "High"].map((id) => ({ id, label: id, description: "" })) };
 
 import { POST } from "../../app/api/chat/route";
-import { CONTEXT_DATA_PREAMBLE, CONTEXT_POLICY_TEXT } from "../../lib/context/context-policy";
+import { CONTEXT_DATA_PREAMBLE, CONTEXT_POLICY_TEXT, contextPolicyFor } from "../../lib/context/context-policy";
+import { readChatSse } from "../../lib/ai/sse";
+import { responseQualityFor } from "../../lib/ai/response-quality";
 
 let preferenceResult: { data: unknown; error: unknown } = { data: null, error: null };
 const assistantId = "e3b624e6-d792-47a8-8ff2-46724452c1ca";
@@ -16,6 +18,41 @@ const assistant = { id: assistantId, position: 3, content: "…", status: "strea
 describe("POST /api/chat", () => {
   beforeEach(() => { preferenceResult = { data: null, error: null }; createClient.mockReset(); stream.mockReset(); modelOptions.mockReset().mockReturnValue(allModes); contextCapabilities.mockReset().mockReturnValue({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 }); claim.mockReset().mockReturnValue(query({ data: assistant, error: null })); });
   afterEach(() => vi.useRealTimers());
+
+  it.each(["stop", "length", "content_filter"])("finalizes %s explicitly, with sanitized persistence", async (reason) => {
+    const writes: unknown[] = [];
+    readyClient(writes);
+    stream.mockResolvedValue(providerChunks(["<thi", "nk>private</think>Complete visible answer."], reason));
+    const response = await POST(validRequest());
+    if (reason === "stop") {
+      expect((await Array.fromAsync(readChatSse(response.body!))).slice(-2)).toEqual([{ type: "status", status: "complete" }, { type: "done" }]);
+    } else {
+      await expect(Array.fromAsync(readChatSse(response.body!))).rejects.toThrow(reason === "length" ? "output limit" : "content filter");
+    }
+    expect(writes).toContainEqual({ content: "Complete visible answer.", status: reason === "stop" ? "complete" : "error" });
+    expect(JSON.stringify(writes)).not.toContain("private");
+  });
+
+  it.each(["Auto", "High"])("routes model choice %s on the server", async (model) => {
+    readyClient([]);
+    stream.mockResolvedValue(providerChunks(["Done."], "stop"));
+    const request = validRequest();
+    const response = await POST(new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify({ ...await request.json(), model }) }));
+    await response.text();
+    expect(stream.mock.calls[0][0]).toBe(model === "Auto" ? "Balanced" : "High");
+  });
+
+  it.each(["Fast", "Balanced", "High"])("gives %s the same adaptive response-detail policy, so the mode never sets answer length", async (model) => {
+    readyClient([]);
+    stream.mockResolvedValue(providerChunks(["Done."], "stop"));
+    const request = validRequest();
+    const response = await POST(new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify({ ...await request.json(), model, regenerate: true }) }));
+    await response.text();
+    expect(stream.mock.calls[0][0]).toBe(model);
+    expect(stream.mock.calls[0][1][0].content).toBe(contextPolicyFor("High"));
+    expect(stream.mock.calls[0][1][0].content).toBe(contextPolicyFor("Fast"));
+    expect(claim).toHaveBeenCalledWith("regenerate_assistant_message", expect.any(Object));
+  });
 
   it("returns 401 before reading request data or invoking a provider", async () => {
     createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: null, error: new Error("no session") }) } });
@@ -114,12 +151,42 @@ describe("POST /api/chat", () => {
     expect(response.headers.get("content-type")).toContain("text/event-stream");
     expect(body).toContain('event: delta\ndata: {"text":"Hello"}');
     expect(body).toContain('event: status\ndata: {"status":"complete"}');
-    expect(stream).toHaveBeenCalledWith("Balanced", [{ role: "system", content: CONTEXT_POLICY_TEXT }, { role: "user", content: "hello" }], expect.any(AbortSignal), { reasoning: "auto" });
+    expect(stream).toHaveBeenCalledWith("Balanced", [{ role: "system", content: CONTEXT_POLICY_TEXT }, { role: "user", content: "hello" }], expect.any(AbortSignal));
     expect(claim).toHaveBeenCalledWith("claim_assistant_message", { p_conversation_id: "conversation", p_user_message_id: "b79e56e1-b479-46f4-97d3-30b2e22be90e" });
     expect(body).toContain(`"id":"${assistantId}"`);
     expect(body).toContain('"position":3');
     expect(body).toContain('"context"');
     expect(writes).toContainEqual(expect.objectContaining({ content: "Hello", status: "complete" }));
+  });
+
+  it("correlates one request id across start, context, and completion without message content", async () => {
+    readyClient([]);
+    stream.mockResolvedValue(sseBody("Hello"));
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const request = validRequest();
+      request.headers.set("x-vercel-id", "icn1::abc123request");
+      const response = await POST(request);
+      expect(response.status).toBe(200);
+      await response.text();
+      const records = info.mock.calls.map(([line]) => JSON.parse(String(line)) as { event?: string; requestId?: string; profileIncluded?: boolean; roomIncluded?: boolean });
+      const started = records.find((record) => record.event === "chat.response.started");
+      const built = records.find((record) => record.event === "context.built");
+      const completed = records.find((record) => record.event === "chat.response.completed");
+      expect(started?.requestId).toBe("icn1::abc123request");
+      expect(built?.requestId).toBe(started?.requestId);
+      expect(completed?.requestId).toBe(started?.requestId);
+      expect(built).toMatchObject({ profileIncluded: false, roomIncluded: false, policyVersion: "context-policy-v1", truncated: false });
+      expect(built).toMatchObject({ pinsIncluded: false, fileIncluded: false, fileCount: 0 });
+      expect(built).not.toHaveProperty("filesIncluded");
+      const serialized = JSON.stringify([...info.mock.calls, ...error.mock.calls]);
+      expect(serialized).not.toContain("hello");
+      expect(serialized).not.toContain("Hello");
+    } finally {
+      info.mockRestore();
+      error.mockRestore();
+    }
   });
 
   it("does not announce completion when the assistant response failed to persist", async () => {
@@ -177,7 +244,9 @@ describe("POST /api/chat", () => {
       const response = await POST(validRequest());
       expect(response.status).toBe(502);
       expect(await response.text()).not.toContain("AI_PROVIDER");
-      expect(logged).toHaveBeenCalledWith("Unsupported AI_PROVIDER; expected openai-compatible.");
+      const records = logged.mock.calls.map(([line]) => JSON.parse(String(line)) as { event?: string; code?: string; reason?: string });
+      expect(records).toContainEqual(expect.objectContaining({ event: "chat.response.failed", code: "AI_PROVIDER_FAILED", reason: "unsupported_provider", stage: "provider" }));
+      expect(JSON.stringify(records)).not.toContain("openai-compatible");
     } finally { logged.mockRestore(); }
   });
 
@@ -213,6 +282,49 @@ describe("POST /api/chat", () => {
     const response = await pending;
     expect(response.status).toBe(502);
     expect(writes).toContainEqual(expect.objectContaining({ content: "Response stopped.", status: "interrupted" }));
+  });
+
+  it("persists and streams the answer without internal reasoning", async () => {
+    const writes: unknown[] = [];
+    readyClient(writes);
+    stream.mockResolvedValue(providerChunks(["<thi", "nk>private reasoning</th", "ink>\n# Proposal"]));
+    const logged = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    try {
+      const response = await POST(validRequest());
+      const body = await response.text();
+      expect(body).toContain('event: delta\ndata: {"text":"# Proposal"}');
+      expect(body).not.toContain("<think");
+      expect(body).not.toContain("private reasoning");
+      expect(writes).toContainEqual(expect.objectContaining({ content: "# Proposal", status: "complete" }));
+      expect(writes.map((write) => JSON.stringify(write)).join("\n")).not.toContain("private reasoning");
+      const filtered = logged.mock.calls.map((call) => String(call[0])).find((line) => line.includes("ai.reasoning.filtered"));
+      expect(filtered).toBeTruthy();
+      expect(filtered).not.toContain("private reasoning");
+      expect(JSON.parse(filtered!)).toMatchObject({ event: "ai.reasoning.filtered", requestId: assistantId, reasoningBlockCount: 1 });
+    } finally { logged.mockRestore(); }
+  });
+
+  it("sanitizes a retry through the same generation path", async () => {
+    const writes: unknown[] = [];
+    readyClient(writes);
+    stream.mockResolvedValue(providerChunks(["<think>private reasoning</think>\n# Proposal"]));
+    const response = await POST(validRequest());
+    const body = await response.text();
+    expect(body).not.toContain("private reasoning");
+    expect(writes).toContainEqual(expect.objectContaining({ content: "# Proposal", status: "complete" }));
+  });
+
+  it("sanitizes a regenerate through the same generation path", async () => {
+    const writes: unknown[] = [];
+    readyClient(writes);
+    stream.mockResolvedValue(providerChunks(["<think>private reasoning</think>\n# Proposal"]));
+    const request = validRequest();
+    const regenerating = new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify({ conversationId: "5e9bdcca-9205-4fea-a773-13952bb78c44", userMessageId: "b79e56e1-b479-46f4-97d3-30b2e22be90e", regenerate: true }) });
+    const response = await POST(regenerating);
+    const body = await response.text();
+    expect(body).not.toContain("private reasoning");
+    expect(claim).toHaveBeenCalledWith("regenerate_assistant_message", expect.any(Object));
+    expect(writes).toContainEqual(expect.objectContaining({ content: "# Proposal", status: "complete" }));
   });
 
   it("replays a saved response without invoking the provider", async () => {
@@ -308,9 +420,9 @@ describe("POST /api/chat", () => {
     });
 
     it("rejects a mode that is not configured on the server, before reading any user data", async () => {
-      modelOptions.mockReturnValue({ models: allModes.models.filter((option) => option.id !== "Reasoning"), reasoningModes: [] });
+      modelOptions.mockReturnValue({ models: allModes.models.filter((option) => option.id !== "High") });
       const from = readyClient([]);
-      const response = await post({ model: "Reasoning" });
+      const response = await post({ model: "High" });
       expect(response.status).toBe(400);
       expect(await response.text()).toContain("isn't available");
       expect(from).not.toHaveBeenCalled();
@@ -318,7 +430,7 @@ describe("POST /api/chat", () => {
     });
 
     it("falls back to an available mode when the saved one is no longer configured", async () => {
-      modelOptions.mockReturnValue({ models: allModes.models.filter((option) => option.id === "Fast"), reasoningModes: [] });
+      modelOptions.mockReturnValue({ models: allModes.models.filter((option) => option.id === "Fast") });
       readyClient([]);
       stream.mockResolvedValue(sseBody("ok"));
       expect((await post({})).status).toBe(200);
@@ -326,40 +438,96 @@ describe("POST /api/chat", () => {
     });
 
     it("fails safely when no mode is configured at all", async () => {
-      modelOptions.mockReturnValue({ models: [], reasoningModes: [] });
+      modelOptions.mockReturnValue({ models: [] });
       readyClient([]);
       expect((await post({})).status).toBe(503);
       expect(stream).not.toHaveBeenCalled();
     });
 
-    it("passes an allowed reasoning effort to the provider only for modes that support it", async () => {
+    it("accepts the legacy Reasoning id server-side, from an old client request or an old saved row, and routes it as High", async () => {
       readyClient([]);
       stream.mockResolvedValue(sseBody("ok"));
-      expect((await post({ model: "Reasoning", reasoning: "low" })).status).toBe(200);
-      expect(stream).toHaveBeenCalledWith("Reasoning", expect.any(Array), expect.any(AbortSignal), { reasoning: "low" });
-    });
-
-    it("rejects a reasoning effort for a mode that does not support it, without calling the provider", async () => {
-      readyClient([]);
-      const response = await post({ model: "Balanced", reasoning: "high" });
-      expect(response.status).toBe(400);
-      expect(await response.text()).toContain("Reasoning isn't available");
-      expect(claim).not.toHaveBeenCalled();
-      expect(stream).not.toHaveBeenCalled();
-    });
-
-    it("rejects reasoning values outside the allowlist", async () => {
-      readyClient([]);
-      for (const reasoning of ["bogus", "xhigh", "LOW", "", 1, null]) expect((await post({ model: "Reasoning", reasoning })).status).toBe(400);
-      expect(stream).not.toHaveBeenCalled();
-    });
-
-    it("treats auto as no reasoning parameter, even for modes that do not support it", async () => {
-      readyClient([]);
+      expect((await post({ model: "Reasoning" })).status).toBe(200);
+      expect(stream.mock.calls[0][0]).toBe("High");
+      stream.mockReset();
+      readyClient([], undefined, "Reasoning");
       stream.mockResolvedValue(sseBody("ok"));
-      expect((await post({ model: "Balanced", reasoning: "auto" })).status).toBe(200);
-      expect(stream.mock.calls[0][3]).toEqual({ reasoning: "auto" });
+      expect((await post({})).status).toBe(200);
+      expect(stream.mock.calls[0][0]).toBe("High");
     });
+
+    it("never lets a client set reasoning: a stale reasoning field is ignored and the provider gets only the mode", async () => {
+      for (const reasoning of ["low", "high", "auto", "bogus", 1, null]) {
+        readyClient([]);
+        stream.mockReset().mockResolvedValue(sseBody("ok"));
+        expect((await post({ model: "High", reasoning })).status).toBe(200);
+        expect(stream.mock.calls[0]).toHaveLength(3);
+        expect(stream.mock.calls[0][0]).toBe("High");
+      }
+    });
+  });
+
+  it.each([
+    { pins: false, file: false, regenerate: false },
+    { pins: true, file: false, regenerate: false },
+    { pins: false, file: true, regenerate: false },
+    { pins: true, file: true, regenerate: false },
+    { pins: false, file: false, regenerate: true },
+    { pins: true, file: false, regenerate: true },
+    { pins: false, file: true, regenerate: true },
+    { pins: true, file: true, regenerate: true },
+  ])("emits room diagnostics accepted by the chat parser: %j", async ({ pins, file, regenerate }) => {
+    const fileId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const writes: unknown[] = [];
+    const outcomes = [
+      { data: { id: "user-message", position: 1, content: "hello" }, error: null },
+      { data: [{ role: "user", content: "hello", status: "complete", position: 1 }], error: null },
+      { data: { id: assistantId }, error: null },
+    ];
+    const from = vi.fn((table: string) => {
+      if (table === "user_preferences") return query(preferenceResult);
+      if (table === "conversations") return query({ data: { id: "conversation", selected_model: "Balanced", room_id: "room" }, error: null });
+      if (table === "rooms") return query({ data: { name: "Clinic", instructions: "Plan a clinic assistant." }, error: null });
+      if (table === "room_briefs") return query({ data: null, error: null });
+      if (table === "pins") return query({ data: pins ? [{ id: "pin", title: "Scope", content: "Scheduling", updated_at: "2026-10-03T00:00:00.000Z" }] : [], error: null });
+      if (table === "room_files") return query({ data: [{ id: fileId, original_name: "notes.txt", extracted_text: "A scheduling prototype." }], error: null });
+      return query(outcomes.shift(), (write) => writes.push(write));
+    });
+    createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc: claim });
+    stream.mockResolvedValue(providerChunks(["<think>Private reasoning</think>", "Hello"]));
+    const request = validRequest();
+    const response = await POST(new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify({
+      ...await request.json(), regenerate, ...(file ? { fileIds: [fileId] } : {}),
+    }) }));
+    expect(response.status).toBe(200);
+    expect(response.body).not.toBeNull();
+    const events = await Array.fromAsync(readChatSse(response.body!));
+    expect(events[0]).toMatchObject({ type: "start", id: assistantId, context: { sources: expect.arrayContaining([
+      { type: "room", label: "This room", state: "included", reason: expect.any(String) },
+      { type: "pins", label: "Pinned context", state: pins ? "included" : "not_used", reason: expect.any(String) },
+    ]) } });
+    if (file) expect(events[0]).toMatchObject({ context: { sources: expect.arrayContaining([{ type: "file", label: "File context", state: "included", reason: "Selected room file" }]) } });
+    expect(events.filter((event) => event.type === "delta")).toEqual([{ type: "delta", text: "Hello" }]);
+    expect(events.slice(-2)).toEqual([{ type: "status", status: "complete" }, { type: "done" }]);
+    expect(writes).toContainEqual({ content: "Hello", status: "complete" });
+    expect(claim).toHaveBeenCalledWith(regenerate ? "regenerate_assistant_message" : "claim_assistant_message", expect.any(Object));
+    expect(JSON.stringify(events)).not.toContain("Private reasoning");
+  });
+
+  it.each((["Fast", "Balanced", "High"] as const).flatMap((mode) => [false, true].map((regenerate) => ({ mode, regenerate }))))("uses the resolved mode's quality policy for generation/retry: %j", async ({ mode, regenerate }) => {
+    readyClient([]);
+    stream.mockResolvedValue(sseBody("Hello"));
+    const request = validRequest();
+    const body = await request.json() as { conversationId: string; userMessageId: string };
+    const response = await POST(new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify({ ...body, model: mode, regenerate }) }));
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('"status":"complete"');
+    const messages = stream.mock.calls[0][1] as { role: string; content: string }[];
+    expect(messages[0]).toEqual({ role: "system", content: contextPolicyFor(mode) });
+    expect(messages[0].content.split(responseQualityFor(mode))).toHaveLength(2);
+    expect(messages.at(-1)).toEqual({ role: "user", content: "hello" });
+    expect(stream.mock.calls[0][0]).toBe(mode);
+    expect(claim).toHaveBeenCalledWith(regenerate ? "regenerate_assistant_message" : "claim_assistant_message", expect.any(Object));
   });
 
   describe("account preferences in the provider context", () => {
@@ -417,7 +585,7 @@ describe("POST /api/chat", () => {
       }));
       expect(response.status).toBe(200);
       const messages = stream.mock.calls[0][1] as { role: string; content: string }[];
-      expect(messages[0].content).toBe(CONTEXT_POLICY_TEXT);
+      expect(messages[0].content).toBe(contextPolicyFor("Fast"));
       expect(messages[0].content).not.toContain("SECRET CONTEXT");
       expect(stream.mock.calls[0][0]).toBe("Fast");
     });
@@ -434,21 +602,68 @@ describe("POST /api/chat", () => {
         expect(claim).toHaveBeenCalled();
         const messages = stream.mock.calls[0][1] as { role: string; content: string }[];
         expect(messages[0]).toEqual({ role: "system", content: CONTEXT_POLICY_TEXT });
-        expect(logged).toHaveBeenCalledWith("preference_read_failed");
+        const records = logged.mock.calls.map(([line]) => JSON.parse(String(line)) as { event?: string; code?: string });
+        expect(records).toContainEqual(expect.objectContaining({ event: "preferences.read.failed", code: "PREFERENCE_READ_FAILED" }));
+        expect(JSON.stringify(records)).not.toContain("database unavailable");
       } finally { logged.mockRestore(); }
+    });
+
+    it("includes only an explicitly selected room file and hides another user's file", async () => {
+      const fileId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+      const outcomes = [
+        { data: { id: "user-message", position: 1, content: "hello" }, error: null },
+        { data: [{ role: "user", content: "hello", status: "complete", position: 1 }], error: null },
+        { data: { id: assistantId }, error: null },
+      ];
+      const from = vi.fn((table: string) => {
+        if (table === "user_preferences") return query(preferenceResult);
+        if (table === "conversations") return query({ data: { id: "conversation", selected_model: "Balanced", room_id: "room" }, error: null });
+        if (table === "rooms") return query({ data: { name: "Lab", instructions: null }, error: null });
+        if (table === "room_briefs") return query({ data: null, error: null });
+        if (table === "pins") return query({ data: [], error: null });
+        if (table === "room_files") return query({ data: [{ id: fileId, original_name: "notes.txt", extracted_text: "The launch code is blue." }], error: null });
+        if (table === "messages") return query(outcomes.shift()!);
+        return query({ data: null, error: null });
+      });
+      createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc: claim });
+      stream.mockResolvedValue(sseBody("Hello"));
+      const response = await POST(new Request("http://localhost/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: "5e9bdcca-9205-4fea-a773-13952bb78c44", userMessageId: "b79e56e1-b479-46f4-97d3-30b2e22be90e", fileIds: [fileId] }) }));
+      expect(response.status).toBe(200);
+      const body = await response.text();
+      expect(body).toContain("File context");
+      expect(body).not.toContain("The launch code is blue.");
+      const messages = stream.mock.calls[0][1] as { role: string; content: string }[];
+      expect(messages[0].content).not.toContain("launch code");
+      expect(messages[1].content).toContain("The launch code is blue.");
+      expect(messages.at(-1)?.content).toBe("hello");
+
+      const hidden = vi.fn((table: string) => {
+        if (table === "user_preferences") return query(preferenceResult);
+        if (table === "conversations") return query({ data: { id: "conversation", selected_model: "Balanced", room_id: "room" }, error: null });
+        if (table === "rooms") return query({ data: { name: "Lab", instructions: null }, error: null });
+        if (table === "room_briefs") return query({ data: null, error: null });
+        if (table === "pins") return query({ data: [], error: null });
+        if (table === "room_files") return query({ data: [], error: null });
+        return query({ data: { id: "user-message", position: 1, content: "hello" }, error: null });
+      });
+      createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from: hidden, rpc: claim });
+      const denied = await POST(new Request("http://localhost/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: "5e9bdcca-9205-4fea-a773-13952bb78c44", userMessageId: "b79e56e1-b479-46f4-97d3-30b2e22be90e", fileIds: [fileId] }) }));
+      expect(denied.status).toBe(400);
+      expect(stream).toHaveBeenCalledTimes(1);
+      expect(claim).toHaveBeenCalledTimes(1);
     });
   });
 });
 
 const encoder = new TextEncoder();
-function readyClient(writes: unknown[], updates: unknown[] = [{ data: { id: assistantId }, error: null }]) {
+function readyClient(writes: unknown[], updates: unknown[] = [{ data: { id: assistantId }, error: null }], savedModel = "Balanced") {
   const results = [
     { data: { id: "user-message", position: 1, content: "hello" }, error: null },
     { data: [{ role: "user", content: "hello", status: "complete", position: 1 }], error: null },
     ...updates,
   ];
   const from = vi.fn((table: string) => table === "user_preferences" ? query(preferenceResult) : table === "conversations"
-    ? query({ data: { id: "conversation", selected_model: "Balanced" }, error: null })
+    ? query({ data: { id: "conversation", selected_model: savedModel }, error: null })
     : query(results.shift(), (write) => writes.push(write)));
   createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc: claim });
   return from;
@@ -460,7 +675,7 @@ function validRequest(signal?: AbortSignal) {
 
 function query(result: unknown, onWrite?: (write: unknown) => void) {
   const builder: Record<string, unknown> = {};
-  for (const method of ["select", "eq", "lte", "order", "limit"]) builder[method] = () => builder;
+  for (const method of ["select", "eq", "lte", "order", "limit", "in"]) builder[method] = () => builder;
   builder.eq = vi.fn(() => builder);
   builder.insert = (write: unknown) => { onWrite?.(write); return builder; };
   builder.update = (write: unknown) => { onWrite?.(write); return builder; };
@@ -471,9 +686,14 @@ function query(result: unknown, onWrite?: (write: unknown) => void) {
 }
 
 function sseBody(text: string) {
-  const encoder = new TextEncoder();
+  return providerChunks([text]);
+}
+
+function providerChunks(parts: string[], finishReason?: string) {
   return new ReadableStream<Uint8Array>({ start(controller) {
-    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`));
-    controller.enqueue(encoder.encode("data: [DONE]\n\n")); controller.close();
+    for (const part of parts) controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: part } }] })}\n\n`));
+    if (finishReason) controller.enqueue(encoder.encode("data: " + JSON.stringify({ choices: [{ delta: {}, finish_reason: finishReason }] }) + "\n\n"));
+    controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+    controller.close();
   } });
 }

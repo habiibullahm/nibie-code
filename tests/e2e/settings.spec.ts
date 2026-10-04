@@ -26,8 +26,10 @@ test.describe("settings shell", () => {
 
   test("saves a new-chat default without changing the open conversation", async ({ page }) => {
     await page.goto("/preview");
-    await page.getByRole("button", { name: "Debouncing a search box" }).click();
-    await expect(page.getByRole("button", { name: "Model: Balanced" })).toBeVisible();
+    await page.getByRole("button", { name: "Debouncing a search box", exact: true }).click();
+    await page.getByRole("button", { name: "Model: Balanced", exact: true }).click();
+    await page.getByRole("menuitemradio", { name: /^High/ }).click();
+    await expect(page.getByRole("button", { name: "Model: High", exact: true })).toBeEnabled();
 
     await openSettings(page);
     await dialog(page).getByRole("tab", { name: "Nibie", exact: true }).click();
@@ -35,9 +37,10 @@ test.describe("settings shell", () => {
     await expect(dialog(page).getByRole("status")).toHaveText("Saved");
     await page.keyboard.press("Escape");
 
-    await expect(page.getByRole("button", { name: "Model: Balanced" })).toBeVisible();
+    // The open conversation keeps its own mode; a new chat follows the saved default (Fast).
+    await expect(page.getByRole("button", { name: "Model: High", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "New chat", exact: true }).first().click();
     await expect(page.getByRole("heading", { name: "What’s on your mind?" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Model: Fast" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Model: Fast", exact: true })).toBeVisible();
   });
 });

@@ -5,6 +5,7 @@ import { expect, test, type Page } from "@playwright/test";
 const theme = (page: Page) => page.evaluate(() => document.documentElement.getAttribute("data-theme"));
 const background = (page: Page) => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
 
+
 async function openThemeSettings(page: Page) {
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
@@ -75,7 +76,7 @@ test.describe("theme", () => {
 
   test("keeps text readable in both themes", async ({ page }) => {
     await page.goto("/preview");
-    await page.getByRole("button", { name: "Debouncing a search box" }).click();
+    await page.getByRole("button", { name: "Debouncing a search box", exact: true }).click();
     const contrast = () => page.evaluate(() => {
       const channels = (value: string) => (value.match(/\d+(\.\d+)?/g) ?? []).slice(0, 3).map(Number);
       const luminance = ([r, g, b]: number[]) => { const [x, y, z] = [r, g, b].map((v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; }); return 0.2126 * x + 0.7152 * y + 0.0722 * z; };
@@ -104,54 +105,40 @@ test.describe("brand", () => {
   });
 });
 
-test.describe("model and reasoning pickers (mock workspace)", () => {
-  test("the model menu offers the configured modes with their model names and is keyboard operable", async ({ page }) => {
+test.describe("mode picker (mock workspace)", () => {
+  test("offers only Fast, Balanced and High, defaults to Balanced, and is keyboard operable", async ({ page }) => {
     await page.goto("/preview");
-    const model = page.getByRole("button", { name: "Model: Balanced" });
-    await expect(model).toHaveAttribute("aria-haspopup", "menu");
-    await model.click();
+    const picker = page.getByRole("button", { name: "Model: Balanced", exact: true });
+    await expect(picker).toHaveText("Balanced");
+    await expect(picker).toHaveAttribute("aria-haspopup", "menu");
+    await expect(page.getByRole("button", { name: /^Reasoning:/ })).toHaveCount(0);
+    await picker.click();
     const menu = page.getByRole("menu", { name: "Model" });
-    await expect(menu.getByRole("menuitemradio")).toHaveText([/Fast\s*preview-fast/, /Balanced\s*preview-balanced/, /Reasoning\s*preview-reasoning/]);
-    await expect(menu.getByRole("menuitemradio", { name: /Balanced/ })).toBeFocused();
+    await expect(menu.getByRole("menuitemradio")).toHaveText([/^Fast\s*Quick answers/, /^Balanced\s*Best for everyday work/, /^High\s*Deeper reasoning/]);
+    await expect(menu.getByRole("menuitemradio", { name: /^Balanced/ })).toBeFocused();
     await page.keyboard.press("ArrowUp");
-    await expect(menu.getByRole("menuitemradio", { name: /Fast/ })).toBeFocused();
+    await expect(menu.getByRole("menuitemradio", { name: /^Fast/ })).toBeFocused();
     await page.keyboard.press("Enter");
     await expect(menu).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Model: Fast" })).toBeFocused();
-    await page.getByRole("button", { name: "Model: Fast" }).click();
+    await expect(page.getByRole("button", { name: "Model: Fast", exact: true })).toBeFocused();
+    await page.getByRole("button", { name: "Model: Fast", exact: true }).click();
     await page.keyboard.press("Escape");
     await expect(menu).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Model: Fast" })).toBeFocused();
+    await expect(page.getByRole("button", { name: "Model: Fast", exact: true })).toBeFocused();
+    // Provider names and reasoning vocabulary never appear in the composer.
+    await expect(page.locator(".composer")).not.toContainText(/Reasoning|Low|Medium|Auto|GPT|DeepSeek|MiniMax|OpenAI|preview-/);
   });
 
-  test("the reasoning control is disabled with a reason until a supporting mode is chosen, and keeps its own level", async ({ page }) => {
+  test("shows the chosen mode", async ({ page }) => {
     await page.goto("/preview");
-    const unavailable = page.getByRole("button", { name: /^Reasoning: Auto \(Not supported by Balanced\)/ });
-    await expect(unavailable).toBeDisabled();
-    await page.getByRole("button", { name: "Model: Balanced" }).click();
-    await page.getByRole("menuitemradio", { name: /Reasoning/ }).click();
-    const reasoning = page.getByRole("button", { name: "Reasoning: Auto", exact: true });
-    await expect(reasoning).toBeEnabled();
-    await reasoning.click();
-    await expect(page.getByRole("menu", { name: "Reasoning" }).getByRole("menuitemradio")).toHaveText([/Auto/, /Low/, /Medium/, /High/]);
-    await page.getByRole("menuitemradio", { name: /Low/ }).click();
-    await expect(page.getByRole("button", { name: "Reasoning: Low", exact: true })).toBeVisible();
-    // Switching away disables it again (and the level is not applied), switching back restores the remembered level.
-    await page.getByRole("button", { name: "Model: Reasoning" }).click();
-    await page.getByRole("menuitemradio", { name: /Fast/ }).click();
-    await expect(page.getByRole("button", { name: /^Reasoning: Auto \(Not supported by Fast\)/ })).toBeDisabled();
-    await page.getByRole("button", { name: "Model: Fast" }).click();
-    await page.getByRole("menuitemradio", { name: /Reasoning/ }).click();
-    await expect(page.getByRole("button", { name: "Reasoning: Low", exact: true })).toBeVisible();
-    await page.reload();
-    await page.getByRole("button", { name: "Model: Balanced" }).click();
-    await page.getByRole("menuitemradio", { name: /Reasoning/ }).click();
-    await expect(page.getByRole("button", { name: "Reasoning: Low", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Model: Balanced", exact: true }).click();
+    await page.getByRole("menuitemradio", { name: /^High/ }).click();
+    await expect(page.getByRole("button", { name: "Model: High", exact: true })).toHaveText("High");
   });
 });
 
 test.describe("layout has no horizontal overflow", () => {
-  for (const [width, height] of [[390, 844], [768, 1024], [1024, 768], [1440, 900]]) {
+  for (const [width, height] of [[320, 740], [390, 844], [768, 1024], [1024, 768], [1440, 900]]) {
     for (const scheme of ["dark", "light"] as const) {
       test(`${width}px, ${scheme} theme, with menus open`, async ({ browser }) => {
         const context = await browser.newContext({ viewport: { width, height } });
@@ -159,11 +146,9 @@ test.describe("layout has no horizontal overflow", () => {
         const page = await context.newPage();
         await page.goto("/preview");
         if (width <= 760) await page.getByRole("button", { name: "Open conversation menu" }).click();
-        await page.getByRole("button", { name: "Debouncing a search box" }).first().click();
+        await page.getByRole("button", { name: "Debouncing a search box", exact: true }).first().click();
         await expect(page.locator(".code-block")).toBeVisible();
         await page.getByRole("button", { name: /^Model:/ }).click();
-        await page.getByRole("menuitemradio", { name: /Reasoning/ }).click();
-        await page.getByRole("button", { name: /^Reasoning:/ }).click();
         const menu = await page.locator(".composer-menu-list").boundingBox();
         expect(menu!.x).toBeGreaterThanOrEqual(0);
         expect(menu!.x + menu!.width).toBeLessThanOrEqual(width);
@@ -184,7 +169,7 @@ test.describe("conversation scrolling", () => {
     await page.setViewportSize({ width: 390, height: 520 });
     await page.goto("/preview");
     await page.getByRole("button", { name: "Open conversation menu" }).click();
-    await page.getByRole("button", { name: "Debouncing a search box" }).first().click();
+    await page.getByRole("button", { name: "Debouncing a search box", exact: true }).first().click();
     await expect(page.locator(".code-block")).toBeVisible();
     // The conversation is taller than the screen, and it opens at its end rather than at the first message.
     expect(await page.evaluate(() => { const box = document.querySelector(".conversation-scroll")!; return box.scrollHeight > box.clientHeight; })).toBe(true);
@@ -203,12 +188,12 @@ test.describe("conversation scrolling", () => {
     await page.setViewportSize({ width: 390, height: 520 });
     await page.goto("/preview");
     await page.getByRole("button", { name: "Open conversation menu" }).click();
-    await page.getByRole("button", { name: "Debouncing a search box" }).first().click();
+    await page.getByRole("button", { name: "Debouncing a search box", exact: true }).first().click();
     await expect(page.locator(".code-block")).toBeVisible();
     await page.evaluate(() => { document.querySelector(".conversation-scroll")!.scrollTop = 0; });
-    // Unrelated updates (opening a menu, changing the model) must not move the reader.
+    // Unrelated updates (opening a menu, changing the mode) must not move the reader.
     await page.getByRole("button", { name: /^Model:/ }).click();
-    await page.getByRole("menuitemradio", { name: /Fast/ }).click();
+    await page.getByRole("menuitemradio", { name: /^Fast/ }).click();
     expect(await page.evaluate(() => document.querySelector(".conversation-scroll")!.scrollTop)).toBe(0);
   });
 });

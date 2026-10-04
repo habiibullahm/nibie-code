@@ -1,6 +1,22 @@
 export const historyGroups = ["Today", "Yesterday", "Older"] as const;
 export type HistoryGroup = (typeof historyGroups)[number];
 
+// Room membership and local history are separate: each unarchived thread has exactly one sidebar home.
+export function groupThreads<T extends { room_id: string | null; archived_at?: string | null }>(conversations: T[]) {
+  const general: T[] = [];
+  const byRoom = new Map<string, T[]>();
+  for (const conversation of conversations) {
+    if (conversation.archived_at) continue;
+    if (conversation.room_id === null) general.push(conversation);
+    else {
+      const threads = byRoom.get(conversation.room_id) ?? [];
+      threads.push(conversation);
+      byRoom.set(conversation.room_id, threads);
+    }
+  }
+  return { general, byRoom };
+}
+
 const formatters = new Map<string, Intl.DateTimeFormat>();
 // The calendar day (yyyy-mm-dd) of an instant in a time zone; `undefined` means the viewer's own zone.
 function calendarDay(ms: number, zone: string | undefined) {

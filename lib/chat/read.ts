@@ -1,5 +1,7 @@
 import "server-only";
+import { normalizeSavedMode } from "@/lib/chat/legacy-mode";
 
+import { sanitizeModelOutput } from "@/lib/ai/sanitize-model-output";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { schemaUnavailable } from "@/lib/chat/schema-error";
 import { validateConversationId } from "@/lib/chat/validation";
@@ -22,6 +24,15 @@ export type RoomBriefSummary = {
   next_step: string | null;
 };
 
+export type PinSummary = {
+  id: string;
+  room_id: string;
+  title: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type RoomSummary = {
   id: string;
   name: string;
@@ -30,8 +41,9 @@ export type RoomSummary = {
   created_at: string;
   updated_at: string;
   brief: RoomBriefSummary | null;
+  pins: PinSummary[];
 };
-export type PersistedMessage = { id: string; role: "user" | "assistant"; content: string; position: number; status?: "complete" | "streaming" | "interrupted" | "error"; created_at?: string };
+export type PersistedMessage = { id: string; role: "user" | "assistant"; content: string; position: number; status?: "complete" | "streaming" | "interrupted" | "error"; created_at?: string; terminationReason?: "user_stopped" };
 
 export async function getChatWorkspaceData(conversationId: unknown) {
   const supabase = await createSupabaseServerClient();
@@ -49,7 +61,7 @@ export async function getChatWorkspaceData(conversationId: unknown) {
 
   // The history list and the selected conversation's messages are independent reads, so they run together.
   // RLS scopes both to the signed-in owner; messages are only used when the conversation is in the owner's list.
-  const [conversationResult, { data: roomRows, error: roomsError }, { data: briefRows, error: briefsError }, messagesResult] = await Promise.all([
+  const [conversationResult, { data: roomRows, error: roomsError }, { data: briefRows, error: briefsError }, { data: pinRows, error: pinsError }, messagesResult] = await Promise.all([
     orderedConversations("id,title,selected_model,room_id,archived_at,created_at,updated_at"),
     supabase
       .from("rooms")
@@ -59,6 +71,11 @@ export async function getChatWorkspaceData(conversationId: unknown) {
     supabase
       .from("room_briefs")
       .select("room_id,goal,current_focus,important_decisions,open_questions,next_step"),
+    supabase
+      .from("pins")
+      .select("id,room_id,title,content,created_at,updated_at")
+      .order("updated_at", { ascending: false })
+      .order("id", { ascending: true }),
     parsedId.success ? readMessages(parsedId.data) : Promise.resolve(null),
   ]);
   const withoutArchive = schemaUnavailable(conversationResult.error)
@@ -73,9 +90,10 @@ export async function getChatWorkspaceData(conversationId: unknown) {
       ? ((withoutArchive.data ?? []) as unknown as Omit<ConversationSummary, "archived_at">[]).map((row) => ({ ...row, archived_at: null }))
       : conversationResult.data;
   const conversationsError = withoutRoom ? withoutRoom.error : withoutArchive ? withoutArchive.error : conversationResult.error;
-  const empty = { conversations: [] as ConversationSummary[], archivedConversations: [] as ConversationSummary[], rooms: [] as RoomSummary[], messages: [] as PersistedMessage[], activeId: null };
+  const empty = { conversations: [] as ConversationSummary[], archivedConversations: [] as ConversationSummary[], rooms: [] as RoomSummary[], roomsError: null as string | null, messages: [] as PersistedMessage[], activeId: null };
   if (conversationsError) return { ...empty, error: "Conversation history couldn't be loaded. Refresh to try again." };
-  const allConversations = ((conversationRows ?? []) as ConversationSummary[]).map((row) => ({ ...row, room_id: row.room_id ?? null, archived_at: row.archived_at ?? null }));
+  // Saved modes from earlier builds ("Reasoning", display names) are normalized here, so the client only ever sees Fast / Balanced / High.
+  const allConversations = ((conversationRows ?? []) as ConversationSummary[]).map((row) => ({ ...row, selected_model: normalizeSavedMode(row.selected_model) ?? row.selected_model, room_id: row.room_id ?? null, archived_at: row.archived_at ?? null }));
   const conversations = allConversations.filter((item) => !item.archived_at);
   const archivedConversations = allConversations.filter((item) => item.archived_at);
   const roomsMissing = schemaUnavailable(roomsError) || schemaUnavailable(briefsError);
@@ -86,13 +104,22 @@ export async function getChatWorkspaceData(conversationId: unknown) {
     open_questions: brief.open_questions,
     next_step: brief.next_step,
   }]));
-  const rooms: RoomSummary[] = roomsMissing ? [] : (roomRows ?? []).map((room) => ({ ...room, brief: briefs.get(room.id) ?? null }));
-  const roomError = !roomsMissing && (roomsError || briefsError) ? "Rooms couldn't be loaded. Refresh to try again." : null;
+  const pinsMissing = roomsMissing || schemaUnavailable(pinsError);
+  const pinsByRoom = new Map<string, PinSummary[]>();
+  if (!pinsMissing) {
+    for (const pin of pinRows ?? []) {
+      const list = pinsByRoom.get(pin.room_id) ?? [];
+      list.push(pin);
+      pinsByRoom.set(pin.room_id, list);
+    }
+  }
+  const rooms: RoomSummary[] = roomsMissing ? [] : (roomRows ?? []).map((room) => ({ ...room, brief: briefs.get(room.id) ?? null, pins: pinsByRoom.get(room.id) ?? [] }));
+  const roomError = !roomsMissing && (roomsError || briefsError || (!pinsMissing && pinsError)) ? "Rooms couldn't be loaded. Refresh to try again." : null;
 
   const active = parsedId.success ? conversations.find((item) => item.id === parsedId.data) : undefined;
-  if (!active || !messagesResult) return { conversations, archivedConversations, rooms, messages: [] as PersistedMessage[], activeId: null, error: roomError };
+  if (!active || !messagesResult) return { conversations, archivedConversations, rooms, roomsError: roomError, messages: [] as PersistedMessage[], activeId: null, error: roomError };
 
-  const loadError = { conversations, archivedConversations, rooms, messages: [] as PersistedMessage[], activeId: active.id, error: "This conversation couldn't be loaded. Refresh to try again." };
+  const loadError = { conversations, archivedConversations, rooms, roomsError: roomError, messages: [] as PersistedMessage[], activeId: active.id, error: "This conversation couldn't be loaded. Refresh to try again." };
   if (messagesResult.error) return loadError;
   let messages = messagesResult.data ?? [];
 
@@ -104,5 +131,10 @@ export async function getChatWorkspaceData(conversationId: unknown) {
     if (reread.error) return loadError;
     messages = reread.data ?? [];
   }
-  return { conversations, archivedConversations, rooms, messages, activeId: active.id, error: roomError };
+  return { conversations, archivedConversations, rooms, roomsError: roomError, messages: messages.map(visibleMessage), activeId: active.id, error: roomError };
+}
+
+function visibleMessage<T extends { role: string; content: string }>(message: T): T {
+  if (message.role !== "assistant") return message;
+  return { ...message, content: sanitizeModelOutput(message.content).text };
 }

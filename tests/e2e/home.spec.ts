@@ -95,8 +95,8 @@ test("desktop chat workspace opens history and submits local messages", async ({
   await page.goto("/preview");
   await page.getByRole("button", { name: "New chat" }).first().click();
   await expect(page.getByRole("heading", { name: "What’s on your mind?" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "A thoughtful note to the team" })).toBeVisible();
-  await page.getByRole("button", { name: "A thoughtful note to the team" }).click();
+  await expect(page.getByRole("button", { name: "A thoughtful note to the team", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "A thoughtful note to the team", exact: true }).click();
   await expect(page.getByText("A good note can recognize the effort")).toBeVisible();
 
   const composer = page.getByRole("textbox", { name: "Message Nibie" });
@@ -108,7 +108,7 @@ test("desktop chat workspace opens history and submits local messages", async ({
   await composer.press("Enter");
   await expect(page.getByText("A local preview message\nsecond line")).toBeVisible();
   await expect(page.getByText("Your message is shown in this local preview.")).toContainText("Replies are not connected yet");
-  await expect(page.getByRole("button", { name: "Model: Balanced" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Model: Balanced", exact: true })).toBeVisible();
 });
 
 test("mobile chat workspace uses a keyboard-accessible conversation drawer", async ({ page }) => {
@@ -121,7 +121,8 @@ test("mobile chat workspace uses a keyboard-accessible conversation drawer", asy
   await menu.getByRole("button", { name: "Settings", exact: true }).focus();
   await page.keyboard.press("Tab");
   await expect(menu.getByRole("link", { name: "Nibie home" })).toBeFocused();
-  await page.getByRole("button", { name: "Learning the basics of astronomy" }).click();
+  await menu.getByRole("button", { name: "Expand Nibie Development", exact: true }).click();
+  await menu.getByRole("button", { name: "Learning the basics of astronomy", exact: true }).click();
   await expect(page.getByRole("button", { name: "Open conversation menu" })).toBeFocused();
   await expect(page.getByText("Start by looking up.")).toBeVisible();
   await expect(menu).toHaveCount(0);
@@ -131,7 +132,7 @@ test("mobile chat workspace uses a keyboard-accessible conversation drawer", asy
 test("assistant replies render safe Markdown with working copy controls", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.goto("/preview");
-  await page.getByRole("button", { name: "Debouncing a search box" }).click();
+  await page.getByRole("button", { name: "Debouncing a search box", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Example" })).toBeVisible();
   await expect(page.getByRole("listitem").filter({ hasText: "Use wait to tune responsiveness." })).toBeVisible();
   const link = page.getByRole("link", { name: "MDN guide" });

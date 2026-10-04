@@ -1,9 +1,10 @@
 import type { UserPreferences } from "@/lib/preferences/types";
+import type { ChatModel } from "@/lib/chat/validation";
 import type { RoomContextInput } from "@/lib/context/room-context";
 
 export type { RoomContextInput } from "@/lib/context/room-context";
 
-export type ContextSourceType = "core" | "profile" | "room" | "thread_summary" | "recent_messages" | "current_request";
+export type ContextSourceType = "core" | "profile" | "room" | "pins" | "file" | "thread_summary" | "recent_messages" | "current_request";
 
 export type ContextAuthority = "policy" | "untrusted_data";
 
@@ -24,10 +25,16 @@ export type ContextBlock = {
 };
 
 export type ContextSourceDiagnostic = {
-  type: "profile" | "room" | "thread_summary" | "recent_messages";
-  label: "Your profile" | "This room" | "Thread summary" | "Recent conversation";
+  type: "profile" | "room" | "pins" | "file" | "thread_summary" | "recent_messages";
+  label: "Your profile" | "This room" | "Pinned context" | "File context" | "Thread summary" | "Recent conversation";
   state: "included" | "not_used";
   reason: string;
+};
+
+// Explicitly selected room-file text. Omitted means this request did not ask for file context.
+export type FileContextInput = {
+  name: string;
+  text: string;
 };
 
 export type ContextDiagnostics = {
@@ -72,6 +79,8 @@ export type ThreadSummary = {
 };
 
 export type BuildContextInput = {
+  // The resolved mode only selects output-style guidance; provider selection is unchanged.
+  responseMode?: ChatModel;
   capabilities: ModelContextCapabilities;
   preferences: UserPreferences;
   preferenceReadFailed: boolean;
@@ -80,6 +89,8 @@ export type BuildContextInput = {
   currentPosition: number;
   // Omitted or null for a general thread. Present only after the caller has authorized the room.
   room?: RoomContextInput | null;
+  // Present only for files the caller already authorized for this request. Never every room file.
+  files?: FileContextInput[] | null;
 };
 
 export class ContextBuildError extends Error {
