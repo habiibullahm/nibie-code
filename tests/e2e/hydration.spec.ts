@@ -13,6 +13,8 @@ const environments = [
 for (const environment of environments) {
   for (const width of [1440, 390]) {
     test(`sidebar hydrates cleanly for ${environment.name} at ${width}px, with timestamps on`, async ({ browser }) => {
+      // The first load of this page also compiles it in dev mode.
+      test.setTimeout(90_000);
       const context = await browser.newContext({ locale: environment.locale, timezoneId: environment.timezoneId, viewport: { width, height: 900 } });
       await context.addInitScript(() => localStorage.setItem("nibie-show-timestamps", "true"));
       const page = await context.newPage();
@@ -22,7 +24,8 @@ for (const environment of environments) {
       await page.goto("/preview/sidebar-hydration");
       await page.waitForLoadState("networkidle");
       if (width <= 760) await page.getByRole("button", { name: "Open conversation menu" }).click();
-      await expect(page.locator("[data-conversation-id]").first()).toBeVisible();
+      // At phone width the desktop sidebar is hidden and the drawer is the visible one, so look at what is actually on screen.
+      await expect(page.locator("[data-conversation-id]:visible").first()).toBeVisible();
       expect(problems).toEqual([]);
       await context.close();
     });
