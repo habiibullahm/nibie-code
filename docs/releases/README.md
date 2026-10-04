@@ -1,6 +1,8 @@
 # Nibie releases
 
-Production identity is the git commit that Vercel built, plus the annotated git tag applied after smoke tests pass. `package.json` `version` is not the production version.
+Production identity is the git commit that Vercel built, plus the annotated git tag applied only after signed-in smoke passes and the changelog, release note, and product docs match that production SHA. `package.json` `version` is not the production version.
+
+A release is not complete while docs still describe an older build.
 
 Do not deploy from a moving branch name. Freeze the release candidate SHA, test that SHA, and promote that SHA.
 
@@ -17,8 +19,8 @@ Git tag and deployment SHA are authoritative. Do not bump `package.json` only to
 
 ## Documents
 
-- [V1 release checklist](V1_RELEASE_CHECKLIST.md) is the ordered procedure.
-- [V1 release template](V1_RELEASE_TEMPLATE.md) is copied to `docs/releases/vX.Y.Z.md` after the deploy is verified.
+- [V1 release checklist](V1_RELEASE_CHECKLIST.md) is the ordered procedure. Tag only after its docs steps pass.
+- [V1 release template](V1_RELEASE_TEMPLATE.md) is copied to `docs/releases/vX.Y.Z.md` after production smoke passes and before the tag.
 - [Observability](../engineering/OBSERVABILITY.md) explains how to read runtime logs.
 
 ## Local gate
@@ -55,14 +57,14 @@ git push origin main
 
 `main` must end at `RC_SHA`, or at one release merge commit whose only parent change is that candidate. Wait until the Vercel production deployment for that SHA is READY. Then confirm `GET /api/health` `release` is the first 7 characters of that SHA.
 
-After smoke tests and log review:
+After smoke tests and log review, update the changelog, write `docs/releases/vX.Y.Z.md`, and correct product docs that no longer match production. Then tag:
 
 ```text
 git tag -a v1.0.0 PRODUCTION_SHA -m "Nibie v1.0.0"
 git push origin v1.0.0
 ```
 
-`PRODUCTION_SHA` is the commit Vercel production is serving. It is the frozen candidate, or the deliberate merge commit that contains only that candidate. Tag that deployed SHA, not a later commit.
+`PRODUCTION_SHA` is the commit Vercel production is serving. It is the frozen candidate, or the deliberate merge commit that contains only that candidate. Tag that deployed SHA, not a later commit. Do not tag while the docs still describe a different build.
 
 ## Migration log
 
@@ -74,7 +76,7 @@ Record each row in the release note:
 | --- | --- | --- | --- |
 | `0004_rooms.sql` | applied | production | PASS |
 
-The current staging baseline this tooling was built from has no duplicate prefixes. Its journal ends at `0005_superb_frank_castle.sql` (conversation archive). Re-read the journal when V1 is frozen. Pins, files, and workbench are not in this baseline.
+Re-read `drizzle/meta/_journal.json` at freeze time and record that SHA's files. On merged `main` when this note was updated, the journal ends at `0008_workbench.sql`. The frozen SHA wins. A file in the repo is not a production migration until the release log records that it was applied.
 
 Apply migrations before production traffic reaches code that needs the new schema. Record the filename, environment, and result. Never invent a PASS.
 
@@ -88,6 +90,7 @@ production incident
 → tests
 → staging or preview verification
 → production
+→ changelog, release note, and product docs match that SHA
 → tag the patch
 ```
 

@@ -1,0 +1,51 @@
+---
+description: A Nibie release is complete only after production, changelog, and product docs match
+alwaysApply: true
+---
+
+# Release completion
+
+Docs are part of the release. A release is done only after every item below is true.
+
+1. Code is merged to `main`.
+2. The production deployment for that SHA is Ready.
+3. Signed-in production smoke passes.
+4. `CHANGELOG.md` records only what shipped.
+5. `docs/releases/vX.Y.Z.md` matches verified production.
+6. Stale or outdated product docs are corrected or removed.
+7. Known issues match production today.
+8. The version tag is created only after those docs match production.
+
+Source of truth is merged `main` plus verified production behavior. Inspect both before editing docs. Do not document planned work as shipped. Current docs describe production today: behavior, architecture, UX, Room and Thread behavior, model modes and routing, provider and config contract, context, safety, persistence, navigation, limitations, known issues, and the next milestone. Remove or mark old staging behavior, abandoned plans, superseded model names, fixed bugs, and temporary workarounds.
+
+Follow `docs/releases/V1_RELEASE_CHECKLIST.md`. Copy `docs/releases/V1_RELEASE_TEMPLATE.md` after smoke passes and before the tag.
+
+## Changelog
+
+Under the shipped version and date: Added, Changed, Fixed, Removed or Deprecated when relevant, Known issues, and important user-visible behavior.
+
+## Release note
+
+Release, version, date, production SHA, production URL, what shipped, user-visible changes, technical changes, DB or migrations, environment and config names only, production verification, known issues, deferred work, and the next milestone.
+
+## Secrets
+
+Never write API keys, credentials, full secret values, private tokens, or sensitive production data. Environment variables may be named when relevant.
+
+## Final release report
+
+End every release report with:
+
+```text
+PRODUCTION: PASS / FAIL
+SMOKE: PASS / FAIL
+CHANGELOG UPDATED: YES / NO
+RELEASE DOC UPDATED: YES / NO
+STALE DOCS CLEANED: YES / NO
+KNOWN ISSUES CURRENT: YES / NO
+TAG: ...
+DOCS MATCH PRODUCTION: YES / NO
+RELEASE COMPLETE: YES / NO
+```
+
+If `DOCS MATCH PRODUCTION` is `NO`, `RELEASE COMPLETE` is `NO`.
