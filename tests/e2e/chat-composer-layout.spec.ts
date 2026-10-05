@@ -128,14 +128,16 @@ test("expand affordance tracks actual textarea overflow", async ({ page }) => {
   const shortDraftHeight = await textarea.evaluate((element) => element.getBoundingClientRect().height);
   await textarea.fill(Array.from({ length: 20 }, (_, i) => `Prompt line ${i + 1}`).join("\n"));
   await expect(expand).toBeVisible();
-  const [textareaBox, expandBox] = await Promise.all([textarea.boundingBox(), expand.boundingBox()]);
-  expect(textareaBox).not.toBeNull();
+  const actions = page.locator(".composer-actions");
+  const [actionsBox, expandBox] = await Promise.all([actions.boundingBox(), expand.boundingBox()]);
+  expect(actionsBox).not.toBeNull();
   expect(expandBox).not.toBeNull();
-  expect(expandBox!.x).toBeGreaterThanOrEqual(textareaBox!.x + textareaBox!.width - expandBox!.width - 1);
-  expect(expandBox!.x + expandBox!.width).toBeLessThanOrEqual(textareaBox!.x + textareaBox!.width + 1);
-  expect(expandBox!.y).toBeGreaterThanOrEqual(textareaBox!.y - 1);
-  expect(expandBox!.y + expandBox!.height).toBeLessThanOrEqual(textareaBox!.y + textareaBox!.height + 1);
-  await expect(page.locator(".composer-actions").getByRole("button", { name: "Expand composer" })).toHaveCount(0);
+  expect(expandBox!.x).toBeGreaterThanOrEqual(actionsBox!.x - 1);
+  expect(expandBox!.x + expandBox!.width).toBeLessThanOrEqual(actionsBox!.x + actionsBox!.width + 1);
+  expect(expandBox!.y).toBeGreaterThanOrEqual(actionsBox!.y - 1);
+  expect(expandBox!.y + expandBox!.height).toBeLessThanOrEqual(actionsBox!.y + actionsBox!.height + 1);
+  await expect(actions.getByRole("button", { name: "Expand composer" })).toBeVisible();
+  await expect(page.locator(".composer-input-wrap").getByRole("button", { name: "Expand composer" })).toHaveCount(0);
   const geometry = await expectComposerGeometry(page);
   expect(geometry.textareaBottom).toBeLessThanOrEqual(geometry.actionsTop + 1);
   await textarea.fill("Short again");
@@ -147,6 +149,47 @@ test("expand affordance tracks actual textarea overflow", async ({ page }) => {
   await expect(expand).toHaveCount(0);
 });
 
+test("Expand opens a full-screen composer layer at desktop and mobile widths", async ({ page }) => {
+  for (const { width, height } of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    await openSampleConversation(page, width, height);
+    const textarea = page.getByRole("textbox", { name: "Message Nibie" });
+    await textarea.fill(Array.from({ length: 20 }, (_, index) => `Prompt line ${index + 1}`).join("\n"));
+    const expand = page.locator(".composer-actions").getByRole("button", { name: "Expand composer" });
+    await expect(expand).toBeVisible();
+    await expect(page.locator(".composer-input-wrap").getByRole("button", { name: "Expand composer" })).toHaveCount(0);
+    await expand.click();
+    const dialog = page.getByRole("dialog", { name: "Expanded message composer" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toHaveAttribute("aria-modal", "true");
+    const collapse = page.getByRole("button", { name: "Collapse composer" });
+    await expect(collapse).toBeVisible();
+    const [dockBox, composerBox] = await Promise.all([page.locator(".composer-dock").boundingBox(), page.locator(".composer.is-expanded").boundingBox()]);
+    expect(dockBox).not.toBeNull();
+    expect(composerBox).not.toBeNull();
+    for (const box of [dockBox!, composerBox!]) {
+      expect(Math.abs(box.x)).toBeLessThanOrEqual(1);
+      expect(Math.abs(box.y)).toBeLessThanOrEqual(1);
+      expect(Math.abs(box.width - width)).toBeLessThanOrEqual(1);
+      expect(Math.abs(box.height - height)).toBeLessThanOrEqual(1);
+    }
+    await expect.poll(() => page.locator(".chat-header").evaluate((element) => (element as HTMLElement).inert)).toBe(true);
+    await expect.poll(() => page.locator(".workspace-sidebar").evaluate((element) => (element as HTMLElement).inert)).toBe(true);
+    const send = page.getByRole("button", { name: "Send message" });
+    await send.focus();
+    await page.keyboard.press("Tab");
+    await expect(collapse).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(send).toBeFocused();
+    await page.locator(".chat-header .header-new-chat").evaluate((element) => (element as HTMLElement).focus());
+    await expect(send).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(textarea).toBeFocused();
+    await expect.poll(() => page.locator(".chat-header").evaluate((element) => (element as HTMLElement).inert)).toBe(false);
+    await expect.poll(() => page.locator(".workspace-sidebar").evaluate((element) => (element as HTMLElement).inert)).toBe(false);
+  }
+});
+
 test("expand and collapse preserve draft, focus, selection, and send reset", async ({ page }) => {
   await openSampleConversation(page, 390, 844);
   const textarea = page.getByRole("textbox", { name: "Message Nibie" });
@@ -154,14 +197,16 @@ test("expand and collapse preserve draft, focus, selection, and send reset", asy
   await textarea.fill(draft);
   const expand = page.getByRole("button", { name: "Expand composer" });
   await expect(expand).toBeVisible();
-  const [textareaBox, expandBox] = await Promise.all([textarea.boundingBox(), expand.boundingBox()]);
-  expect(textareaBox).not.toBeNull();
+  const actions = page.locator(".composer-actions");
+  const [actionsBox, expandBox] = await Promise.all([actions.boundingBox(), expand.boundingBox()]);
+  expect(actionsBox).not.toBeNull();
   expect(expandBox).not.toBeNull();
-  expect(expandBox!.x).toBeGreaterThanOrEqual(textareaBox!.x + textareaBox!.width - expandBox!.width - 1);
-  expect(expandBox!.x + expandBox!.width).toBeLessThanOrEqual(textareaBox!.x + textareaBox!.width + 1);
-  expect(expandBox!.y).toBeGreaterThanOrEqual(textareaBox!.y - 1);
-  expect(expandBox!.y + expandBox!.height).toBeLessThanOrEqual(textareaBox!.y + textareaBox!.height + 1);
-  await expect(page.locator(".composer-actions").getByRole("button", { name: "Expand composer" })).toHaveCount(0);
+  expect(expandBox!.x).toBeGreaterThanOrEqual(actionsBox!.x - 1);
+  expect(expandBox!.x + expandBox!.width).toBeLessThanOrEqual(actionsBox!.x + actionsBox!.width + 1);
+  expect(expandBox!.y).toBeGreaterThanOrEqual(actionsBox!.y - 1);
+  expect(expandBox!.y + expandBox!.height).toBeLessThanOrEqual(actionsBox!.y + actionsBox!.height + 1);
+  await expect(actions.getByRole("button", { name: "Expand composer" })).toBeVisible();
+  await expect(page.locator(".composer-input-wrap").getByRole("button", { name: "Expand composer" })).toHaveCount(0);
   await expand.click();
   await expect(page.getByRole("button", { name: "Collapse composer" })).toBeVisible();
   await page.getByRole("button", { name: "Collapse composer" }).click();
@@ -171,8 +216,6 @@ test("expand and collapse preserve draft, focus, selection, and send reset", asy
   await expect(textarea).toBeFocused();
   await expect(textarea).toHaveValue(draft);
   await expect.poll(() => textarea.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(compactHeight);
-  const expandedLayout = await expectComposerGeometry(page);
-  expect(expandedLayout.textareaBottom).toBeLessThanOrEqual(expandedLayout.actionsTop + 1);
   await expect.poll(() => textarea.evaluate((element) => (element as HTMLTextAreaElement).selectionStart)).toBe(12);
   await expect.poll(() => textarea.evaluate((element) => (element as HTMLTextAreaElement).selectionEnd)).toBe(24);
 

@@ -59,6 +59,7 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
   const [canExpand, setCanExpand] = useState(false);
   const [enterToSend] = useChatFlag("enterToSend");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -104,6 +105,25 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
     window.addEventListener("resize", fit);
     fit();
     return () => { observer.disconnect(); window.removeEventListener("resize", fit); };
+  }, [expanded]);
+  useEffect(() => {
+    if (!expanded) return;
+    const dialog = composerRef.current;
+    const workspace = dialog?.closest<HTMLElement>(".chat-workspace");
+    if (!dialog || !workspace) return;
+    const inerted: { element: HTMLElement; wasInert: boolean }[] = [];
+    let branch: HTMLElement = dialog;
+    while (branch !== workspace) {
+      const parent = branch.parentElement;
+      if (!parent) break;
+      for (const sibling of Array.from(parent.children)) {
+        if (sibling === branch || !(sibling instanceof HTMLElement)) continue;
+        inerted.push({ element: sibling, wasInert: sibling.inert });
+        sibling.inert = true;
+      }
+      branch = parent;
+    }
+    return () => { for (const { element, wasInert } of inerted) element.inert = wasInert; };
   }, [expanded]);
 
   // Files can be attached while a reply streams, for the next message. A message waits for its attachments: none still reading, and none failed (a failed one is removed or retried first).
@@ -159,6 +179,17 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
     const action = composerEnterAction({ key: event.key, shiftKey: event.shiftKey, metaKey: event.metaKey, ctrlKey: event.ctrlKey, composing: event.nativeEvent.isComposing, enterToSend });
     if (action === "send") { event.preventDefault(); submit(); }
   }
+  function handleExpandedKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (!expanded) return;
+    if (event.key === "Escape") { event.preventDefault(); toggleExpanded(); return; }
+    if (event.key !== "Tab") return;
+    const focusable = Array.from(formRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), textarea:not(:disabled), input:not(:disabled):not([tabindex="-1"]), select:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])') ?? []).filter((element) => element.getClientRects().length > 0);
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (!first || !last) return;
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  }
 
   function toggleExpanded() {
     const textarea = textareaRef.current;
@@ -178,15 +209,12 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
 
   return <div ref={dockRef} className={`composer-dock${centered ? " is-centered" : ""}`}>
     {attachmentPanel}
-    <div className={`composer${expanded ? " is-expanded" : ""}${dragging ? " is-dropping" : ""}`}>
+    <div ref={composerRef} className={`composer${expanded ? " is-expanded" : ""}${dragging ? " is-dropping" : ""}`} role={expanded ? "dialog" : undefined} aria-modal={expanded ? "true" : undefined} aria-label={expanded ? "Expanded message composer" : undefined} onKeyDown={handleExpandedKeyDown}>
       <form ref={formRef} className={`composer-form${hasAttachments ? " has-attachments" : ""}${isActive ? " is-active" : ""}`} onSubmit={(event) => { event.preventDefault(); submit(); }}>
         {expanded ? <div className="composer-expanded-header"><span className="composer-expanded-label">Message</span><button className="composer-icon" type="button" aria-label="Collapse composer" title="Collapse composer" aria-expanded="true" onClick={toggleExpanded}><Minimize2 size={16} aria-hidden="true" /></button></div> : null}
         <div className="composer-content">
           <ComposerAttachments items={attachments.items} notice={attachments.notice} disabled={sending} onRemove={attachments.remove} onRetry={attachments.retry} />
-          <div className={`composer-input-wrap${!expanded && canExpand ? " has-expand" : ""}`}>
-            <textarea ref={textareaRef} aria-label="Message Nibie" placeholder="Ask Nibie anything..." enterKeyHint={enterToSend ? "send" : "enter"} value={draft} rows={1} onChange={(event) => { expandedBeforeClearRef.current = null; setDraft(event.target.value); }} onKeyDown={handleKeyDown} />
-            {!expanded && canExpand ? <button className="composer-icon composer-expand" type="button" aria-label="Expand composer" title="Expand composer" aria-expanded="false" onClick={toggleExpanded}><Maximize2 size={16} aria-hidden="true" /></button> : null}
-          </div>
+          <textarea ref={textareaRef} aria-label="Message Nibie" placeholder="Ask Nibie anything..." enterKeyHint={enterToSend ? "send" : "enter"} value={draft} rows={1} onChange={(event) => { expandedBeforeClearRef.current = null; setDraft(event.target.value); }} onKeyDown={handleKeyDown} />
         </div>
         {attachmentsEnabled ? <input ref={fileInputRef} className="composer-file-input" type="file" multiple accept={ATTACHMENT_ACCEPT} tabIndex={-1} aria-hidden="true" onChange={(event) => { attachments.add([...(event.target.files ?? [])]); event.target.value = ""; }} /> : null}
         <div className="composer-footer">
@@ -199,6 +227,7 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
           </span>
           <div className="composer-actions">
             <ContextIndicator diagnostics={diagnostics} onEditProfile={onEditProfile} />
+            {!expanded && canExpand ? <button className="composer-icon composer-expand" type="button" aria-label="Expand composer" title="Expand composer" aria-expanded="false" onClick={toggleExpanded}><Maximize2 size={16} aria-hidden="true" /></button> : null}
             {streaming ? <button key="stop" className="send-button" type="button" aria-label="Stop response" onClick={onStop}><X size={18} /></button> : <button key="send" className="send-button" type="submit" aria-label="Send message" disabled={!draft.trim() || sending || attachmentsBlocked}>{sending ? <span className="send-spinner" /> : <ArrowUp size={18} strokeWidth={2.3} />}</button>}
           </div>
         </div>
