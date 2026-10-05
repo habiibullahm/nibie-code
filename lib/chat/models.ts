@@ -3,7 +3,7 @@ import { modelSchema, type ChatModel } from "@/lib/chat/validation";
 
 // Nibie exposes ONE capability picker: Fast / Balanced / High. Which provider and model sit behind each mode is decided on the
 // server (lib/ai/registry.ts); the browser never sees it.
-export type ModelOption = { id: ChatModel; label: string; description: string };
+export type ModelOption = { id: ChatModel; label: string; description: string; credits?: number };
 
 // "Auto" means: follow the conversation's saved mode.
 export const modelChoiceSchema = modelSchema.or(z.literal("Auto"));

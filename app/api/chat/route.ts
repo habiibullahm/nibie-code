@@ -23,6 +23,7 @@ import { loadOwnerPreferences } from "@/lib/preferences/store";
 import { operationalCodes } from "@/lib/observability/codes";
 import { logError, logInfo, logWarn } from "@/lib/observability/logger";
 import { requestIdFrom } from "@/lib/observability/request-id";
+import { weeklyCreditCost, WEEKLY_FREE_CREDIT_LIMIT } from "@/lib/usage/policy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -207,6 +208,76 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   const onRequestAbort = () => { clientCancelled = true; aborter.abort(); };
   request.signal.addEventListener("abort", onRequestAbort, { once: true });
   if (request.signal.aborted) onRequestAbort();
+  if (clientCancelled) {
+    request.signal.removeEventListener("abort", onRequestAbort);
+    await persist("Response stopped.", "interrupted");
+    return new Response(null, { status: 499 });
+  }
+
+  // Reserve after validation, ownership, the idempotent generation claim, and context construction. The database derives the
+  // week and credits from its clock and the trusted logical mode; no client preflight is needed.
+  const releaseReservation = async () => {
+    try {
+      const { error } = await supabase.rpc("release_weekly_ai_usage", { p_generation_id: assistant.id });
+      if (error) logError("weekly_usage.reservation.release_failed", { requestId, logicalMode: mode, code: operationalCodes.requestFailed });
+    } catch {
+      logError("weekly_usage.reservation.release_failed", { requestId, logicalMode: mode, code: operationalCodes.requestFailed });
+    }
+  };
+  const reservationStartedAt = Date.now();
+  let reservation: { accepted: boolean; credits_charged: number; credits_used: number; credits_remaining: number; reset_at: string } | null = null;
+  let reservationError: unknown = null;
+  try {
+    const result = await supabase.rpc("reserve_weekly_ai_usage", {
+      p_generation_id: assistant.id,
+      p_logical_mode: mode,
+    }).single<{ accepted: boolean; credits_charged: number; credits_used: number; credits_remaining: number; reset_at: string }>();
+    reservation = result.data;
+    reservationError = result.error;
+  } catch {
+    reservationError = new Error("Reservation request failed.");
+  }
+  const usageReservationMs = Date.now() - reservationStartedAt;
+  if (reservationError || !reservation || typeof reservation.accepted !== "boolean"
+    || !Number.isInteger(reservation.credits_remaining) || reservation.credits_remaining < 0 || reservation.credits_remaining > WEEKLY_FREE_CREDIT_LIMIT
+    || typeof reservation.reset_at !== "string" || !Number.isFinite(Date.parse(reservation.reset_at))) {
+    logError("weekly_usage.reservation.failed", { requestId, logicalMode: mode, durationMs: usageReservationMs, code: operationalCodes.requestFailed });
+    await releaseReservation();
+    try { await persist(clientCancelled ? "Response stopped." : "Response unavailable.", clientCancelled ? "interrupted" : "error"); }
+    finally { request.signal.removeEventListener("abort", onRequestAbort); }
+    if (clientCancelled || request.signal.aborted) return new Response(null, { status: 499 });
+    return NextResponse.json({ error: safeError }, { status: 503 });
+  }
+  if (!reservation.accepted) {
+    logWarn("weekly_usage.limit.rejected", { requestId, logicalMode: mode, creditsCharged: 0, creditsRemaining: reservation.credits_remaining });
+    try { await persist("Weekly usage limit reached.", "error"); }
+    finally { request.signal.removeEventListener("abort", onRequestAbort); }
+    return NextResponse.json({
+      code: operationalCodes.weeklyUsageLimitRejected,
+      error: "You've reached your weekly Nibie usage limit.",
+      creditsRemaining: reservation.credits_remaining,
+      resetAt: reservation.reset_at,
+    }, { status: 429, headers: { "x-request-id": requestId } });
+  }
+  if (reservation.credits_charged !== weeklyCreditCost[mode]) {
+    logError("weekly_usage.reservation.failed", { requestId, logicalMode: mode, durationMs: usageReservationMs, reason: "policy_mismatch", code: operationalCodes.requestFailed });
+    await releaseReservation();
+    try { await persist("Response unavailable.", "error"); }
+    finally { request.signal.removeEventListener("abort", onRequestAbort); }
+    return NextResponse.json({ error: safeError }, { status: 503 });
+  }
+  logInfo("weekly_usage.reservation.accepted", {
+    requestId, logicalMode: mode, creditsCharged: reservation.credits_charged,
+    creditsRemaining: reservation.credits_remaining, reservationLatencyMs: usageReservationMs,
+  });
+
+  if (clientCancelled || request.signal.aborted) {
+    await releaseReservation();
+    try { await persist("Response stopped.", "interrupted"); }
+    finally { request.signal.removeEventListener("abort", onRequestAbort); }
+    return new Response(null, { status: 499 });
+  }
+
   // A browser disconnect does not always reach request.signal (it does not on every host), so Stop is also read from the
   // reply row: once Stop marks it interrupted (from any instance), the provider stream is aborted here.
   let userStopped = false;
@@ -235,9 +306,27 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
     const interrupted = userStopped || clientCancelled || request.signal.aborted;
     if (interrupted) logWarn("chat.response.interrupted", { requestId, stage: "provider", status: "interrupted", durationMs: durationMs() });
     else logError("chat.response.failed", { requestId, durationMs: durationMs(), ...providerFailureFields(error) });
+    if (!interrupted) await releaseReservation();
     try { if (!userStopped) await persist(clientCancelled ? stoppedPlaceholder : "Response unavailable.", clientCancelled ? "interrupted" : "error"); }
     finally { clearTimeout(timeout); request.signal.removeEventListener("abort", onRequestAbort); }
     return NextResponse.json({ error: providerTimedOut ? timeoutError : safeError }, { status: providerTimedOut ? 504 : 502 });
+  }
+
+  let usageStarted = false;
+  try {
+    const { data, error } = await supabase.rpc("start_weekly_ai_usage", { p_generation_id: assistant.id });
+    usageStarted = data === true && !error;
+  } catch {
+    usageStarted = false;
+  }
+  if (!usageStarted) {
+    logError("weekly_usage.start.failed", { requestId, logicalMode: mode, code: operationalCodes.requestFailed });
+    aborter.abort();
+    await releaseReservation();
+    try { await persist(clientCancelled ? "Response stopped." : "Response unavailable.", clientCancelled ? "interrupted" : "error"); }
+    finally { clearTimeout(timeout); request.signal.removeEventListener("abort", onRequestAbort); }
+    if (clientCancelled || request.signal.aborted) return new Response(null, { status: 499 });
+    return NextResponse.json({ error: safeError }, { status: 503 });
   }
 
   const stream = new ReadableStream<Uint8Array>({
@@ -319,7 +408,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       } finally {
         logInfo("chat.response.metrics", {
           requestId, logicalMode: mode, provider: providerFor(mode), providerTtftMs, generationDurationMs: Date.now() - providerStartedAt,
-          totalDurationMs: Date.now() - requestStartedAt, finishReason,
+          appBeforeProviderMs: providerStartedAt - requestStartedAt, usageReservationMs, totalDurationMs: Date.now() - requestStartedAt, finishReason,
           outputChars: output.length, streamCompleted: completed,
         });
         clearTimeout(timeout);

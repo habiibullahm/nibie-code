@@ -2,12 +2,13 @@ import { notFound } from "next/navigation";
 import { ChatWorkspace } from "@/components/chat-workspace";
 import { requestTime } from "@/lib/chat/groups";
 import { modelPickerCopy, type ModelOption } from "@/lib/chat/models";
+import { weeklyCreditCost } from "@/lib/usage/policy";
 import type { ConversationSummary, PersistedMessage, RoomSummary } from "@/lib/chat/read";
 
 // Dev-only harness: the real signed-in workspace (not the mock `preview` mode) with the data shapes that can make server and client
 // disagree: rooms whose names sort differently by locale, threads in rooms and in General across today / yesterday / older,
 // threads sitting right on a UTC midnight boundary, and an active thread inside a room.
-const models: ModelOption[] = (["Fast", "Balanced", "High"] as const).map((id) => ({ id, ...modelPickerCopy[id] }));
+const models: ModelOption[] = (["Fast", "Balanced", "High"] as const).map((id) => ({ id, ...modelPickerCopy[id], credits: weeklyCreditCost[id] }));
 
 const roomNames = ["alpha", "Alpha", "Éclair", "Zeta 10", "Zeta 2", "ünder", "東京", "🚀 Launch", "a-b", "a b", "Ångström", "ZZ"];
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;

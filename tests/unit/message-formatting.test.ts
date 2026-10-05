@@ -54,7 +54,7 @@ describe("assistant formatting examples", () => {
 
   it("every fenced code block has a copy button with a copy icon, with or without a language", () => {
     const html = render("```bash\nnpm run build\n```\n\n```\nplain text block\n```");
-    expect(count(html, "button")).toBe(2);
+    expect((html.match(/<button[^>]*class="copy-button is-compact is-icon-only"/g) ?? []).length).toBe(2);
     expect(html).toContain('aria-label="Copy bash code block"');
     expect(html).toContain('aria-label="Copy code block"');
     // Icon only: the copy icon is the whole visible control; the name comes from aria-label and the tooltip.

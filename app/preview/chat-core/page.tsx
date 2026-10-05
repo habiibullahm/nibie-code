@@ -7,10 +7,11 @@ import { longReply, longReplyFixtureId } from "@/tests/fixtures/long-reply";
 import { formattingSample, formattingSampleId } from "@/tests/fixtures/formatting-sample";
 import { ChatWorkspace } from "@/components/chat-workspace";
 import { modelPickerCopy, type ModelOption } from "@/lib/chat/models";
+import { weeklyCreditCost } from "@/lib/usage/policy";
 import { requestTime } from "@/lib/chat/groups";
 
 // Dev-only harness: all three modes, independent of which providers this machine has configured.
-const workspaceModels: ModelOption[] = (["Fast", "Balanced", "High"] as const).map((id) => ({ id, ...modelPickerCopy[id] }));
+const workspaceModels: ModelOption[] = (["Fast", "Balanced", "High"] as const).map((id) => ({ id, ...modelPickerCopy[id], credits: weeklyCreditCost[id] }));
 
 export default async function ChatCorePreview({ searchParams }: { searchParams: Promise<{ workspace?: string; mode?: string }> }) {
   if (process.env.NODE_ENV === "production") notFound();

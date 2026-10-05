@@ -30,7 +30,8 @@ const finish = encoder.encode('data: {"choices":[{"delta":{},"finish_reason":"st
 function database(mode: string, options: { lateClaim?: boolean; failStopWrite?: boolean } = {}) {
   const rows: Row[] = [{ id: firstUser, conversation_id: conversation, role: "user", content: "First", status: "complete", position: 1 }];
   const writes: { id?: string; write: Partial<Row>; applied: number }[] = [];
-  let appendCalls = 0; let lateClaim = options.lateClaim ?? false;
+  let appendCalls = 0, creditsUsed = 0; let lateClaim = options.lateClaim ?? false;
+  const weights: Record<string, number> = { Fast: 1, Balanced: 3, High: 6 };
   function from(table: string) {
     const filters: ((row: Row) => boolean)[] = [];
     let write: Partial<Row> | undefined;
@@ -57,28 +58,37 @@ function database(mode: string, options: { lateClaim?: boolean; failStopWrite?: 
     }
     return query;
   }
-  const rpc = vi.fn((name: string, args: Record<string, string>) => ({ single: async () => {
-    if (name === "append_user_message") {
-      appendCalls++;
-      if (lateClaim) { lateClaim = false; rows.push({ id: firstAssistant, conversation_id: conversation, role: "assistant", content: "…", status: "streaming", position: 2, reply_to_message_id: firstUser }); return { data: null, error: { code: "PT409" } }; }
-      const existing = rows.find((row) => row.id === args.p_message_id);
-      if (existing) return { data: existing, error: null };
+  const rpc = vi.fn((name: string, args: Record<string, string>) => {
+    const run = async () => {
+      if (name === "reserve_weekly_ai_usage") {
+        const cost = weights[args.p_logical_mode] ?? 0; creditsUsed += cost;
+        return { data: { accepted: true, credits_charged: cost, credits_used: creditsUsed, credits_remaining: 100 - creditsUsed, reset_at: "2026-10-05T00:00:00.000Z" }, error: null };
+      }
+      if (name === "start_weekly_ai_usage") return { data: true, error: null };
+      if (name === "release_weekly_ai_usage") { creditsUsed = Math.max(0, creditsUsed - (weights[mode] ?? 0)); return { data: true, error: null }; }
+      if (name === "append_user_message") {
+        appendCalls++;
+        if (lateClaim) { lateClaim = false; rows.push({ id: firstAssistant, conversation_id: conversation, role: "assistant", content: "…", status: "streaming", position: 2, reply_to_message_id: firstUser }); return { data: null, error: { code: "PT409" } }; }
+        const existing = rows.find((row) => row.id === args.p_message_id);
+        if (existing) return { data: existing, error: null };
+        if (rows.some((row) => row.status === "streaming")) return { data: null, error: { code: "PT409" } };
+        const row: Row = { id: args.p_message_id, conversation_id: conversation, role: "user", content: args.p_content, status: "complete", position: Math.max(...rows.map((item) => item.position)) + 1 };
+        rows.push(row); return { data: row, error: null };
+      }
+      const old = rows.find((row) => row.reply_to_message_id === args.p_user_message_id);
+      if (old?.status === "complete") return { data: { ...old, replayed: true }, error: null };
       if (rows.some((row) => row.status === "streaming")) return { data: null, error: { code: "PT409" } };
-      const row: Row = { id: args.p_message_id, conversation_id: conversation, role: "user", content: args.p_content, status: "complete", position: Math.max(...rows.map((item) => item.position)) + 1 };
-      rows.push(row); return { data: row, error: null };
-    }
-    const old = rows.find((row) => row.reply_to_message_id === args.p_user_message_id);
-    if (old?.status === "complete") return { data: { ...old, replayed: true }, error: null };
-    if (rows.some((row) => row.status === "streaming")) return { data: null, error: { code: "PT409" } };
-    if (old) rows.splice(rows.indexOf(old), 1);
-    const id = args.p_user_message_id === firstUser ? old ? "44444444-4444-4444-8444-444444444444" : firstAssistant : secondAssistant;
-    const row: Row = { id, conversation_id: conversation, role: "assistant", content: "…", status: "streaming", position: old?.position ?? Math.max(...rows.map((item) => item.position)) + 1, reply_to_message_id: args.p_user_message_id };
-    rows.push(row); return { data: { ...row, replayed: false }, error: null };
-  } }));
+      if (old) rows.splice(rows.indexOf(old), 1);
+      const id = args.p_user_message_id === firstUser ? old ? "44444444-4444-4444-8444-444444444444" : firstAssistant : secondAssistant;
+      const row: Row = { id, conversation_id: conversation, role: "assistant", content: "…", status: "streaming", position: old?.position ?? Math.max(...rows.map((item) => item.position)) + 1, reply_to_message_id: args.p_user_message_id };
+      rows.push(row); return { data: { ...row, replayed: false }, error: null };
+    };
+    return { single: run, then: (resolve: (value: unknown) => unknown) => run().then(resolve) };
+  });
   createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc });
   const reply = (id = firstAssistant) => rows.find((row) => row.id === id);
   const contentWrites = (id = firstAssistant) => writes.filter((entry) => entry.id === id && entry.applied && entry.write.content !== undefined);
-  return { rows, writes, rpc, reply, contentWrites, appendCalls: () => appendCalls };
+  return { rows, writes, rpc, reply, contentWrites, appendCalls: () => appendCalls, usage: () => creditsUsed };
 }
 
 // A provider stream that sends `parts`, then stays open (a long High reply still being written) until it is cancelled or released.
@@ -131,6 +141,7 @@ describe("server-authoritative Stop (issue #12)", () => {
     await vi.waitFor(() => expect(upstream.cancelled).toHaveBeenCalledOnce());
     expect(provider.mock.calls[0][0]).toBe(mode);
     expect((provider.mock.calls[0][2] as AbortSignal).aborted).toBe(true);
+    expect(db.usage()).toBe(({ Fast: 1, Balanced: 3, High: 6 } as const)[mode as "Fast" | "Balanced" | "High"]);
     const events = await live.rest();
     expect(events.slice(-2)).toEqual([{ type: "status", status: "interrupted" }, { type: "done" }]);
     // 3-4. The exact partial, as interrupted; the generation never wrote its own content over it.
