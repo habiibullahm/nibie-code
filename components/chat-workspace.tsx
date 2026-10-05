@@ -6,7 +6,7 @@ import { PanelLeftClose, PanelLeftOpen, SquarePen, X } from "lucide-react";
 import { addUserMessageAction, archiveConversationAction, editLastUserMessageAction, moveConversationAction, renameConversationAction, restoreConversationAction, startConversationAction, updateConversationModelAction } from "@/app/actions/chat";
 import { createPinAction, deletePinAction, updatePinAction } from "@/app/actions/pins";
 import { createRoomAction, deleteRoomAction, updateRoomAction, updateRoomBriefAction } from "@/app/actions/rooms";
-import { BrandMark, type BrandActivity } from "@/components/brand";
+import type { BrandActivity } from "@/components/brand";
 import { ChatComposer, type ComposerHandle } from "@/components/chat-composer";
 import { ChatSidebar } from "@/components/chat-sidebar";
 import { RoomDetail } from "@/components/room-detail";
@@ -52,7 +52,13 @@ const unconfirmedNotice = "We couldn't confirm that response. Reload the page to
 const stillFinishingNotice = "A response is still finishing. It will appear here when it's done.";
 const checkAgainNotice = "This response is still in progress. Refresh the page to check it again.";
 const droppedConnectionNotice = "The connection dropped. Checking whether your response was saved…";
-const suggestions = ["Help me think through an idea", "Write something with me", "Explain a new topic"];
+const welcomeGreetings = [
+  (name: string | null) => name ? `Hey, ${name}.` : "Hey there.",
+  (name: string | null) => name ? `Good to see you, ${name}.` : "Good to see you.",
+  (name: string | null) => name ? `Welcome back, ${name}.` : "Welcome back.",
+  (name: string | null) => name ? `Glad you're here, ${name}.` : "Glad you're here.",
+  (name: string | null) => name ? `Hello again, ${name}.` : "Hello again.",
+] as const;
 const noConversations: ConversationSummary[] = [];
 // Streamed text is applied in small batches so a long reply is not re-parsed as Markdown for every network chunk.
 const streamFlushMs = 40;
@@ -88,6 +94,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const [localConversations, setLocalConversations] = useState<ConversationSummary[]>([]);
   const [locallyArchivedIds, setLocallyArchivedIds] = useState<string[]>([]);
   const [previewActiveId, setPreviewActiveId] = useState<string | null>(null);
+  const [welcomeGreetingIndex, setWelcomeGreetingIndex] = useState(0);
   // The conversation the user just chose, applied immediately while the server renders it. undefined = follow the URL.
   const [pendingId, setPendingId] = useState<string | null | undefined>(undefined);
   const [pendingRoomId, setPendingRoomId] = useState<string | null | undefined>(undefined);
@@ -383,6 +390,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   // server work (and no empty "New chat" entries left in history) until the user actually sends something.
   const newChat = useStableCallback(() => {
     if (busy.current) return;
+    setWelcomeGreetingIndex((index) => (index + 1) % welcomeGreetings.length);
     composerRef.current?.clear();
     openConversation(null);
     requestAnimationFrame(() => composerRef.current?.focus());
@@ -886,6 +894,9 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     selectedFileCount: selectedFileIds.length,
   });
   const accountName = accountDisplayName({ email, metadataName, preferredName: savedPreferences.preferredName });
+  const greetingSource = savedPreferences.preferredName?.trim() || metadataName?.trim() || null;
+  const greetingName = greetingSource?.split(/\s+/)[0] ?? null;
+  const welcomeGreeting = welcomeGreetings[welcomeGreetingIndex](greetingName);
   const headerRoomName = (showRoom ? activeRoom?.name : threadRoom?.name) ?? null;
   const roomThreads = activeRoom ? shownConversations.filter((item) => item.room_id === activeRoom.id) : [];
   const sidebarProps = { conversations: shownConversations, archivedConversations, rooms, activeId: history, activeRoomId: showRoom ? selectedRoomId : threadRoom?.id ?? null, busy: controlsDisabled || recovering, activity: assistantActivity, preview, email, name: accountName, renderedAt, settingsActive: settingsOpen, onClose: closeDrawer, onOpen: openConversation, onOpenRoom: openRoom, onNewThreadInRoom: newThreadInRoom, onDeleteRoom: deleteRoomFromSidebar, onCreateRoom: openRoomSetup, onNewChat: newChat, onOpenSettings: openSettings, onRename: rename, onArchive: archive, onRestore: restore, onMove: moveThread };
@@ -901,7 +912,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
         <button type="button" className="header-new-chat" aria-label="New chat" title="New chat" disabled={controlsDisabled} onClick={newChat}><SquarePen size={17} /></button>
       </header>
       <div ref={scrollRef} onScroll={handleScroll} className={`conversation-scroll ${showRoom ? "is-room" : messages.length || loadingConversation ? "has-messages" : "is-empty"}`}>
-        {showRoom && activeRoom ? <RoomDetail key={activeRoom.id} room={activeRoom} threads={roomThreads} busy={controlsDisabled} preview={preview} onOpenThread={openConversation} onNewThread={() => newThreadInRoom(activeRoom.id)} onSaveRoom={saveRoom} onSaveBrief={saveBrief} onCreatePin={createPin} onUpdatePin={updatePin} onDeletePin={removePin} onDelete={removeRoom} /> : loadingConversation ? <div className="message-list conversation-skeleton" role="status" aria-busy="true" aria-label="Loading conversation"><div className="skeleton-line is-short" /><div className="skeleton-line" /><div className="skeleton-line" /><div className="skeleton-line is-medium" /></div> : messages.length ? <div className="message-list" aria-live="polite">{messages.map((message) => <MessageRow key={message.id} message={message} initial={initial} isLast={message.id === lastMessage?.id} isLastUser={message.id === lastUser?.id} canMutate={!preview} disabled={messageActionsLocked} editing={editingId === message.id} responseFailed={notice === failureNotice} onRegenerate={regenerate} onStartEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} />)}{notice && <p className="local-notice" role="status">{notice}</p>}</div> : <div className="welcome-state"><div className="welcome-panel">{notice && <p className="local-notice" role="status">{notice}</p>}<div className="welcome-icon"><BrandMark activity={assistantActivity} /></div><p className="welcome-eyebrow">{drafting && activeRoom ? "NEW THREAD" : "A LITTLE ROOM TO THINK"}</p><h1>{drafting && activeRoom ? activeRoom.name : "What’s on your mind?"}</h1>{drafting && activeRoom ? <p className="welcome-copy">This thread starts inside the room. Nibie will use its instructions, brief, and pins.</p> : null}{drafting ? null : <div className="suggestion-list" aria-label="Suggestions">{suggestions.map((suggestion) => <button key={suggestion} onClick={() => { composerRef.current?.set(suggestion); composerRef.current?.focus(); }}>{suggestion}<span>↗</span></button>)}</div>}</div>{centeredComposer ? <ChatComposer {...composerProps} centered /> : null}</div>}
+        {showRoom && activeRoom ? <RoomDetail key={activeRoom.id} room={activeRoom} threads={roomThreads} busy={controlsDisabled} preview={preview} onOpenThread={openConversation} onNewThread={() => newThreadInRoom(activeRoom.id)} onSaveRoom={saveRoom} onSaveBrief={saveBrief} onCreatePin={createPin} onUpdatePin={updatePin} onDeletePin={removePin} onDelete={removeRoom} /> : loadingConversation ? <div className="message-list conversation-skeleton" role="status" aria-busy="true" aria-label="Loading conversation"><div className="skeleton-line is-short" /><div className="skeleton-line" /><div className="skeleton-line" /><div className="skeleton-line is-medium" /></div> : messages.length ? <div className="message-list" aria-live="polite">{messages.map((message) => <MessageRow key={message.id} message={message} initial={initial} isLast={message.id === lastMessage?.id} isLastUser={message.id === lastUser?.id} canMutate={!preview} disabled={messageActionsLocked} editing={editingId === message.id} responseFailed={notice === failureNotice} onRegenerate={regenerate} onStartEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} />)}{notice && <p className="local-notice" role="status">{notice}</p>}</div> : <div className="welcome-state"><div className="welcome-panel">{notice && <p className="local-notice" role="status">{notice}</p>}<div className="welcome-copy-group"><h1 data-testid={drafting ? undefined : "welcome-greeting"}>{drafting && activeRoom ? activeRoom.name : welcomeGreeting}</h1>{drafting && activeRoom ? <><p className="welcome-eyebrow">NEW THREAD</p><p className="welcome-copy">This thread starts inside the room. Nibie will use its instructions, brief, and pins.</p></> : null}</div></div>{centeredComposer ? <ChatComposer {...composerProps} centered /> : null}</div>}
       </div>
       {!showRoom && !centeredComposer ? <ChatComposer {...composerProps} /> : null}    </section>
     {renaming && <dialog ref={renameDialogRef} className="room-setup-dialog" aria-labelledby={renameTitleId} aria-busy={renameSaving} onCancel={(event) => { event.preventDefault(); if (!renameSaving) setRenaming(null); }}>

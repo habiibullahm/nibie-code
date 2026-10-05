@@ -93,7 +93,7 @@ test("invalid stored preferences keep the defaults", async ({ page }) => {
   });
   await page.goto("/preview");
   await page.getByRole("button", { name: "A thoughtful note to the team", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "What’s on your mind?" })).toHaveCount(0);
+  await expect(page.getByTestId("welcome-greeting")).toHaveCount(0);
   await expect(page.locator(".message-time")).toHaveCount(0);
   const box = composer(page);
   await box.fill("Defaults hold");

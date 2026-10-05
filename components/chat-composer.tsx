@@ -45,10 +45,18 @@ type Props = {
   centered?: boolean;
 };
 
+function fitCollapsedTextarea(element: HTMLTextAreaElement) {
+  element.style.height = "0px";
+  const maxHeight = Number.parseFloat(getComputedStyle(element).maxHeight);
+  element.style.height = `${Math.min(element.scrollHeight, Number.isFinite(maxHeight) ? maxHeight : 180)}px`;
+  return element.scrollHeight > (Number.isFinite(maxHeight) ? maxHeight : element.clientHeight) + 1;
+}
+
 // The draft lives here, not in the workspace: typing re-renders only this component, never the message list or sidebar.
 export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, streaming, mode, models, onModelChange, savingMode, caption, diagnostics, onEditProfile, onSubmit, onStop, onAttach, attachmentsEnabled = false, onRoomFiles, attachmentPanel = null, roomItems, roomId, roomLabel, roomSelectionNotice, roomsLoading, onRoomChange, centered = false }: Props) {
   const [draft, setDraft] = useState("");
   const [expanded, setExpanded] = useState(false);
+  const [canExpand, setCanExpand] = useState(false);
   const [enterToSend] = useChatFlag("enterToSend");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -76,10 +84,27 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
       element.style.height = "";
       return;
     }
-    element.style.height = "0px";
-    const maxHeight = Number.parseFloat(getComputedStyle(element).maxHeight);
-    element.style.height = `${Math.min(element.scrollHeight, Number.isFinite(maxHeight) ? maxHeight : 180)}px`;
+    setCanExpand(fitCollapsedTextarea(element));
   }, [draft, expanded, attachments.items.length]);
+  useEffect(() => {
+    const element = textareaRef.current;
+    if (!element) return;
+    let observedWidth = -1;
+    const fit = () => {
+      if (expanded) { setCanExpand(false); return; }
+      setCanExpand(fitCollapsedTextarea(element));
+    };
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? element.clientWidth;
+      if (Math.abs(width - observedWidth) < 1) return;
+      observedWidth = width;
+      fit();
+    });
+    observer.observe(element);
+    window.addEventListener("resize", fit);
+    fit();
+    return () => { observer.disconnect(); window.removeEventListener("resize", fit); };
+  }, [expanded]);
 
   // Files can be attached while a reply streams, for the next message. A message waits for its attachments: none still reading, and none failed (a failed one is removed or retried first).
   const attachmentsBlocked = attachments.uploading || attachments.failed;
@@ -171,7 +196,7 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
           </span>
           <div className="composer-actions">
             <ContextIndicator diagnostics={diagnostics} onEditProfile={onEditProfile} />
-            {!expanded && isActive ? <button className="composer-icon composer-expand" type="button" aria-label="Expand composer" title="Expand composer" aria-expanded="false" onClick={toggleExpanded}><Maximize2 size={16} aria-hidden="true" /></button> : null}
+            {!expanded && canExpand ? <button className="composer-icon composer-expand" type="button" aria-label="Expand composer" title="Expand composer" aria-expanded="false" onClick={toggleExpanded}><Maximize2 size={16} aria-hidden="true" /></button> : null}
             {streaming ? <button key="stop" className="send-button" type="button" aria-label="Stop response" onClick={onStop}><X size={18} /></button> : <button key="send" className="send-button" type="submit" aria-label="Send message" disabled={!draft.trim() || sending || attachmentsBlocked}>{sending ? <span className="send-spinner" /> : <ArrowUp size={18} strokeWidth={2.3} />}</button>}
           </div>
         </div>

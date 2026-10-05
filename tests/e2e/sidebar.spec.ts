@@ -39,7 +39,7 @@ test("desktop sidebar collapses to an accessible primary navigation rail", async
   await expect(sidebar.locator("[data-conversation-id]")).toHaveCount(0);
 
   await sidebar.getByRole("button", { name: "New chat" }).click();
-  await expect(page.getByRole("heading", { name: "What’s on your mind?" })).toBeVisible();
+  await expect(page.getByTestId("welcome-greeting")).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Message Nibie" })).toBeFocused();
   await expect(sidebar).toHaveCSS("width", "64px");
 
@@ -75,6 +75,47 @@ test("desktop sidebar collapses to an accessible primary navigation rail", async
   await expect(sidebar).toHaveCSS("width", "264px");
   await expect(sidebar.getByRole("link", { name: "Workbench" })).toHaveCount(0);
   await expect(sidebar.getByRole("button", { name: "New chat" })).toBeVisible();
+});
+
+test("collapsed General navigation selects the latest General chat from a Room", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/preview");
+  const sidebar = page.locator(".desktop-sidebar");
+  await sidebar.getByRole("button", { name: "Collapse sidebar" }).click();
+  await sidebar.getByRole("button", { name: "Rooms" }).click();
+  await sidebar.locator("section[aria-label='Rooms'] .history-item").filter({ hasText: "Nibie Development" }).click();
+  await expect(page.getByRole("textbox", { name: "Name" })).toHaveValue("Nibie Development");
+  await sidebar.getByRole("button", { name: "Collapse sidebar" }).click();
+  await sidebar.getByRole("button", { name: "General" }).click();
+  await expect(sidebar).toHaveCSS("width", "264px");
+  await expect(sidebar.locator("[data-conversation-id='preview-writing'] .history-item")).toHaveClass(/is-active/);
+  await expect(sidebar.locator("section[aria-label='Chat history'] .history-item.is-active")).toBeVisible();
+  await expect(page.locator(".composer-secondary-tools").getByRole("button", { name: "Room: General" })).toBeVisible();
+  await sidebar.getByRole("button", { name: "Collapse sidebar" }).click();
+  await expect(sidebar.getByRole("button", { name: "General" })).toHaveClass(/is-active/);
+  await expect(sidebar.getByRole("button", { name: "General" })).toHaveAttribute("aria-current", "page");
+  await expect(sidebar.getByRole("button", { name: "Rooms" })).not.toHaveClass(/is-active/);
+  await expect(sidebar.getByRole("button", { name: "Rooms" })).not.toHaveAttribute("aria-current");
+});
+
+test("General navigation clears a draft when no General conversations remain", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/preview");
+  const sidebar = page.locator(".desktop-sidebar");
+  for (const title of ["A thoughtful note to the team", "Debouncing a search box"]) {
+    await sidebar.getByRole("button", { name: `Actions for ${title}`, exact: true }).click();
+    await page.getByRole("menuitem", { name: "Move to…", exact: true }).click();
+    await page.getByRole("combobox", { name: "Move to", exact: true }).selectOption({ label: "Nibie Development" });
+    await page.getByRole("button", { name: "Move thread", exact: true }).click();
+  }
+  await sidebar.getByRole("button", { name: "New thread in Nibie Development", exact: true }).click();
+  const textarea = page.getByRole("textbox", { name: "Message Nibie" });
+  await textarea.fill("Unsent text must not carry into a new chat.");
+  await sidebar.getByRole("button", { name: "Collapse sidebar" }).click();
+  await sidebar.getByRole("button", { name: "General" }).click();
+  await expect(textarea).toHaveValue("");
+  await sidebar.getByRole("button", { name: "Collapse sidebar" }).click();
+  await expect(sidebar.getByRole("button", { name: "General" })).toHaveAttribute("aria-current", "page");
 });
 
 test("sidebar keeps chat and Rooms available across desktop and mobile breakpoints", async ({ page }) => {
@@ -388,19 +429,52 @@ test("a long thread displays an active summary from response diagnostics", async
 });
 
 test("first-chat welcome and composer are centered together", async ({ page }) => {
+  const greetings = ["Hey there.", "Good to see you.", "Welcome back.", "Glad you're here.", "Hello again."];
   for (const width of [390, 860, 1440]) {
     await page.setViewportSize({ width, height: 844 });
     await page.goto("/preview");
     const scroll = page.locator(".conversation-scroll.is-empty");
     const stack = scroll.locator(".welcome-state");
     await expect(stack.locator(".composer-dock.is-centered")).toBeVisible();
+    const greeting = stack.getByTestId("welcome-greeting");
+    await expect(greeting).toBeVisible();
+    expect(greetings).toContain((await greeting.textContent())?.trim());
+    await expect(stack.locator(".welcome-eyebrow")).toHaveCount(0);
+    await expect(stack.locator(".suggestion-list")).toHaveCount(0);
+    await expect(stack.locator(".welcome-icon")).toHaveCount(0);
+    const [greetingBox, panelBox] = await Promise.all([greeting.boundingBox(), stack.locator(".welcome-panel").boundingBox()]);
+    expect(greetingBox).not.toBeNull();
+    expect(panelBox).not.toBeNull();
+    expect(Math.abs((greetingBox!.x + greetingBox!.width / 2) - (panelBox!.x + panelBox!.width / 2))).toBeLessThan(2);
+    const composer = stack.locator(".composer-dock");
+    const composerBox = await composer.boundingBox();
+    expect(composerBox).not.toBeNull();
+    expect(composerBox!.y - (greetingBox!.y + greetingBox!.height)).toBeGreaterThanOrEqual(24);
     const scrollBox = await scroll.boundingBox();
     const stackBox = await stack.boundingBox();
     expect(scrollBox).not.toBeNull();
     expect(stackBox).not.toBeNull();
     expect(Math.abs((stackBox!.x + stackBox!.width / 2) - (scrollBox!.x + scrollBox!.width / 2))).toBeLessThan(2);
     expect(Math.abs((stackBox!.y + stackBox!.height / 2) - (scrollBox!.y + scrollBox!.height / 2))).toBeLessThan(2);
+    await stack.getByRole("textbox", { name: "Message Nibie" }).fill("I'm typing now");
+    await expect(greeting).toBeHidden();
+    const [activeDockBox, mainBox] = await Promise.all([stack.locator(".composer-dock").boundingBox(), page.locator(".chat-main").boundingBox()]);
+    expect(activeDockBox).not.toBeNull();
+    expect(mainBox).not.toBeNull();
+    expect(Math.abs((activeDockBox!.y + activeDockBox!.height) - (mainBox!.y + mainBox!.height))).toBeLessThan(2);
   }
+});
+
+test("new chat cycles to a different welcome greeting", async ({ page }) => {
+  const greetings = ["Hey there.", "Good to see you.", "Welcome back.", "Glad you're here.", "Hello again."];
+  await page.goto("/preview");
+  const greeting = page.getByTestId("welcome-greeting");
+  await expect(greeting).toBeVisible();
+  const first = (await greeting.textContent())?.trim();
+  expect(greetings).toContain(first);
+  await page.getByRole("button", { name: "New chat" }).first().click();
+  await expect.poll(() => greeting.textContent()).not.toBe(first);
+  expect(greetings).toContain((await greeting.textContent())?.trim());
 });
 
 test("active thread Room selector is in the composer", async ({ page }) => {

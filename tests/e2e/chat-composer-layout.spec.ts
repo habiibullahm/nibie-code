@@ -63,7 +63,7 @@ async function expectComposerGeometry(page: Page) {
   expect(metrics.textareaBottom).toBeLessThanOrEqual(metrics.actionsTop + 1);
   expect(Math.abs(metrics.attachTop + (metrics.attachBottom - metrics.attachTop) / 2 - metrics.actionsTop - (metrics.actionsBottom - metrics.actionsTop) / 2)).toBeLessThanOrEqual(1);
   expect(metrics.actionsBottom).toBeLessThanOrEqual(metrics.composerBoxBottom + 1);
-  expect(metrics.textareaHeight).toBeLessThanOrEqual(metrics.maxTextareaHeight + 2);
+  if (Number.isFinite(metrics.maxTextareaHeight)) expect(metrics.textareaHeight).toBeLessThanOrEqual(metrics.maxTextareaHeight + 2);
   expect(metrics.horizontalOverflow).toBe(false);
   return metrics;
 }
@@ -117,11 +117,34 @@ test("growing composer stays below messages at desktop, tablet, and mobile sizes
   }
 });
 
+test("expand affordance tracks actual textarea overflow", async ({ page }) => {
+  await openSampleConversation(page, 733, 650);
+  const textarea = page.getByRole("textbox", { name: "Message Nibie" });
+  const expand = page.getByRole("button", { name: "Expand composer" });
+  await expect(expand).toHaveCount(0);
+  await textarea.fill("Short draft");
+  await expect(expand).toHaveCount(0);
+  const shortDraftHeight = await textarea.evaluate((element) => element.getBoundingClientRect().height);
+  await textarea.fill(Array.from({ length: 20 }, (_, i) => `Prompt line ${i + 1}`).join("\n"));
+  await expect(expand).toBeVisible();
+  const geometry = await expectComposerGeometry(page);
+  expect(geometry.textareaBottom).toBeLessThanOrEqual(geometry.actionsTop + 1);
+  await textarea.fill("Short again");
+  await expect(expand).toHaveCount(0);
+  await expect.poll(() => textarea.evaluate((element, baseline: number) => Math.abs(element.getBoundingClientRect().height - baseline), shortDraftHeight)).toBeLessThanOrEqual(1);
+  await textarea.fill(Array.from({ length: 20 }, (_, i) => `Prompt line ${i + 1}`).join("\n"));
+  await expect(expand).toBeVisible();
+  await textarea.fill("");
+  await expect(expand).toHaveCount(0);
+});
+
 test("expand and collapse preserve draft, focus, selection, and send reset", async ({ page }) => {
   await openSampleConversation(page, 390, 844);
   const textarea = page.getByRole("textbox", { name: "Message Nibie" });
   const draft = Array.from({ length: 20 }, (_, index) => `Prompt line ${index + 1}`).join("\n");
   await textarea.fill(draft);
+  await expect(page.getByRole("button", { name: "Expand composer" })).toBeVisible();
+  await page.getByRole("button", { name: "Expand composer" }).click();
   await expect(page.getByRole("button", { name: "Collapse composer" })).toBeVisible();
   await page.getByRole("button", { name: "Collapse composer" }).click();
   await textarea.evaluate((element: HTMLTextAreaElement) => { element.focus(); element.setSelectionRange(12, 24); });

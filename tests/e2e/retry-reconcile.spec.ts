@@ -26,7 +26,7 @@ const regenerate = (page: Page) => page.getByRole("button", { name: "Regenerate"
 
 async function startChat(page: Page, prompt: string) {
   await page.getByRole("button", { name: "New chat", exact: true }).first().click();
-  await expect(page.getByRole("heading", { name: "What’s on your mind?" })).toBeVisible();
+  await expect(page.getByTestId("welcome-greeting")).toBeVisible();
   await page.getByRole("textbox", { name: "Message Nibie" }).fill(prompt);
 }
 
