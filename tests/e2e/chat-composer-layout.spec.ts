@@ -32,7 +32,6 @@ async function expectComposerGeometry(page: Page) {
     const composer = dock.querySelector<HTMLElement>(".composer")!;
     const actions = composer.querySelector<HTMLElement>(".composer-actions")!;
     const attach = composer.querySelector<HTMLElement>(".composer-attach button")!;
-    const promptLabel = composer.querySelector<HTMLElement>(".composer-prompt-label");
     const message = viewport.querySelector<HTMLElement>(".message-row:last-child")!;
     const textarea = dock.querySelector<HTMLTextAreaElement>("textarea")!;
     return {
@@ -40,12 +39,11 @@ async function expectComposerGeometry(page: Page) {
       composerTop: dock.getBoundingClientRect().top,
       composerBottom: dock.getBoundingClientRect().bottom,
       textareaBottom: textarea.getBoundingClientRect().bottom,
-      textareaTop: textarea.getBoundingClientRect().top,
       actionsTop: actions.getBoundingClientRect().top,
       actionsBottom: actions.getBoundingClientRect().bottom,
       attachTop: attach.getBoundingClientRect().top,
       attachBottom: attach.getBoundingClientRect().bottom,
-      promptLabelBottom: promptLabel?.getBoundingClientRect().bottom ?? null,
+      showsPlaceholderAsText: composer.textContent?.includes("Ask Nibie anything...") ?? false,
       composerBoxBottom: composer.getBoundingClientRect().bottom,
       messageBottom: message.getBoundingClientRect().bottom,
       textareaHeight: textarea.getBoundingClientRect().height,
@@ -61,8 +59,7 @@ async function expectComposerGeometry(page: Page) {
   expect(metrics.viewportBottom).toBeLessThanOrEqual(metrics.composerTop + 1);
   expect(metrics.messageBottom).toBeLessThanOrEqual(metrics.viewportBottom + 1);
   expect(metrics.composerBottom).toBeLessThanOrEqual(metrics.viewportHeight + 1);
-  expect(metrics.promptLabelBottom).not.toBeNull();
-  expect(metrics.promptLabelBottom!).toBeLessThanOrEqual(metrics.textareaTop);
+  expect(metrics.showsPlaceholderAsText).toBe(false);
   expect(metrics.textareaBottom).toBeLessThanOrEqual(metrics.actionsTop + 1);
   expect(Math.abs(metrics.attachTop + (metrics.attachBottom - metrics.attachTop) / 2 - metrics.actionsTop - (metrics.actionsBottom - metrics.actionsTop) / 2)).toBeLessThanOrEqual(1);
   expect(metrics.actionsBottom).toBeLessThanOrEqual(metrics.composerBoxBottom + 1);

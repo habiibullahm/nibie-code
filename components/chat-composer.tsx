@@ -145,15 +145,14 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
   }
 
   const modelItems: MenuItem<ChatModel>[] = models.map((option) => ({ value: option.id, label: option.label, detail: option.description }));
-  const showPromptLabel = draft.length > 0;
+  const hasDraft = draft.length > 0;
   const hasAttachments = attachments.items.length > 0 || Boolean(attachments.notice);
 
   return <div ref={dockRef} className={`composer-dock${centered ? " is-centered" : ""}`}>
     {attachmentPanel}
     <div className={`composer${expanded ? " is-expanded" : ""}${dragging ? " is-dropping" : ""}`}>
-      <form ref={formRef} className={`composer-form${hasAttachments ? " has-attachments" : ""}${showPromptLabel ? " has-prompt-label" : ""}`} onSubmit={(event) => { event.preventDefault(); submit(); }}>
+      <form ref={formRef} className={`composer-form${hasAttachments ? " has-attachments" : ""}${hasDraft ? " has-draft" : ""}`} onSubmit={(event) => { event.preventDefault(); submit(); }}>
         <ComposerAttachments items={attachments.items} notice={attachments.notice} disabled={sending} onRemove={attachments.remove} onRetry={attachments.retry} />
-        {showPromptLabel ? <div className="composer-prompt-label"><span aria-hidden="true">Ask Nibie anything...</span><button className="composer-icon" type="button" aria-label={expanded ? "Collapse composer" : "Expand composer"} title={expanded ? "Collapse composer" : "Expand composer"} onClick={toggleExpanded}>{expanded ? <Minimize2 size={16} aria-hidden="true" /> : <Maximize2 size={16} aria-hidden="true" />}</button></div> : null}
         <span className="composer-attach">
           <button className="composer-icon" type="button" aria-label="Attach file" title="Attach file" aria-haspopup={attachmentsEnabled && onRoomFiles ? "menu" : undefined} aria-expanded={attachmentsEnabled && onRoomFiles ? attachMenuOpen : undefined} aria-pressed={attachmentsEnabled && onRoomFiles ? undefined : Boolean(attachmentPanel)} disabled={attachmentsEnabled && sending} onClick={plus}><Plus size={18} /></button>
           {attachMenuOpen ? <span className="attach-menu" role="menu" aria-label="Attach">
@@ -165,6 +164,7 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
         {attachmentsEnabled ? <input ref={fileInputRef} className="composer-file-input" type="file" multiple accept={ATTACHMENT_ACCEPT} tabIndex={-1} aria-hidden="true" onChange={(event) => { attachments.add([...(event.target.files ?? [])]); event.target.value = ""; }} /> : null}
         <div className="composer-actions">
           <ContextIndicator diagnostics={diagnostics} onEditProfile={onEditProfile} />
+          {hasDraft ? <button className="composer-icon" type="button" aria-label={expanded ? "Collapse composer" : "Expand composer"} title={expanded ? "Collapse composer" : "Expand composer"} onClick={toggleExpanded}>{expanded ? <Minimize2 size={16} aria-hidden="true" /> : <Maximize2 size={16} aria-hidden="true" />}</button> : null}
           {streaming ? <button key="stop" className="send-button" type="button" aria-label="Stop response" onClick={onStop}><X size={18} /></button> : <button key="send" className="send-button" type="submit" aria-label="Send message" disabled={!draft.trim() || sending || attachmentsBlocked}>{sending ? <span className="send-spinner" /> : <ArrowUp size={18} strokeWidth={2.3} />}</button>}
         </div>
       </form>
