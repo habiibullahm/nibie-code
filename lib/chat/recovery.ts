@@ -30,11 +30,12 @@ export function needsServerCheck(kind: StreamFailureKind) {
 
 type StatusRow = { id: string; role: string; status?: string; position: number };
 
-// A stop-status acknowledgement can arrive before the partial text is persisted.
+// A reply the user stopped is saved only once the server holds it as stopped with exactly the text on screen. A finished
+// answer that merely starts with that text is the generation completing before the Stop landed, and must not replace it.
 export function messagePersistenceConfirmed(local: { role: string; content: string; terminationReason?: "user_stopped" }, saved: { content: string; status?: string }) {
   if (saved.status === "streaming") return false;
   if (local.role === "user") return saved.content === local.content;
-  return local.terminationReason !== "user_stopped" || saved.content.startsWith(local.content);
+  return local.terminationReason !== "user_stopped" || (saved.status === "interrupted" && saved.content === local.content);
 }
 
 export function hasActiveGeneration(messages: readonly StatusRow[]) {

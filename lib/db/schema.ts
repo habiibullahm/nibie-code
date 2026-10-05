@@ -1,4 +1,5 @@
 import {
+  boolean,
   check,
   date,
   foreignKey,
@@ -290,5 +291,43 @@ export const workbenchDocuments = pgTable(
       sql`char_length(${table.title}) between 1 and 120 and ${table.title} = btrim(${table.title})`,
     ),
     check("workbench_documents_content_length", sql`char_length(${table.content}) <= 100000`),
+  ],
+);
+
+// A chat attachment: text extracted from a file the owner attached to one of their messages.
+// A draft has no conversation or message yet. Once sent, the same-owner composite key ties it to exactly one user
+// message in one conversation. It is not room knowledge and is never shared with other threads.
+export const messageAttachments = pgTable(
+  "message_attachments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id"),
+    messageId: uuid("message_id"),
+    originalName: text("original_name").notNull(),
+    mimeType: text("mime_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    extractedText: text("extracted_text").notNull(),
+    truncated: boolean("truncated").notNull().default(false),
+    pageCount: integer("page_count"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "message_attachments_message_owner_fk",
+      columns: [table.messageId, table.conversationId, table.userId],
+      foreignColumns: [messages.id, messages.conversationId, messages.userId],
+    }).onDelete("cascade"),
+    index("message_attachments_message_idx").on(table.conversationId, table.messageId),
+    index("message_attachments_draft_idx").on(table.userId, table.createdAt).where(sql`${table.messageId} IS NULL`),
+    check("message_attachments_link_pair", sql`(${table.conversationId} IS NULL) = (${table.messageId} IS NULL)`),
+    check("message_attachments_name_length", sql`char_length(${table.originalName}) between 1 and 120 and ${table.originalName} = btrim(${table.originalName})`),
+    check(
+      "message_attachments_mime_allowlist",
+      sql`${table.mimeType} in ('text/plain', 'text/markdown', 'text/csv', 'application/json', 'application/pdf', 'text/x-typescript', 'text/javascript', 'text/x-python', 'text/x-java', 'text/x-go', 'text/x-rust', 'application/sql', 'text/html', 'text/css', 'application/yaml', 'application/xml')`,
+    ),
+    check("message_attachments_size_bounds", sql`${table.sizeBytes} between 1 and 4194304`),
+    check("message_attachments_text_bounds", sql`char_length(${table.extractedText}) between 1 and 24000`),
+    check("message_attachments_page_bounds", sql`${table.pageCount} IS NULL OR ${table.pageCount} between 1 and 100000`),
   ],
 );

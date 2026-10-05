@@ -123,7 +123,7 @@ Public, no account:
 Signed in:
 
 - Send a message and refresh; the reply is still there
-- Stop a long reply; the conversation is not left spinning after refresh
+- Stop a long reply; the conversation is not left spinning after refresh, and the reply keeps the stopped text with a Stopped label (never the finished answer)
 - Retry and Regenerate only affect the latest turn
 - Change Fast / Balanced / High; the browser sends only the safe logical mode. If the weekly candidate is released: confirm a new provider generation charges once at 1 / 3 / 6 credits, a completed replay does not charge, a stopped established stream remains charged, and an exhausted allowance returns `WEEKLY_USAGE_LIMIT` without calling the provider
 - Open Settings → General; verify the server-supplied remaining allowance/reset, then verify exhausted-state copy. No usage preflight occurs before Send

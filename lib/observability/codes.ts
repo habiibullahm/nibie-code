@@ -8,6 +8,8 @@ export const operationalCodes = {
   requestFailed: "REQUEST_FAILED",
   weeklyUsageLimitRejected: "WEEKLY_USAGE_LIMIT",
   roomDraftFailed: "ROOM_DRAFT_FAILED",
+  attachmentSaveFailed: "ATTACHMENT_SAVE_FAILED",
+  attachmentReadFailed: "ATTACHMENT_READ_FAILED",
 } as const;
 
 export type OperationalCode = (typeof operationalCodes)[keyof typeof operationalCodes];

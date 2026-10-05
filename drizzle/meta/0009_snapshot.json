@@ -1,5 +1,5 @@
 {
-  "id": "224397b4-d4c0-41b8-8163-dc20f20f6197",
+  "id": "af711bd9-7449-486c-b275-d581e1cda9e2",
   "prevId": "a88d39e8-7a7b-4094-9c45-0a1481e4b470",
   "version": "7",
   "dialect": "postgresql",
@@ -149,6 +149,188 @@
       },
       "policies": {},
       "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.message_attachments": {
+      "name": "message_attachments",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "conversation_id": {
+          "name": "conversation_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "message_id": {
+          "name": "message_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "original_name": {
+          "name": "original_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mime_type": {
+          "name": "mime_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "size_bytes": {
+          "name": "size_bytes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "extracted_text": {
+          "name": "extracted_text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "truncated": {
+          "name": "truncated",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "page_count": {
+          "name": "page_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "message_attachments_message_idx": {
+          "name": "message_attachments_message_idx",
+          "columns": [
+            {
+              "expression": "conversation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "message_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "message_attachments_draft_idx": {
+          "name": "message_attachments_draft_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"message_attachments\".\"message_id\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "message_attachments_user_id_users_id_fk": {
+          "name": "message_attachments_user_id_users_id_fk",
+          "tableFrom": "message_attachments",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "message_attachments_message_owner_fk": {
+          "name": "message_attachments_message_owner_fk",
+          "tableFrom": "message_attachments",
+          "tableTo": "messages",
+          "columnsFrom": [
+            "message_id",
+            "conversation_id",
+            "user_id"
+          ],
+          "columnsTo": [
+            "id",
+            "conversation_id",
+            "user_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "message_attachments_link_pair": {
+          "name": "message_attachments_link_pair",
+          "value": "(\"message_attachments\".\"conversation_id\" IS NULL) = (\"message_attachments\".\"message_id\" IS NULL)"
+        },
+        "message_attachments_name_length": {
+          "name": "message_attachments_name_length",
+          "value": "char_length(\"message_attachments\".\"original_name\") between 1 and 120 and \"message_attachments\".\"original_name\" = btrim(\"message_attachments\".\"original_name\")"
+        },
+        "message_attachments_mime_allowlist": {
+          "name": "message_attachments_mime_allowlist",
+          "value": "\"message_attachments\".\"mime_type\" in ('text/plain', 'text/markdown', 'text/csv', 'application/json', 'application/pdf', 'text/x-typescript', 'text/javascript', 'text/x-python', 'text/x-java', 'text/x-go', 'text/x-rust', 'application/sql', 'text/html', 'text/css', 'application/yaml', 'application/xml')"
+        },
+        "message_attachments_size_bounds": {
+          "name": "message_attachments_size_bounds",
+          "value": "\"message_attachments\".\"size_bytes\" between 1 and 4194304"
+        },
+        "message_attachments_text_bounds": {
+          "name": "message_attachments_text_bounds",
+          "value": "char_length(\"message_attachments\".\"extracted_text\") between 1 and 24000"
+        },
+        "message_attachments_page_bounds": {
+          "name": "message_attachments_page_bounds",
+          "value": "\"message_attachments\".\"page_count\" IS NULL OR \"message_attachments\".\"page_count\" between 1 and 100000"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.messages": {
@@ -1002,230 +1184,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.weekly_ai_usage": {
-      "name": "weekly_ai_usage",
-      "schema": "",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "week_start": {
-          "name": "week_start",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "credits_used": {
-          "name": "credits_used",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "fast_requests": {
-          "name": "fast_requests",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "balanced_requests": {
-          "name": "balanced_requests",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "high_requests": {
-          "name": "high_requests",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "weekly_ai_usage_user_id_users_id_fk": {
-          "name": "weekly_ai_usage_user_id_users_id_fk",
-          "tableFrom": "weekly_ai_usage",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "weekly_ai_usage_user_week_key": {
-          "name": "weekly_ai_usage_user_week_key",
-          "nullsNotDistinct": false,
-          "columns": [
-            "user_id",
-            "week_start"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "weekly_ai_usage_credits_nonnegative": {
-          "name": "weekly_ai_usage_credits_nonnegative",
-          "value": "\"weekly_ai_usage\".\"credits_used\" between 0 and 100"
-        },
-        "weekly_ai_usage_fast_nonnegative": {
-          "name": "weekly_ai_usage_fast_nonnegative",
-          "value": "\"weekly_ai_usage\".\"fast_requests\" >= 0"
-        },
-        "weekly_ai_usage_balanced_nonnegative": {
-          "name": "weekly_ai_usage_balanced_nonnegative",
-          "value": "\"weekly_ai_usage\".\"balanced_requests\" >= 0"
-        },
-        "weekly_ai_usage_high_nonnegative": {
-          "name": "weekly_ai_usage_high_nonnegative",
-          "value": "\"weekly_ai_usage\".\"high_requests\" >= 0"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.weekly_usage_reservations": {
-      "name": "weekly_usage_reservations",
-      "schema": "",
-      "columns": {
-        "generation_id": {
-          "name": "generation_id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "week_start": {
-          "name": "week_start",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "logical_mode": {
-          "name": "logical_mode",
-          "type": "weekly_usage_mode",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "credits_charged": {
-          "name": "credits_charged",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "released_at": {
-          "name": "released_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "started_at": {
-          "name": "started_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "weekly_usage_reservations_user_week_idx": {
-          "name": "weekly_usage_reservations_user_week_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "week_start",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "weekly_usage_reservations_generation_id_messages_id_fk": {
-          "name": "weekly_usage_reservations_generation_id_messages_id_fk",
-          "tableFrom": "weekly_usage_reservations",
-          "tableTo": "messages",
-          "columnsFrom": [
-            "generation_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "weekly_usage_reservations_user_id_users_id_fk": {
-          "name": "weekly_usage_reservations_user_id_users_id_fk",
-          "tableFrom": "weekly_usage_reservations",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "weekly_usage_reservations_credits_positive": {
-          "name": "weekly_usage_reservations_credits_positive",
-          "value": "\"weekly_usage_reservations\".\"credits_charged\" > 0"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.workbench_documents": {
       "name": "workbench_documents",
       "schema": "",
@@ -1421,15 +1379,6 @@
         "natural",
         "professional",
         "direct"
-      ]
-    },
-    "public.weekly_usage_mode": {
-      "name": "weekly_usage_mode",
-      "schema": "public",
-      "values": [
-        "Fast",
-        "Balanced",
-        "High"
       ]
     }
   },

@@ -2,6 +2,7 @@ import { defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
 
 export default defineConfig({
+  // Same module resolution as the unit suite: server modules imported here use the "@/" alias.
   resolve: {
     alias: {
       "@": fileURLToPath(new URL(".", import.meta.url)),

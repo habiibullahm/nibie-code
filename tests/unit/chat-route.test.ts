@@ -1,11 +1,37 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc, modelOptions, contextCapabilities } = vi.hoisted(() => {
+const { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc, modelOptions, contextCapabilities, withoutAttachments, attachmentState, stopState } = vi.hoisted(() => {
   const createClient = vi.fn(); const stream = vi.fn(); const claim = vi.fn(); const usageReserve = vi.fn(); const usageStart = vi.fn(); const usageRelease = vi.fn();
   const rpc = vi.fn((name: string, args: unknown) => name === "reserve_weekly_ai_usage" ? usageReserve(args) : name === "start_weekly_ai_usage" ? usageStart(args) : name === "release_weekly_ai_usage" ? usageRelease(args) : claim(name, args));
-  return { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc, modelOptions: vi.fn(), contextCapabilities: vi.fn(() => ({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 })) };
+  const attachmentState: { result: { data: unknown; error: unknown }; reads: unknown[][] } = { result: { data: [], error: null }, reads: [] };
+  const stopState = { status: "streaming" as string | null, reads: 0 };
+  const statusRead = () => {
+    const builder: Record<string, unknown> = {};
+    builder.eq = () => builder;
+    builder.maybeSingle = async () => { stopState.reads++; return { data: stopState.status ? { status: stopState.status } : null, error: null }; };
+    return builder;
+  };
+  const none = () => {
+    const builder: Record<string, unknown> = {};
+    for (const method of ["select", "eq", "order", "limit"]) builder[method] = (...args: unknown[]) => { attachmentState.reads.push([method, ...args]); return builder; };
+    builder.then = (resolve: (value: unknown) => unknown) => Promise.resolve(attachmentState.result).then(resolve);
+    return builder;
+  };
+  const withoutAttachments = (client: unknown) => {
+    const value = client as { from?: (table: string) => unknown } | undefined;
+    if (!value || typeof value.from !== "function") return client;
+    const from = value.from;
+    type Table = { select: (...args: unknown[]) => unknown; update: (...args: unknown[]) => unknown; insert: (...args: unknown[]) => unknown };
+    const messages = () => ({
+      select: (...args: unknown[]) => args[0] === "status" ? statusRead() : (from("messages") as Table).select(...args),
+      update: (...args: unknown[]) => (from("messages") as Table).update(...args),
+      insert: (...args: unknown[]) => (from("messages") as Table).insert(...args),
+    });
+    return { ...value, from: (table: string) => table === "message_attachments" ? none() : table === "messages" ? messages() : from(table) };
+  };
+  return { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc, modelOptions: vi.fn(), contextCapabilities: vi.fn(() => ({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 })), withoutAttachments, attachmentState, stopState };
 });
-vi.mock("@/lib/supabase/server", () => ({ createSupabaseServerClient: createClient }));
+vi.mock("@/lib/supabase/server", () => ({ createSupabaseServerClient: async () => withoutAttachments(await createClient()) }));
 vi.mock("@/lib/ai/provider", () => ({ chatProvider: { stream } }));
 vi.mock("@/lib/ai/registry", () => ({ getModelOptions: modelOptions, contextCapabilitiesFor: contextCapabilities, providerFor: (mode: string) => mode === "Fast" ? "sumopod" : "openai" }));
 const allModes = { models: ["Fast", "Balanced", "High"].map((id) => ({ id, label: id, description: "" })) };
@@ -21,6 +47,7 @@ const assistant = { id: assistantId, position: 3, content: "…", status: "strea
 
 describe("POST /api/chat", () => {
   beforeEach(() => {
+    attachmentState.result = { data: [], error: null }; attachmentState.reads = []; stopState.status = "streaming"; stopState.reads = 0;
     preferenceResult = { data: null, error: null };
     createClient.mockReset(); stream.mockReset(); modelOptions.mockReset().mockReturnValue(allModes);
     contextCapabilities.mockReset().mockReturnValue({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 });
@@ -68,6 +95,55 @@ describe("POST /api/chat", () => {
     const shown = events.flatMap((event) => event.type === "delta" ? [event.text] : []).join("");
     expect(shown).toBe(parts.join(""));
     expect(writes).toContainEqual({ content: shown, status: "complete" });
+  });
+
+  describe("chat attachments in the reply context", () => {
+    const row = (overrides: Record<string, unknown> = {}) => ({ message_id: "user-message", original_name: "attachment-a.txt", mime_type: "text/plain", extracted_text: "The internal codename for this test document is Cedar Harbor.", truncated: false, page_count: null, created_at: "2026-10-04T00:00:00Z", ...overrides });
+
+    it("grounds the reply in this conversation's attachments as untrusted data", async () => {
+      const writes: unknown[] = [];
+      const results = [
+        { data: { id: "user-message", position: 1, content: "hello" }, error: null },
+        { data: [{ id: "user-message", role: "user", content: "hello", status: "complete", position: 1 }], error: null },
+        { data: { id: assistantId }, error: null },
+      ];
+      const from = vi.fn((table: string) => table === "user_preferences" ? query(preferenceResult) : table === "conversations"
+        ? query({ data: { id: "conversation", selected_model: "Balanced" }, error: null })
+        : query(results.shift(), (write) => writes.push(write)));
+      createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc });
+      attachmentState.result = { data: [row(), row({ message_id: "another-conversation-message", original_name: "elsewhere.txt", extracted_text: "Not this one." })], error: null };
+      stream.mockResolvedValue(providerChunks(["Cedar Harbor."], "stop"));
+      const response = await POST(validRequest());
+      const events = await Array.fromAsync(readChatSse(response.body!));
+      expect(events.slice(-2)).toEqual([{ type: "status", status: "complete" }, { type: "done" }]);
+      expect(attachmentState.reads).toContainEqual(["eq", "conversation_id", "5e9bdcca-9205-4fea-a773-13952bb78c44"]);
+      const prompt = stream.mock.calls[0][1] as { role: string; content: string }[];
+      expect(prompt[0].content).not.toContain("Cedar Harbor");
+      expect(prompt[1].content).toContain('filename: "attachment-a.txt"');
+      expect(prompt[1].content).toContain("<untrusted_attachment_content>\nThe internal codename for this test document is Cedar Harbor.");
+      expect(prompt[1].content).not.toContain("Not this one.");
+      expect(events[0]).toMatchObject({ type: "start", context: { sources: expect.arrayContaining([expect.objectContaining({ type: "attachment", state: "included" })]) } });
+    });
+
+    it("does not start a reply without attachments it could not read", async () => {
+      const writes: unknown[] = [];
+      readyClient(writes);
+      attachmentState.result = { data: null, error: { code: "XX000", message: "read failed" } };
+      const response = await POST(validRequest());
+      expect(response.status).toBe(503);
+      expect(stream).not.toHaveBeenCalled();
+      expect(claim).not.toHaveBeenCalled();
+    });
+
+    it("replies normally on a database that has no attachments table yet", async () => {
+      readyClient([]);
+      attachmentState.result = { data: null, error: { code: "PGRST205", message: "missing" } };
+      stream.mockResolvedValue(providerChunks(["Done."], "stop"));
+      const response = await POST(validRequest());
+      expect(response.status).toBe(200);
+      await response.text();
+      expect(stream).toHaveBeenCalledOnce();
+    });
   });
 
   it.each(["Auto", "High"])("routes model choice %s on the server", async (model) => {

@@ -7,6 +7,8 @@ export const ROOM_TOKEN_CAP = 1_200;
 // Shared by every pin in one room. Whole pins are kept or dropped; pin text is never cut in half.
 export const PIN_TOKEN_CAP = 800;
 export const FILE_TOKEN_CAP = 1_500;
+// Shared by every chat attachment in one request.
+export const ATTACHMENT_TOKEN_CAP = 6_000;
 
 export function estimateTokens(text: string) {
   return Math.ceil(text.length / 4);

@@ -1,0 +1,37 @@
+// A representative assistant reply for formatting checks: every Markdown element Nibie renders, plus the content that
+// tends to break narrow layouts (long code lines, a wide table, a long unbroken string).
+export const formattingSampleId = "fixture:formatting-sample";
+
+export const formattingSample = [
+  "HTTP caching lets a browser reuse a response instead of downloading it again. Two headers do most of the work: `Cache-Control` decides how long a copy stays fresh, and `ETag` lets the server confirm an old copy is still valid.",
+  "## How a request is answered",
+  "1. The browser checks its cache for a fresh copy.",
+  "2. If the copy is stale, it sends `If-None-Match` with the saved `ETag`.",
+  "3. The server replies `304 Not Modified` when nothing changed, so no body is sent.",
+  "",
+  "### Choosing a policy",
+  "- **Static assets** with hashed names can be cached for a year.",
+  "  - Use `immutable` so the browser skips revalidation.",
+  "  - Never reuse a hashed file name for new content.",
+  "- **HTML pages** should revalidate on every visit.",
+  "- **API responses** depend on how stale the data may be.",
+  "",
+  "| Resource | `Cache-Control` | Revalidate | Notes |",
+  "| --- | --- | --- | --- |",
+  "| `app.4f9c2.js` | `public, max-age=31536000, immutable` | Never | Name changes when content changes |",
+  "| `index.html` | `no-cache` | Every request | Uses the `ETag` |",
+  "| `/api/profile` | `private, max-age=0, must-revalidate` | Every request | Per-user data stays out of shared caches |",
+  "",
+  "```ts",
+  "export async function cachedFetch(url: string, etag?: string): Promise<{ status: number; etag: string | null; body: string | null }> {",
+  "  const response = await fetch(url, { headers: etag ? { \"If-None-Match\": etag } : {} });",
+  "  return { status: response.status, etag: response.headers.get(\"ETag\"), body: response.status === 304 ? null : await response.text() };",
+  "}",
+  "```",
+  "",
+  "Set it with `export CACHE_TTL=3600` or read more in the [MDN guide](https://developer.mozilla.org/en-US/docs/Web/HTTP/Caching).",
+  "",
+  "> A `no-cache` header still allows caching. It only forces revalidation before reuse.",
+  "",
+  "A long token such as sha256-3f1a9c5b7d2e8f6a4c0b9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0 must wrap rather than widen the page.",
+].join("\n");

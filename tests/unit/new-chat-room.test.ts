@@ -1,7 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { createClient, stream } = vi.hoisted(() => ({ createClient: vi.fn(), stream: vi.fn() }));
-vi.mock("@/lib/supabase/server", () => ({ createSupabaseServerClient: createClient }));
+// The chat route also reads this conversation's attachments. Tests that are not about attachments see none, while every
+// other table still goes to the test's own mock.
+const { withoutAttachments } = vi.hoisted(() => {
+  const none = () => {
+    const builder: Record<string, unknown> = {};
+    for (const method of ["select", "eq", "order", "limit"]) builder[method] = () => builder;
+    builder.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data: [], error: null }).then(resolve);
+    return builder;
+  };
+  return { withoutAttachments: (client: unknown) => {
+    const value = client as { from?: (table: string) => unknown } | undefined;
+    if (!value || typeof value.from !== "function") return client;
+    const from = value.from;
+    return { ...value, from: (table: string) => table === "message_attachments" ? none() : from(table) };
+  } };
+});
+vi.mock("@/lib/supabase/server", () => ({ createSupabaseServerClient: async () => withoutAttachments(await createClient()) }));
 vi.mock("@/lib/ai/provider", () => ({ chatProvider: { stream } }));
 vi.mock("@/lib/ai/registry", () => ({
   getModelOptions: () => ({ models: [{ id: "Balanced", label: "Balanced", description: "" }] }),

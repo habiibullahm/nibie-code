@@ -4,6 +4,7 @@ import type { PersistedMessage } from "@/lib/chat/read";
 import { validateConversationId } from "@/lib/chat/validation";
 import { ChatCoreComposerFixture } from "@/tests/fixtures/chat-core-composer";
 import { longReply, longReplyFixtureId } from "@/tests/fixtures/long-reply";
+import { formattingSample, formattingSampleId } from "@/tests/fixtures/formatting-sample";
 import { ChatWorkspace } from "@/components/chat-workspace";
 import { modelPickerCopy, type ModelOption } from "@/lib/chat/models";
 import { weeklyCreditCost } from "@/lib/usage/policy";
@@ -22,20 +23,24 @@ export default async function ChatCorePreview({ searchParams }: { searchParams: 
     const messages: PersistedMessage[] = [];
     const jar = await cookies();
     const saved = jar.get("chat-core-stop-snapshot")?.value;
-    // Set once the stopped partial has been saved, so a reload shows the persisted text rather than the claim placeholder.
-    const stoppedContent = jar.get("chat-core-stop-partial")?.value === "1" ? "Partial first response" : "…";
-    // A saved thread for streaming regressions. A long reply is named by fixture id because it does not fit in a cookie.
+    // "1": the stopped partial has been saved, so a reload shows the persisted text rather than the claim placeholder.
+    // "complete": the generation saved its finished answer before the Stop landed (issue #12); the stopped reply must still win.
+    const stopState = jar.get("chat-core-stop-partial")?.value;
+    const firstReply = stopState === "1" ? { content: "Partial first response", status: "interrupted" as const }
+      : stopState === "complete" ? { content: "Partial first response and the rest of the finished answer.", status: "complete" as const }
+        : { content: "…", status: "interrupted" as const };
+    // A saved thread for streaming and formatting checks. Long replies are named by fixture id because they do not fit in a cookie.
     const thread = jar.get("chat-core-thread")?.value;
     if (thread) {
       const rows: unknown = JSON.parse(decodeURIComponent(thread));
-      if (Array.isArray(rows)) messages.push(...(rows as PersistedMessage[]).map((row) => row.content === longReplyFixtureId ? { ...row, content: longReply } : row));
+      if (Array.isArray(rows)) messages.push(...(rows as PersistedMessage[]).map((row) => row.content === longReplyFixtureId ? { ...row, content: longReply } : row.content === formattingSampleId ? { ...row, content: formattingSample } : row));
     }
     if (saved) {
       const ids: unknown = JSON.parse(decodeURIComponent(saved));
       if (Array.isArray(ids) && ids.length === 2 && ids.every((id) => validateConversationId(id).success)) {
         messages.push(
           { id: ids[0], role: "user", content: "First synthetic prompt", status: "complete", position: 1 },
-          { id: "e3b624e6-d792-47a8-8ff2-46724452c1ca", role: "assistant", content: stoppedContent, status: "interrupted", position: 2 },
+          { id: "e3b624e6-d792-47a8-8ff2-46724452c1ca", role: "assistant", ...firstReply, position: 2 },
           { id: ids[1], role: "user", content: "Next before persistence confirmation", status: "complete", position: 3 },
           { id: "22222222-2222-4222-8222-222222222222", role: "assistant", content: "Second response completed.", status: "complete", position: 4 },
         );

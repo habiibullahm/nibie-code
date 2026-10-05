@@ -59,6 +59,7 @@ describe("Supabase row-level security", () => {
     await sql`drop table if exists public.weekly_usage_reservations cascade`;
     await sql`drop table if exists public.weekly_ai_usage cascade`;
     await sql`drop type if exists public.weekly_usage_mode cascade`;
+    await sql`drop table if exists public.message_attachments cascade`;
     await sql`drop table if exists public.workbench_documents cascade`;
     await sql`drop table if exists public.room_files cascade`;
     await sql`drop function if exists public.set_room_files_updated_at() cascade`;
@@ -617,5 +618,113 @@ describe("Supabase row-level security", () => {
     expect(await sql`select title from public.conversations where id = ${conversationB}`).toEqual([{ title: "B conversation" }]);
     expect(await sql`select id from public.users where id = ${userA}`).toEqual([{ id: userA }]);
     expect(await sql`select preferred_name from public.user_preferences where user_id = ${userA}`).toEqual([{ preferred_name: "Habib" }]);
+  });
+
+  describe("chat attachments", () => {
+    const owner = randomUUID();
+    const stranger = randomUUID();
+    const thread = randomUUID();
+    const otherThread = randomUUID();
+    const strangerThread = randomUUID();
+
+    async function draft(userId: string, name = "attachment-a.txt", size = 64, text = "The internal codename for this test document is Cedar Harbor.") {
+      const [row] = await asUser(userId, (tx) => tx`insert into public.message_attachments (user_id, original_name, mime_type, size_bytes, extracted_text)
+        values (${userId}, ${name}, 'text/plain', ${size}, ${text}) returning id`);
+      return row.id as string;
+    }
+    const send = (userId: string, conversation: string, message: string, ids: string[], content = "What is the codename?") =>
+      asUser(userId, (tx) => tx`select * from public.append_user_message_with_attachments(${conversation}, ${message}, ${content}, ${ids}::uuid[])`);
+
+    beforeAll(async () => {
+      await sql`insert into auth.users (id) values (${owner}), (${stranger})`;
+      await sql`insert into public.conversations (id, user_id, title) values (${thread}, ${owner}, 'Attachments'), (${otherThread}, ${owner}, 'Other'), (${strangerThread}, ${stranger}, 'Stranger')`;
+    });
+
+    it("has row-level security enabled and forced on the attachments table", async () => {
+      expect(await sql`select relrowsecurity, relforcerowsecurity from pg_class where oid = 'public.message_attachments'::regclass`).toEqual([{ relrowsecurity: true, relforcerowsecurity: true }]);
+    });
+
+    it("links a draft to the user message it was sent with, in one step, and keeps it for a reload", async () => {
+      const first = await draft(owner);
+      const second = await draft(owner, "attachment-b.md");
+      const message = randomUUID();
+      const [saved] = await send(owner, thread, message, [first, second]);
+      expect(saved).toMatchObject({ id: message, position: 1 });
+      const rows = await asUser(owner, (tx) => tx`select id, conversation_id, message_id, original_name from public.message_attachments where conversation_id = ${thread} order by created_at`);
+      expect(rows.map((row) => [row.id, row.conversation_id, row.message_id])).toEqual([[first, thread, message], [second, thread, message]]);
+      expect(rows.map((row) => row.original_name)).toEqual(["attachment-a.txt", "attachment-b.md"]);
+    });
+
+    it("treats a retried send as the same message and refuses a changed attachment set", async () => {
+      const id = await draft(owner);
+      const message = randomUUID();
+      const [first] = await send(owner, thread, message, [id], "Retry me");
+      const [again] = await send(owner, thread, message, [id], "Retry me");
+      expect(again).toEqual(first);
+      expect(await sql`select id from public.messages where id = ${message}`).toHaveLength(1);
+      const extra = await draft(owner);
+      await expect(send(owner, thread, message, [id, extra], "Retry me")).rejects.toMatchObject({ code: "PT409" });
+      expect(await sql`select message_id from public.message_attachments where id = ${extra}`).toEqual([{ message_id: null }]);
+    });
+
+    it("never lets another conversation or another user claim an attachment", async () => {
+      const id = await draft(owner);
+      await send(owner, thread, randomUUID(), [id], "First use");
+      const otherMessage = randomUUID();
+      await expect(send(owner, otherThread, otherMessage, [id])).rejects.toMatchObject({ code: "PT409" });
+      // The whole send rolled back: no message without its attachment.
+      expect(await sql`select id from public.messages where id = ${otherMessage}`).toHaveLength(0);
+
+      const ownersDraft = await draft(owner);
+      const strangerMessage = randomUUID();
+      await expect(send(stranger, strangerThread, strangerMessage, [ownersDraft])).rejects.toMatchObject({ code: "PT409" });
+      expect(await sql`select id from public.messages where id = ${strangerMessage}`).toHaveLength(0);
+      expect(await sql`select message_id from public.message_attachments where id = ${ownersDraft}`).toEqual([{ message_id: null }]);
+
+      // Linking directly, outside the function, cannot reach another owner's or another conversation's message either.
+      const [strangerOwn] = await asUser(stranger, (tx) => tx`select * from public.append_user_message(${strangerThread}, ${randomUUID()}, 'Mine')`);
+      await expect(asUser(owner, (tx) => tx`update public.message_attachments set conversation_id = ${strangerThread}, message_id = ${strangerOwn.id} where id = ${ownersDraft}`)).rejects.toThrow();
+      const ownMessage = (await sql`select id from public.messages where conversation_id = ${thread} order by position limit 1`)[0].id;
+      await expect(asUser(owner, (tx) => tx`update public.message_attachments set conversation_id = ${otherThread}, message_id = ${ownMessage} where id = ${ownersDraft}`)).rejects.toThrow();
+    });
+
+    it("keeps attachments invisible and untouchable for other users", async () => {
+      const id = await draft(owner);
+      expect(await asUser(stranger, (tx) => tx`select id from public.message_attachments where id = ${id}`)).toHaveLength(0);
+      expect(await asUser(stranger, (tx) => tx`delete from public.message_attachments where id = ${id} returning id`)).toHaveLength(0);
+      await expect(asUser(stranger, (tx) => tx`insert into public.message_attachments (user_id, original_name, mime_type, size_bytes, extracted_text) values (${owner}, 'x.txt', 'text/plain', 1, 'x')`)).rejects.toThrow();
+      expect(await sql`select id from public.message_attachments where id = ${id}`).toHaveLength(1);
+    });
+
+    it("creates drafts only unlinked, removes only drafts, and never unlinks a sent attachment", async () => {
+      const ownMessage = (await sql`select id from public.messages where conversation_id = ${thread} order by position limit 1`)[0].id;
+      await expect(asUser(owner, (tx) => tx`insert into public.message_attachments (user_id, conversation_id, message_id, original_name, mime_type, size_bytes, extracted_text) values (${owner}, ${thread}, ${ownMessage}, 'x.txt', 'text/plain', 1, 'x')`)).rejects.toThrow();
+      const removable = await draft(owner);
+      expect(await asUser(owner, (tx) => tx`delete from public.message_attachments where id = ${removable} returning id`)).toHaveLength(1);
+      const [linked] = await sql`select id from public.message_attachments where message_id is not null and user_id = ${owner} limit 1`;
+      expect(await asUser(owner, (tx) => tx`delete from public.message_attachments where id = ${linked.id} returning id`)).toHaveLength(0);
+      expect(await asUser(owner, (tx) => tx`update public.message_attachments set conversation_id = null, message_id = null where id = ${linked.id} returning id`)).toHaveLength(0);
+      await expect(asUser(owner, (tx) => tx`update public.message_attachments set extracted_text = 'changed' where id = ${linked.id}`)).rejects.toThrow();
+    });
+
+    it("saves nothing when an attachment is missing or the set is too large", async () => {
+      const missing = randomUUID();
+      const message = randomUUID();
+      await expect(send(owner, thread, message, [missing])).rejects.toMatchObject({ code: "PT409" });
+      expect(await sql`select id from public.messages where id = ${message}`).toHaveLength(0);
+      const big = [await draft(owner, "a.txt", 3_000_000), await draft(owner, "b.txt", 3_000_000), await draft(owner, "c.txt", 3_000_000)];
+      const tooLarge = randomUUID();
+      await expect(send(owner, thread, tooLarge, big)).rejects.toMatchObject({ code: "PT413" });
+      expect(await sql`select id from public.messages where id = ${tooLarge}`).toHaveLength(0);
+      expect(await sql`select count(*)::int as n from public.message_attachments where id = any(${big}::uuid[]) and message_id is null`).toEqual([{ n: 3 }]);
+      await expect(send(owner, thread, randomUUID(), [big[0], big[1], big[2], randomUUID()])).rejects.toMatchObject({ code: "PT400" });
+    });
+
+    it("removes sent attachments with their conversation", async () => {
+      const id = await draft(owner);
+      await send(owner, otherThread, randomUUID(), [id], "In the other thread");
+      await asUser(owner, (tx) => tx`delete from public.conversations where id = ${otherThread}`);
+      expect(await sql`select id from public.message_attachments where id = ${id}`).toHaveLength(0);
+    });
   });
 });
