@@ -67,7 +67,7 @@ test("attach, remove, attach again, send, follow up and reload", async ({ page }
 
   await attach(page, [fixture("attachment-a.txt")]);
   await expect(chips.getByText("attachment-a.txt")).toBeVisible();
-  await expect(chips).toContainText("Text · 62 B");
+  await expect(chips).toContainText(`Text · ${fixture("attachment-a.txt").buffer.byteLength} B`);
   await page.getByRole("button", { name: "Remove attachment-a.txt" }).click();
   await expect(page.locator(".attachment-chip")).toHaveCount(0);
   await expect.poll(() => server.removed.length).toBe(1);
