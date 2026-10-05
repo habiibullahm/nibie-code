@@ -371,15 +371,28 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 62%, var(--border-strong)); box-shadow: var(--shadow-composer-focus); }
 .composer-form { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; grid-template-areas: "attach input actions"; align-items: end; column-gap: 6px; row-gap: 4px; width: 100%; min-width: 0; margin: 0; transition: row-gap .15s ease; }
 .composer-form.has-attachments { grid-template-areas: "attachments attachments attachments" "attach input actions"; }
+.composer-content, .composer-footer { display: contents; }
 .composer-attachments { grid-area: attachments; }
 .composer-attach { grid-area: attach; align-self: end; }
 .composer-expand { width: 26px; height: 26px; }
+.composer-expanded-header { grid-area: header; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 26px; }
+.composer-expanded-label { color: var(--text-4); font-size: 11px; line-height: 16px; }
 .composer textarea { display: block; width: 100%; min-width: 0; max-height: min(120px, 24dvh); min-height: 26px; padding: 3px 2px; resize: none; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 13px; line-height: 1.55; transition: height .15s ease; }
-.composer-form > textarea { grid-area: input; }
+.composer-content > textarea { grid-area: input; }
 .composer-form:not(.is-active) .composer-attach { align-self: center; }
-.composer-form:not(.is-active) > textarea { align-self: center; transform: translateY(-1px); }
+.composer-form:not(.is-active) textarea { align-self: center; transform: translateY(-1px); }
 .composer-form:not(.is-active) .send-button > svg { stroke-width: 2; }
-.composer.is-expanded textarea { min-height: min(42dvh, 420px); max-height: min(55dvh, 520px); }
+.composer.is-expanded { height: min(48dvh, 520px); min-height: 35dvh; max-height: 55dvh; }
+.composer.is-expanded .composer-form { display: flex; flex: 1 1 auto; flex-direction: column; align-items: stretch; gap: 4px; min-height: 0; }
+.composer.is-expanded .composer-content { display: flex; flex: 1 1 auto; flex-direction: column; gap: 4px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.composer.is-expanded .composer-content::-webkit-scrollbar { width: 6px; }
+.composer.is-expanded .composer-content::-webkit-scrollbar-thumb { border-radius: 999px; background: var(--border-strong); }
+.composer.is-expanded .composer-attachments { flex: none; min-width: 0; margin: 0; }
+.composer.is-expanded .composer-expanded-header { flex: none; }
+.composer.is-expanded textarea { flex: 1 0 26px; height: auto; min-height: 26px; max-height: none; overflow-y: auto; }
+.composer.is-expanded .composer-footer { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 6px; min-height: 32px; }
+.composer.is-expanded .composer-attach { grid-area: auto; align-self: center; }
+.composer.is-expanded .composer-actions { grid-area: auto; }
 .composer textarea::-webkit-scrollbar { width: 6px; }
 .composer textarea::-webkit-scrollbar-track { background: transparent; }
 .composer textarea::-webkit-scrollbar-thumb { border-radius: 999px; background: var(--border-strong); }
@@ -643,7 +656,7 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 @media (max-width: 760px) {
   .composer { gap: 4px; padding: 6px 7px 5px; border-radius: 14px; }
   .composer-form { column-gap: 4px; row-gap: 4px; }
-  .composer.is-expanded textarea { min-height: min(38dvh, 360px); max-height: min(50dvh, 420px); }
+  .composer.is-expanded { height: min(42dvh, 360px); min-height: 35dvh; max-height: 55dvh; }
   .composer-actions { gap: 3px; }
   .composer-left-tools .composer-menu-button, .composer-room-context { max-width: min(140px, 34vw); min-height: 38px; padding-inline: 4px; font-size: 11px; }
   .composer-left-tools > .composer-menu { position: static; }
