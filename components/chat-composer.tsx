@@ -142,7 +142,7 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
     });
   }
 
-  const modelItems: MenuItem<ChatModel>[] = models.map((option) => ({ value: option.id, label: option.label, detail: option.description }));
+  const modelItems: MenuItem<ChatModel>[] = models.map((option) => ({ value: option.id, label: option.label, detail: option.credits === undefined ? option.description : `${option.description} · ${option.credits} credit${option.credits === 1 ? "" : "s"}` }));
   const hasDraft = draft.length > 0;
   const hasAttachments = attachments.items.length > 0 || Boolean(attachments.notice);
   const isActive = hasDraft || hasAttachments;

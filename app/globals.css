@@ -666,6 +666,10 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .settings-nav button:hover { background: var(--hover); color: var(--text); }
 .settings-nav button[aria-selected="true"] { background: var(--active); color: var(--text); font-weight: 600; }
 .settings-content { min-width: 0; overflow: auto; padding: 18px 18px 16px; }
+.weekly-usage { display: flex; flex-direction: column; gap: 6px; padding-top: 16px; border-top: 1px solid var(--border-soft); }
+.weekly-usage h3 { margin: 0; color: var(--text-2); font-size: 13px; font-weight: 600; }
+.weekly-usage-summary { display: flex; flex-direction: column; gap: 3px; min-width: 0; overflow-wrap: anywhere; color: var(--text-2); font-size: 12px; line-height: 1.55; }
+.weekly-usage-summary p { margin: 0; }
 .settings-section h2 { margin: 0; color: var(--text); font-family: Georgia, "Times New Roman", serif; font-size: 22px; font-weight: 400; letter-spacing: -.03em; }
 .settings-section > p { margin: 8px 0 0; color: var(--text-3); font-size: 13px; line-height: 1.6; }
 .settings-fields { display: flex; flex-direction: column; gap: 18px; margin-top: 18px; }

@@ -1,11 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createClient, stream, claim, modelOptions, contextCapabilities } = vi.hoisted(() => ({ createClient: vi.fn(), stream: vi.fn(), claim: vi.fn(), modelOptions: vi.fn(), contextCapabilities: vi.fn(() => ({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 })) }));
-// The chat route also reads this conversation's attachments. Tests that are not about attachments see none, while every
-// other table still goes to the test's own mock.
-// The generation also re-reads its reply's status to notice a server-side Stop; that read answers from `stopState`
-// (still streaming unless a test stops it) and never consumes a test's own queued message results.
-const { withoutAttachments, attachmentState, stopState } = vi.hoisted(() => {
+const { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc, modelOptions, contextCapabilities, withoutAttachments, attachmentState, stopState } = vi.hoisted(() => {
+  const createClient = vi.fn(); const stream = vi.fn(); const claim = vi.fn(); const usageReserve = vi.fn(); const usageStart = vi.fn(); const usageRelease = vi.fn();
+  const rpc = vi.fn((name: string, args: unknown) => name === "reserve_weekly_ai_usage" ? usageReserve(args) : name === "start_weekly_ai_usage" ? usageStart(args) : name === "release_weekly_ai_usage" ? usageRelease(args) : claim(name, args));
   const attachmentState: { result: { data: unknown; error: unknown }; reads: unknown[][] } = { result: { data: [], error: null }, reads: [] };
   const stopState = { status: "streaming" as string | null, reads: 0 };
   const statusRead = () => {
@@ -20,7 +17,7 @@ const { withoutAttachments, attachmentState, stopState } = vi.hoisted(() => {
     builder.then = (resolve: (value: unknown) => unknown) => Promise.resolve(attachmentState.result).then(resolve);
     return builder;
   };
-  return { attachmentState, stopState, withoutAttachments: (client: unknown) => {
+  const withoutAttachments = (client: unknown) => {
     const value = client as { from?: (table: string) => unknown } | undefined;
     if (!value || typeof value.from !== "function") return client;
     const from = value.from;
@@ -31,7 +28,8 @@ const { withoutAttachments, attachmentState, stopState } = vi.hoisted(() => {
       insert: (...args: unknown[]) => (from("messages") as Table).insert(...args),
     });
     return { ...value, from: (table: string) => table === "message_attachments" ? none() : table === "messages" ? messages() : from(table) };
-  } };
+  };
+  return { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc, modelOptions: vi.fn(), contextCapabilities: vi.fn(() => ({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 })), withoutAttachments, attachmentState, stopState };
 });
 vi.mock("@/lib/supabase/server", () => ({ createSupabaseServerClient: async () => withoutAttachments(await createClient()) }));
 vi.mock("@/lib/ai/provider", () => ({ chatProvider: { stream } }));
@@ -48,7 +46,20 @@ const assistantId = "e3b624e6-d792-47a8-8ff2-46724452c1ca";
 const assistant = { id: assistantId, position: 3, content: "…", status: "streaming", replayed: false };
 
 describe("POST /api/chat", () => {
-  beforeEach(() => { attachmentState.result = { data: [], error: null }; attachmentState.reads = []; stopState.status = "streaming"; stopState.reads = 0; preferenceResult = { data: null, error: null }; createClient.mockReset(); stream.mockReset(); modelOptions.mockReset().mockReturnValue(allModes); contextCapabilities.mockReset().mockReturnValue({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 }); claim.mockReset().mockReturnValue(query({ data: assistant, error: null })); });
+  beforeEach(() => {
+    attachmentState.result = { data: [], error: null }; attachmentState.reads = []; stopState.status = "streaming"; stopState.reads = 0;
+    preferenceResult = { data: null, error: null };
+    createClient.mockReset(); stream.mockReset(); modelOptions.mockReset().mockReturnValue(allModes);
+    contextCapabilities.mockReset().mockReturnValue({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 });
+    claim.mockReset().mockReturnValue(query({ data: assistant, error: null }));
+    usageReserve.mockReset().mockImplementation(({ p_logical_mode }: { p_logical_mode: "Fast" | "Balanced" | "High" }) => {
+      const credits_charged = { Fast: 1, Balanced: 3, High: 6 }[p_logical_mode];
+      return query({ data: { accepted: true, credits_charged, credits_used: credits_charged, credits_remaining: 100 - credits_charged, reset_at: "2026-10-05T00:00:00.000Z" }, error: null });
+    });
+    usageRelease.mockReset().mockImplementation(() => query({ data: true, error: null }));
+    usageStart.mockReset().mockImplementation(() => query({ data: true, error: null }));
+    rpc.mockClear();
+  });
   afterEach(() => vi.useRealTimers());
 
   it.each(["stop", "length", "content_filter"])("finalizes %s explicitly, with sanitized persistence", async (reason) => {
@@ -99,7 +110,7 @@ describe("POST /api/chat", () => {
       const from = vi.fn((table: string) => table === "user_preferences" ? query(preferenceResult) : table === "conversations"
         ? query({ data: { id: "conversation", selected_model: "Balanced" }, error: null })
         : query(results.shift(), (write) => writes.push(write)));
-      createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc: claim });
+      createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc });
       attachmentState.result = { data: [row(), row({ message_id: "another-conversation-message", original_name: "elsewhere.txt", extracted_text: "Not this one." })], error: null };
       stream.mockResolvedValue(providerChunks(["Cedar Harbor."], "stop"));
       const response = await POST(validRequest());
@@ -156,6 +167,86 @@ describe("POST /api/chat", () => {
     expect(claim).toHaveBeenCalledWith("regenerate_assistant_message", expect.any(Object));
   });
 
+  it("reserves server-weighted usage once for a new provider generation", async () => {
+    readyClient([]);
+    stream.mockResolvedValue(sseBody("charged"));
+    expect((await POST(validRequest())).status).toBe(200);
+    expect(usageReserve).toHaveBeenCalledOnce();
+    expect(usageReserve).toHaveBeenCalledWith({ p_generation_id: assistantId, p_logical_mode: "Balanced" });
+    expect(usageStart).toHaveBeenCalledWith({ p_generation_id: assistantId });
+    expect(stream).toHaveBeenCalledOnce();
+    expect(usageRelease).not.toHaveBeenCalled();
+  });
+
+  it("does not expose a provider stream when the reservation cannot be marked started", async () => {
+    const writes: unknown[] = [];
+    readyClient(writes);
+    stream.mockResolvedValue(sseBody("must not be delivered"));
+    usageStart.mockReturnValue(query({ data: false, error: null }));
+    const response = await POST(validRequest());
+    expect(response.status).toBe(503);
+    expect(stream).toHaveBeenCalledOnce();
+    expect(usageRelease).toHaveBeenCalledOnce();
+    expect(writes).toContainEqual(expect.objectContaining({ content: "Response unavailable.", status: "error" }));
+  });
+
+  it.each([["Fast", 1], ["Balanced", 3], ["High", 6]] as const)("reserves the server weight for %s (%i credits)", async (model, cost) => {
+    readyClient([]);
+    stream.mockResolvedValue(sseBody("charged"));
+    const request = validRequest();
+    const response = await POST(new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify({ ...await request.json(), model }) }));
+    expect(response.status).toBe(200);
+    expect(cost).toBe(({ Fast: 1, Balanced: 3, High: 6 } as const)[model]);
+    expect(usageReserve).toHaveBeenCalledWith({ p_generation_id: assistantId, p_logical_mode: model });
+    expect(stream).toHaveBeenCalledOnce();
+  });
+
+  it("rejects an exhausted allowance with a stable code and never calls the provider", async () => {
+    const writes: unknown[] = [];
+    readyClient(writes);
+    usageReserve.mockReturnValue(query({ data: { accepted: false, credits_charged: 0, credits_used: 100, credits_remaining: 0, reset_at: "2026-10-05T00:00:00.000Z" }, error: null }));
+    const response = await POST(validRequest());
+    expect(response.status).toBe(429);
+    expect(await response.json()).toEqual({
+      code: "WEEKLY_USAGE_LIMIT",
+      error: "You've reached your weekly Nibie usage limit.",
+      creditsRemaining: 0,
+      resetAt: "2026-10-05T00:00:00.000Z",
+    });
+    expect(stream).not.toHaveBeenCalled();
+    expect(usageRelease).not.toHaveBeenCalled();
+    expect(writes).toContainEqual(expect.objectContaining({ content: "Weekly usage limit reached.", status: "error" }));
+  });
+
+  it("releases the reservation when the provider stream cannot be established", async () => {
+    readyClient([]);
+    stream.mockRejectedValue(new Error("provider unavailable"));
+    expect((await POST(validRequest())).status).toBe(502);
+    expect(usageReserve).toHaveBeenCalledOnce();
+    expect(usageRelease).toHaveBeenCalledOnce();
+    expect(usageRelease).toHaveBeenCalledWith({ p_generation_id: assistantId });
+    expect(usageStart).not.toHaveBeenCalled();
+  });
+
+  it("finalizes the claimed assistant message when the reservation RPC throws", async () => {
+    const writes: unknown[] = [];
+    readyClient(writes);
+    usageReserve.mockReturnValue({ single: () => Promise.reject(new Error("reservation connection lost")) });
+    const response = await POST(validRequest());
+    expect(response.status).toBe(503);
+    expect(stream).not.toHaveBeenCalled();
+    expect(usageRelease).toHaveBeenCalledOnce();
+    expect(writes).toContainEqual(expect.objectContaining({ content: "Response unavailable.", status: "error" }));
+  });
+
+  it("does not reserve usage for an idempotent completed replay", async () => {
+    readyClient([]);
+    claim.mockReturnValue(query({ data: { ...assistant, content: "Already saved", status: "complete", replayed: true }, error: null }));
+    expect((await POST(validRequest())).status).toBe(200);
+    expect(usageReserve).not.toHaveBeenCalled();
+    expect(stream).not.toHaveBeenCalled();
+  });
+
   it("returns 401 before reading request data or invoking a provider", async () => {
     createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: null, error: new Error("no session") }) } });
     const response = await POST(new Request("http://localhost/api/chat", { method: "POST", body: "{}" }));
@@ -197,7 +288,7 @@ describe("POST /api/chat", () => {
       builder.maybeSingle = () => gated.then(() => ({ data: row, error: null }));
       return builder;
     });
-    createClient.mockResolvedValue({ auth: { getClaims, getUser }, from, rpc: claim });
+    createClient.mockResolvedValue({ auth: { getClaims, getUser }, from, rpc });
     const pending = POST(validRequest());
     // The conversation, both message reads, and preferences are issued before any of them has finished.
     await vi.waitFor(() => expect(started).toHaveLength(4));
@@ -245,7 +336,7 @@ describe("POST /api/chat", () => {
       if (table === "messages") return query(outcomes.shift()!, (write) => writes.push(write));
       return query({ data: null, error: null });
     });
-    createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc: claim });
+    createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc });
     stream.mockResolvedValue(sseBody("Hello"));
     const response = await POST(validRequest());
     const body = await response.text();
@@ -302,7 +393,7 @@ describe("POST /api/chat", () => {
     const from = vi.fn((table: string) => table === "user_preferences" ? query(preferenceResult) : table === "conversations"
       ? query({ data: { id: "conversation", selected_model: "Balanced" }, error: null })
       : query(results.shift()!, (write) => writes.push(write)));
-    createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc: claim });
+    createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc });
     stream.mockResolvedValue(sseBody("Hello"));
     const response = await POST(validRequest());
     const body = await response.text();
@@ -321,7 +412,7 @@ describe("POST /api/chat", () => {
     const from = vi.fn((table: string) => table === "user_preferences" ? query(preferenceResult) : table === "conversations"
       ? query({ data: { id: "conversation", selected_model: "Fast" }, error: null })
       : query(results.shift()!, (write) => writes.push(write)));
-    createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc: claim });
+    createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc });
     stream.mockRejectedValue(new Error("provider body or credential must not be returned"));
     const response = await POST(validRequest());
     const body = await response.text();
@@ -339,7 +430,7 @@ describe("POST /api/chat", () => {
     const from = vi.fn((table: string) => table === "user_preferences" ? query(preferenceResult) : table === "conversations"
       ? query({ data: { id: "conversation", selected_model: "Fast" }, error: null })
       : query(results.shift()!));
-    createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc: claim });
+    createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc });
     stream.mockRejectedValue(new Error("Unsupported AI_PROVIDER; expected openai-compatible."));
     const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
     try {
@@ -359,6 +450,9 @@ describe("POST /api/chat", () => {
     const regenerating = new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify({ conversationId: "5e9bdcca-9205-4fea-a773-13952bb78c44", userMessageId: "b79e56e1-b479-46f4-97d3-30b2e22be90e", regenerate: true }) });
     expect((await POST(regenerating)).status).toBe(200);
     expect(claim).toHaveBeenCalledWith("regenerate_assistant_message", { p_conversation_id: "conversation", p_user_message_id: "b79e56e1-b479-46f4-97d3-30b2e22be90e" });
+    expect(usageReserve).toHaveBeenCalledOnce();
+    expect(usageReserve).toHaveBeenCalledWith({ p_generation_id: assistantId, p_logical_mode: "Balanced" });
+    expect(stream).toHaveBeenCalledOnce();
     claim.mockClear();
     const invalid = new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify({ conversationId: "5e9bdcca-9205-4fea-a773-13952bb78c44", userMessageId: "b79e56e1-b479-46f4-97d3-30b2e22be90e", regenerate: "yes" }) });
     expect((await POST(invalid)).status).toBe(400);
@@ -375,7 +469,7 @@ describe("POST /api/chat", () => {
     const from = vi.fn((table: string) => table === "user_preferences" ? query(preferenceResult) : table === "conversations"
       ? query({ data: { id: "conversation", selected_model: "Fast" }, error: null })
       : query(results.shift()!, (write) => writes.push(write)));
-    createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc: claim });
+    createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc });
     stream.mockImplementation((_model: string, _messages: unknown[], signal: AbortSignal) => new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true })));
     const aborter = new AbortController();
     const pending = POST(validRequest(aborter.signal));
@@ -595,7 +689,7 @@ describe("POST /api/chat", () => {
       if (table === "room_files") return query({ data: [{ id: fileId, original_name: "notes.txt", extracted_text: "A scheduling prototype." }], error: null });
       return query(outcomes.shift(), (write) => writes.push(write));
     });
-    createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc: claim });
+    createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc });
     stream.mockResolvedValue(providerChunks(["<think>Private reasoning</think>", "Hello"]));
     const request = validRequest();
     const response = await POST(new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify({
@@ -727,7 +821,7 @@ describe("POST /api/chat", () => {
         if (table === "messages") return query(outcomes.shift()!);
         return query({ data: null, error: null });
       });
-      createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc: claim });
+      createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc });
       stream.mockResolvedValue(sseBody("Hello"));
       const response = await POST(new Request("http://localhost/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: "5e9bdcca-9205-4fea-a773-13952bb78c44", userMessageId: "b79e56e1-b479-46f4-97d3-30b2e22be90e", fileIds: [fileId] }) }));
       expect(response.status).toBe(200);
@@ -748,7 +842,7 @@ describe("POST /api/chat", () => {
         if (table === "room_files") return query({ data: [], error: null });
         return query({ data: { id: "user-message", position: 1, content: "hello" }, error: null });
       });
-      createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from: hidden, rpc: claim });
+      createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from: hidden, rpc });
       const denied = await POST(new Request("http://localhost/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: "5e9bdcca-9205-4fea-a773-13952bb78c44", userMessageId: "b79e56e1-b479-46f4-97d3-30b2e22be90e", fileIds: [fileId] }) }));
       expect(denied.status).toBe(400);
       expect(stream).toHaveBeenCalledTimes(1);
@@ -767,7 +861,7 @@ function readyClient(writes: unknown[], updates: unknown[] = [{ data: { id: assi
   const from = vi.fn((table: string) => table === "user_preferences" ? query(preferenceResult) : table === "conversations"
     ? query({ data: { id: "conversation", selected_model: savedModel }, error: null })
     : query(results.shift(), (write) => writes.push(write)));
-  createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc: claim });
+  createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc });
   return from;
 }
 

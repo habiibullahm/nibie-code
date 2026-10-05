@@ -1,5 +1,6 @@
 import "server-only";
 
+import { weeklyCreditCost } from "@/lib/usage/policy";
 import type { ChatModel } from "@/lib/chat/validation";
 import { modelPickerCopy, type ModelOption } from "@/lib/chat/models";
 import { logError } from "@/lib/observability/logger";
@@ -164,5 +165,5 @@ export function getModelOptions(env: Env = process.env): { models: ModelOption[]
   }
   // Modes that are still usable are offered; the ones that are not are reported, by variable name only.
   for (const issue of config.issues) logError("ai.config.invalid", { reason: issue });
-  return { models: modeOrder.filter((mode) => config.routes[mode]).map((mode) => ({ id: mode, ...modelPickerCopy[mode] })) };
+  return { models: modeOrder.filter((mode) => config.routes[mode]).map((mode) => ({ id: mode, ...modelPickerCopy[mode], credits: weeklyCreditCost[mode] })) };
 }
