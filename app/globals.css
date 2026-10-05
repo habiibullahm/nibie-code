@@ -367,17 +367,13 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .local-notice svg { flex: none; margin-top: 1px; color: var(--info); }
 .composer-dock { position: relative; z-index: 1; flex: 0 0 auto; padding: 18px 28px 13px; background: linear-gradient(180deg, transparent 0%, color-mix(in srgb, var(--bg-app) 93%, transparent) 17%, var(--bg-app) 38%); }
 .composer-dock.is-centered { position: static; width: min(100%, 760px); padding: 0; background: none; }
-.composer { display: flex; flex-direction: column; gap: 4px; width: min(100%, 760px); margin: 0 auto; padding: 7px 9px 6px; border: 1px solid var(--border); border-radius: 15px; background: var(--bg-raised); box-shadow: var(--shadow-composer); transition: border-color .15s,box-shadow .15s; }
+.composer { display: flex; flex-direction: column; justify-content: center; gap: 4px; width: min(100%, 760px); min-height: 56px; margin: 0 auto; padding: 7px 9px 6px; border: 1px solid var(--border); border-radius: 15px; background: var(--bg-raised); box-shadow: var(--shadow-composer); transition: border-color .15s,box-shadow .15s; }
 .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 62%, var(--border-strong)); box-shadow: var(--shadow-composer-focus); }
-.composer:not(:has(.composer-form.is-active)) { min-height: 56px; justify-content: center; }
 .composer-form { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; grid-template-areas: "attach input actions"; align-items: end; column-gap: 6px; row-gap: 4px; width: 100%; min-width: 0; margin: 0; transition: row-gap .15s ease; }
 .composer-form.has-attachments { grid-template-areas: "attachments attachments attachments" "attach input actions"; }
-.composer-form.is-active:not(.has-attachments) { grid-template-areas: "label label expand" "attach input actions"; }
-.composer-form.is-active.has-attachments { grid-template-areas: "attachments attachments attachments" "label label expand" "attach input actions"; }
 .composer-attachments { grid-area: attachments; }
 .composer-attach { grid-area: attach; align-self: end; }
-.composer-prompt-label { grid-area: label; min-width: 0; color: var(--text-4); font-size: 11px; line-height: 16px; animation: composer-label-in .15s ease both; }
-.composer-expand { grid-area: expand; justify-self: end; width: 26px; height: 26px; }
+.composer-expand { width: 26px; height: 26px; }
 .composer textarea { display: block; width: 100%; min-width: 0; max-height: min(120px, 24dvh); min-height: 26px; padding: 3px 2px; resize: none; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 13px; line-height: 1.55; transition: height .15s ease; }
 .composer-form > textarea { grid-area: input; }
 .composer-form:not(.is-active) .composer-attach { align-self: center; }
@@ -400,7 +396,6 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .send-button:disabled { background: var(--disabled-bg); color: var(--disabled-fg); cursor: default; }
 .send-spinner { width: 14px; height: 14px; border: 2px solid color-mix(in srgb, var(--accent-fg) 40%, transparent); border-top-color: var(--accent-fg); border-radius: 50%; animation: spin .65s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-@keyframes composer-label-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
 .composer-caption { margin: 9px auto 0; color: var(--text-4); text-align: center; font-size: 9.5px; letter-spacing: .01em; }
 .context-indicator { position: relative; flex: none; }
 .context-indicator-button { display: grid; place-items: center; width: 31px; height: 31px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text-4); cursor: pointer; }
