@@ -328,11 +328,13 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .conversation-scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 .conversation-scroll.is-empty { display: flex; align-items: center; justify-content: center; padding: 30px 20px; }
 .welcome-state { display: flex; flex-direction: column; align-items: center; gap: 24px; width: min(100%, 760px); }
-.welcome-state:has(.composer-prompt-label) { gap: 4px; }
-.welcome-state:has(.composer-prompt-label) > .welcome-panel { display: flex; flex-direction: column; align-items: center; }
-.welcome-state:has(.composer-prompt-label) .welcome-panel > :not(.welcome-icon):not(.local-notice) { display: none; }
-.welcome-state:has(.composer-prompt-label) .welcome-icon { width: 28px; height: 28px; margin: 0; border-radius: 9px; }
-.welcome-state:has(.composer-prompt-label) .welcome-icon .brand-mark { width: 18px; height: 18px; }
+.welcome-state:has(.composer-form.is-active) { gap: 12px; }
+.welcome-state:has(.composer-form.is-active) .suggestion-list { display: none; }
+.welcome-state:has(.composer.is-expanded) { gap: 4px; }
+.welcome-state:has(.composer.is-expanded) > .welcome-panel { display: flex; flex-direction: column; align-items: center; width: auto; }
+.welcome-state:has(.composer.is-expanded) .welcome-panel > :not(.welcome-icon):not(.local-notice) { display: none; }
+.welcome-state:has(.composer.is-expanded) .welcome-icon { width: 28px; height: 28px; margin: 0; border-radius: 9px; }
+.welcome-state:has(.composer.is-expanded) .welcome-icon .brand-mark { width: 18px; height: 18px; }
 .welcome-panel { width: min(100%, 530px); text-align: center; }
 .welcome-icon { display: grid; place-items: center; width: 43px; height: 43px; margin: 0 auto 22px; border: 1px solid var(--border); border-radius: 14px; color: var(--accent); background: var(--bg-subtle); }
 .welcome-icon .brand-mark { width: 27px; height: 27px; }
@@ -365,30 +367,38 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .local-notice svg { flex: none; margin-top: 1px; color: var(--info); }
 .composer-dock { position: relative; z-index: 1; flex: 0 0 auto; padding: 18px 28px 13px; background: linear-gradient(180deg, transparent 0%, color-mix(in srgb, var(--bg-app) 93%, transparent) 17%, var(--bg-app) 38%); }
 .composer-dock.is-centered { position: static; width: min(100%, 760px); padding: 0; background: none; }
-.composer { display: flex; flex-direction: column; gap: 4px; width: min(100%, 760px); margin: 0 auto; padding: 7px 9px 6px; border: 1px solid var(--border); border-radius: 15px; background: var(--bg-raised); box-shadow: var(--shadow-composer); transition: border-color .15s,box-shadow .15s; }
+.composer { display: flex; flex-direction: column; justify-content: center; gap: 4px; width: min(100%, 760px); min-height: 56px; margin: 0 auto; padding: 7px 9px 6px; border: 1px solid var(--border); border-radius: 15px; background: var(--bg-raised); box-shadow: var(--shadow-composer); transition: border-color .15s,box-shadow .15s; }
 .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 62%, var(--border-strong)); box-shadow: var(--shadow-composer-focus); }
-.composer-form { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; grid-template-areas: "attach input actions"; align-items: end; column-gap: 6px; row-gap: 4px; width: 100%; min-width: 0; margin: 0; }
+.composer-form { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; grid-template-areas: "attach input actions"; align-items: end; column-gap: 6px; row-gap: 4px; width: 100%; min-width: 0; margin: 0; transition: row-gap .15s ease; }
 .composer-form.has-attachments { grid-template-areas: "attachments attachments attachments" "attach input actions"; }
-.composer-form.has-prompt-label:not(.has-attachments) { grid-template-areas: "prompt prompt prompt" "input input input" "attach . actions"; }
-.composer-form.has-attachments.has-prompt-label { grid-template-areas: "attachments attachments attachments" "prompt prompt prompt" "input input input" "attach . actions"; }
+.composer-content, .composer-footer { display: contents; }
 .composer-attachments { grid-area: attachments; }
-.composer-prompt-label { grid-area: prompt; display: flex; align-items: center; justify-content: space-between; min-width: 0; min-height: 26px; color: var(--text-4); font-size: 11.5px; line-height: 1.2; animation: composer-prompt-enter .15s ease-out both; }
-.composer-prompt-label .composer-icon { width: 26px; height: 26px; }
-@keyframes composer-prompt-enter { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
-@media (prefers-reduced-motion: reduce) { .composer-prompt-label { animation: none; } }
 .composer-attach { grid-area: attach; align-self: end; }
-.composer textarea { display: block; width: 100%; min-width: 0; max-height: min(112px, 24dvh); min-height: 26px; padding: 3px 2px; resize: none; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 13px; line-height: 1.55; }
-.composer-form > textarea { grid-area: input; }
-.composer-form:not(.has-prompt-label) .composer-attach { align-self: center; }
-.composer-form:not(.has-prompt-label) > textarea { align-self: center; transform: translateY(-1px); }
-.composer-form:not(.has-prompt-label) .send-button > svg { stroke-width: 2; }
-.composer.is-expanded textarea { max-height: min(45dvh, 440px); }
+.composer-expand { width: 26px; height: 26px; }
+.composer-expanded-header { grid-area: header; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 26px; }
+.composer-expanded-label { color: var(--text-4); font-size: 11px; line-height: 16px; }
+.composer textarea { display: block; width: 100%; min-width: 0; max-height: min(120px, 24dvh); min-height: 26px; padding: 3px 2px; resize: none; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 13px; line-height: 1.55; transition: height .15s ease; }
+.composer-content > textarea { grid-area: input; }
+.composer-form:not(.is-active) .composer-attach { align-self: center; }
+.composer-form:not(.is-active) textarea { align-self: center; transform: translateY(-1px); }
+.composer-form:not(.is-active) .send-button > svg { stroke-width: 2; }
+.composer.is-expanded { height: min(48dvh, 520px); min-height: 35dvh; max-height: 55dvh; }
+.composer.is-expanded .composer-form { display: flex; flex: 1 1 auto; flex-direction: column; align-items: stretch; gap: 4px; min-height: 0; }
+.composer.is-expanded .composer-content { display: flex; flex: 1 1 auto; flex-direction: column; gap: 4px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.composer.is-expanded .composer-content::-webkit-scrollbar { width: 6px; }
+.composer.is-expanded .composer-content::-webkit-scrollbar-thumb { border-radius: 999px; background: var(--border-strong); }
+.composer.is-expanded .composer-attachments { flex: none; min-width: 0; margin: 0; }
+.composer.is-expanded .composer-expanded-header { flex: none; }
+.composer.is-expanded textarea { flex: 1 0 26px; height: auto; min-height: 26px; max-height: none; overflow-y: auto; }
+.composer.is-expanded .composer-footer { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 6px; min-height: 32px; }
+.composer.is-expanded .composer-attach { grid-area: auto; align-self: center; }
+.composer.is-expanded .composer-actions { grid-area: auto; }
 .composer textarea::-webkit-scrollbar { width: 6px; }
 .composer textarea::-webkit-scrollbar-track { background: transparent; }
 .composer textarea::-webkit-scrollbar-thumb { border-radius: 999px; background: var(--border-strong); }
 .composer textarea:focus-visible { outline: none; }
 .composer textarea::placeholder { color: var(--text-4); }
-.composer-actions { grid-area: actions; display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; min-height: 32px; }
+.composer-actions { grid-area: actions; display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; min-height: 32px; }
 .composer-tools { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .composer-left-tools { position: relative; display: flex; flex: 1; flex-wrap: wrap; align-items: center; gap: 5px; min-width: 0; }
 .composer-secondary-tools { width: min(100%, 760px); margin: 8px auto 0; }
@@ -646,7 +656,7 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 @media (max-width: 760px) {
   .composer { gap: 4px; padding: 6px 7px 5px; border-radius: 14px; }
   .composer-form { column-gap: 4px; row-gap: 4px; }
-  .composer.is-expanded textarea { max-height: min(42dvh, 260px); }
+  .composer.is-expanded { height: min(42dvh, 360px); min-height: 35dvh; max-height: 55dvh; }
   .composer-actions { gap: 3px; }
   .composer-left-tools .composer-menu-button, .composer-room-context { max-width: min(140px, 34vw); min-height: 38px; padding-inline: 4px; font-size: 11px; }
   .composer-left-tools > .composer-menu { position: static; }
