@@ -9,6 +9,7 @@ What's new in Nibie.
 ### Added
 
 - Expandable chat composer with a compact default for long prompts.
+- Weekly usage allowance of 100 credits per UTC week, weighted 1 / 3 / 6 for Fast / Balanced / High; these are product units, not provider prices.
 - Deployment identity from the Vercel git commit, exposed safely at `GET /api/health`.
 - Structured server logs for chat generation, with one request id across start, context build, and completion or failure.
 - Release checklist, version policy, migration inventory rules, hotfix steps, and rollback notes.

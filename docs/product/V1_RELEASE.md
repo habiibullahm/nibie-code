@@ -45,7 +45,8 @@ Drizzle journal order:
 7. `drizzle/0006_pins.sql` — owner-scoped room pins, forced RLS, cascade delete with the room
 8. `drizzle/0007_room_files.sql` — owner-scoped room files, forced RLS, cascade delete with the room
 9. `drizzle/0008_workbench.sql` — owner-scoped workbench documents, forced RLS. Deleting a room sets only `room_id` to null
-10. `drizzle/0009_weekly_ai_usage.sql` — weekly account allowance and exactly-once generation reservations; additive only
+10. `drizzle/0009_chat_attachments.sql` — message attachment metadata and owner-scoped access; additive only
+11. `drizzle/0010_weekly_ai_usage.sql` — weekly account allowance and exactly-once generation reservations; additive only
 
 `0003` does not change conversations or messages. `0005` does not change preferences or rooms. Do not regenerate `0004` from `lib/db/schema.ts`; the SQL, not the Drizzle `onDelete("set null")` shorthand, is authoritative for the column-specific null.
 
@@ -80,7 +81,7 @@ Optional tests:
 ## Supabase
 
 1. Use the Nibie project. Confirm the database is the intended one before migrating.
-2. When the weekly-usage candidate is approved for release, apply migrations `0000` through `0009` in journal order. Until then, keep production at its current applied schema; this worktree has not applied the candidate migration.
+2. When this release candidate is approved, apply migrations `0000` through `0010` in journal order. Until then, keep production at its current applied schema; this worktree has not applied either candidate migration.
 3. Verify RLS is enabled and forced on `users`, `conversations`, `messages`, `user_preferences`, `rooms`, `room_briefs`, `pins`, `room_files`, `workbench_documents`, `weekly_ai_usage`, and `weekly_usage_reservations`. Verify authenticated users can read only their own aggregate and cannot directly write quota rows or read the reservation ledger.
 4. Enable Email auth. Enable the Google provider with the Google client id and secret stored in Supabase, not in the Next.js bundle.
 5. Set the Site URL to `NEXT_PUBLIC_APP_URL`.
@@ -99,7 +100,7 @@ Optional tests:
 Do not skip the backup.
 
 1. Confirm the target database and take a backup.
-2. Confirm whether the weekly-usage candidate is approved. Apply only the intended additive migration set in journal order; do not apply `0009` until its release is approved, its rollback/forward-fix plan is reviewed, and the local concurrency/RLS and pre-production checks pass.
+2. Confirm whether weekly usage is approved. Apply only the intended additive migration set in journal order; do not apply `0010` until its release is approved, its rollback/forward-fix plan is reviewed, and the local concurrency/RLS and pre-production checks pass. Migration `0009` is for chat attachments and must precede `0010`.
 3. Verify RLS is still enabled and forced, and that a second user cannot read another user's rows.
 4. Deploy the Next.js app with the runtime environment above. Do not deploy `DATABASE_URL` or a service-role key to the browser.
 5. Smoke auth: email sign-in, Google sign-in, callback, and sign out.
