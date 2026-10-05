@@ -3,6 +3,7 @@ import { ThemeSync } from "@/components/theme-switcher";
 import { getProductName } from "@/lib/config/branding";
 import { publicMetadataBase } from "@/lib/config/public-metadata";
 import { themeInitScript } from "@/lib/theme";
+import { darkPalette } from "@/lib/theme/palette";
 import "./globals.css";
 
 const productName = getProductName();
@@ -16,7 +17,7 @@ export const metadata: Metadata = {
 };
 
 // Dark is the default theme, so the browser chrome matches it; the theme itself is applied by the inline script below.
-export const viewport: Viewport = { colorScheme: "dark light", themeColor: "#151412" };
+export const viewport: Viewport = { colorScheme: "dark light", themeColor: darkPalette.bgApp };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (

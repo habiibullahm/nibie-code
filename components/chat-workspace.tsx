@@ -2,11 +2,11 @@
 
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { PanelLeftOpen, SquarePen, X } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, SquarePen, X } from "lucide-react";
 import { addUserMessageAction, archiveConversationAction, editLastUserMessageAction, moveConversationAction, renameConversationAction, restoreConversationAction, startConversationAction, updateConversationModelAction } from "@/app/actions/chat";
 import { createPinAction, deletePinAction, updatePinAction } from "@/app/actions/pins";
 import { createRoomAction, deleteRoomAction, updateRoomAction, updateRoomBriefAction } from "@/app/actions/rooms";
-import { BrandMark, type BrandActivity } from "@/components/brand";
+import type { BrandActivity } from "@/components/brand";
 import { ChatComposer, type ComposerHandle } from "@/components/chat-composer";
 import { ChatSidebar } from "@/components/chat-sidebar";
 import { RoomDetail } from "@/components/room-detail";
@@ -18,6 +18,7 @@ import { MessageRow } from "@/components/message-row";
 import { forgetLastConversationId, readChatFlag, readLastConversationId, subscribeChatPreferences, writeLastConversationId } from "@/components/use-chat-preferences";
 import { useStableCallback } from "@/components/use-stable-callback";
 import type { ConversationSummary, PersistedMessage, RoomSummary } from "@/lib/chat/read";
+import type { AttachmentSummary } from "@/lib/attachments/types";
 import type { ModelChoice, ModelOption } from "@/lib/chat/models";
 import { decideRestoredConversation } from "@/lib/chat/preferences";
 import { roomContextFromRows } from "@/lib/rooms/map";
@@ -28,13 +29,17 @@ import { clearStoredConversationReference } from "@/lib/privacy/local-state";
 import { modelForComposer } from "@/lib/preferences/model";
 import { accountDisplayName } from "@/lib/auth/display-name";
 import { defaultUserPreferences, type UserPreferences } from "@/lib/preferences/types";
+import { createPreviewConversations } from "@/lib/chat/preview-data";
 import { previewContextDiagnostics } from "@/lib/context/profile-context";
 import type { ContextDiagnostics } from "@/lib/context/context-types";
 import { followAfterSending, followStreamedContent, isNearBottom, trackNearBottom } from "@/lib/chat/scroll";
 import { ChatStreamServerError, readChatSse } from "@/lib/ai/sse";
+import { operationalCodes } from "@/lib/observability/codes";
+import { weeklyLimitNotice } from "@/lib/usage/format";
 import { compareNames, compareText } from "@/lib/chat/order";
 import { readRoomFileSelection, rememberRoomFileSelection } from "@/lib/files/selection-memory";
 import { abortLiveChatStream, finishLiveChatStream, liveChatConversationId, shouldStopLiveChatOnLeave, startLiveChatStream } from "@/lib/chat/live-stream";
+import { stoppedContent, type StopRequest } from "@/lib/chat/stop";
 import { activeAssistantId, classifyStreamFailure, hasActiveGeneration, isRecoverySettled, isRegressiveSnapshot, latestReplyFailed, messagePersistenceConfirmed, needsServerCheck, recoveryPollAction, recoveryPollMs, unseenGenerationSettled } from "@/lib/chat/recovery";
 
 type Conversation = ConversationSummary & { messages: PersistedMessage[] };
@@ -47,7 +52,13 @@ const unconfirmedNotice = "We couldn't confirm that response. Reload the page to
 const stillFinishingNotice = "A response is still finishing. It will appear here when it's done.";
 const checkAgainNotice = "This response is still in progress. Refresh the page to check it again.";
 const droppedConnectionNotice = "The connection dropped. Checking whether your response was saved…";
-const suggestions = ["Help me think through an idea", "Write something with me", "Explain a new topic"];
+const welcomeGreetings = [
+  (name: string | null) => name ? `Hey, ${name}.` : "Hey there.",
+  (name: string | null) => name ? `Good to see you, ${name}.` : "Good to see you.",
+  (name: string | null) => name ? `Welcome back, ${name}.` : "Welcome back.",
+  (name: string | null) => name ? `Glad you're here, ${name}.` : "Glad you're here.",
+  (name: string | null) => name ? `Hello again, ${name}.` : "Hello again.",
+] as const;
 const noConversations: ConversationSummary[] = [];
 // Streamed text is applied in small batches so a long reply is not re-parsed as Markdown for every network chunk.
 const streamFlushMs = 40;
@@ -55,11 +66,6 @@ const previewStamp = "2026-10-01T08:30:00.000Z";
 const previewRoomId = "preview-room-nibie";
 const mockRooms: RoomSummary[] = [
   { id: previewRoomId, name: "Nibie Development", description: "The product and the context engine.", instructions: "Keep the voice calm and specific.", created_at: previewStamp, updated_at: previewStamp, brief: { goal: "Ship Rooms", current_focus: "Room detail", important_decisions: null, open_questions: null, next_step: "Keep general threads working" }, pins: [{ id: "preview-pin-deploy", room_id: previewRoomId, title: "Deployment rule", content: "Production runs on Vercel Seoul and user data stays owner-scoped through Supabase RLS.", created_at: previewStamp, updated_at: previewStamp }] },
-];
-const mockConversations: Conversation[] = [
-  { id: "preview-writing", title: "A thoughtful note to the team", selected_model: "Balanced", room_id: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), messages: [{ id: "p1", role: "user", content: "Help me write a thoughtful note to my team after a busy launch week.", position: 1, created_at: previewStamp }, { id: "p2", role: "assistant", content: "A good note can recognize the effort, name what the team accomplished, and leave room for everyone to recharge.\n\nYou might start with what you noticed most: the care people brought to the final details, the way they supported one another, or a moment that made you proud.", position: 2, created_at: previewStamp }] },
-  { id: "preview-learning", title: "Learning the basics of astronomy", selected_model: "Balanced", room_id: previewRoomId, created_at: new Date(Date.now() - 86400000).toISOString(), updated_at: new Date(Date.now() - 86400000).toISOString(), messages: [{ id: "p3", role: "user", content: "Where should I begin if I want to learn astronomy?", position: 1, created_at: previewStamp }, { id: "p4", role: "assistant", content: "Start by looking up. Learning a few bright constellations and the phases of the Moon gives you a useful map. From there, the scale of the solar system becomes much easier to picture.", position: 2, created_at: previewStamp }] },
-  { id: "preview-code", title: "Debouncing a search box", selected_model: "Balanced", room_id: null, created_at: new Date(Date.now() - 172800000).toISOString(), updated_at: new Date(Date.now() - 172800000).toISOString(), messages: [{ id: "p5", role: "user", content: "Show me a tiny debounce helper in TypeScript.", position: 1, created_at: previewStamp }, { id: "p6", role: "assistant", content: "A debounce helper delays a call until input has settled.\n\n## Example\n\n```ts\nexport function debounce<T extends unknown[]>(fn: (...args: T) => void, wait = 250) {\n  let timer: ReturnType<typeof setTimeout> | undefined;\n  return (...args: T) => {\n    clearTimeout(timer);\n    timer = setTimeout(() => fn(...args), wait);\n  };\n}\n```\n\n- Use `wait` to tune responsiveness.\n- Read more in the [MDN guide](https://developer.mozilla.org/docs/Glossary/Debounce).", position: 2, created_at: previewStamp }] },
 ];
 
 const noModels: ModelOption[] = [];
@@ -72,7 +78,8 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const draftParam = searchParams.get("draft") === "1";
   // Server history captured at delete-all. It stays hidden until a newer server payload arrives, so deleted chats do not flash back.
   const [droppedServerHistory, setDroppedServerHistory] = useState<WorkspaceData | null>(null);
-  const conversations = preview ? mockConversations : initialData && initialData === droppedServerHistory ? noConversations : (initialData?.conversations ?? noConversations);
+  const previewConversations = useMemo(() => createPreviewConversations(renderedAt ?? 0), [renderedAt]);
+  const conversations = preview ? previewConversations : initialData && initialData === droppedServerHistory ? noConversations : (initialData?.conversations ?? noConversations);
   const archivedConversations = preview ? noConversations : initialData?.archivedConversations ?? noConversations;
   const [localMessages, setLocalMessages] = useState<Record<string, PersistedMessage[]>>({});
   const [removedIds, setRemovedIds] = useState<string[]>([]);
@@ -87,6 +94,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const [localConversations, setLocalConversations] = useState<ConversationSummary[]>([]);
   const [locallyArchivedIds, setLocallyArchivedIds] = useState<string[]>([]);
   const [previewActiveId, setPreviewActiveId] = useState<string | null>(null);
+  const [welcomeGreetingIndex, setWelcomeGreetingIndex] = useState(0);
   // The conversation the user just chose, applied immediately while the server renders it. undefined = follow the URL.
   const [pendingId, setPendingId] = useState<string | null | undefined>(undefined);
   const [pendingRoomId, setPendingRoomId] = useState<string | null | undefined>(undefined);
@@ -130,11 +138,11 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const [streaming, setStreaming] = useState(false);
   const [assistantActivity, setAssistantActivity] = useState<BrandActivity>("idle");
   const busy = useRef(false);
-  const submission = useRef<{ id: string; content: string; conversationId: string | null } | null>(null);
+  const submission = useRef<{ id: string; content: string; conversationId: string | null; attachmentIds: string } | null>(null);
   const streamController = useRef<AbortController | null>(null);
   const stopGeneration = useRef<(() => void) | null>(null);
   const userStopEpoch = useRef(0);
-  const stoppedReplies = useRef(new Map<string, Set<string>>());
+  const stoppedReplies = useRef(new Map<string, Map<string, StopRequest>>());
   const recoveryEpoch = useRef(0);
   const [acceptedMessages, setAcceptedMessages] = useState<PersistedMessage[]>(initialData?.messages ?? []);
   const acceptedMessagesRef = useRef(acceptedMessages);
@@ -155,11 +163,18 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   // The conversation follows new content while auto-follow is on and the reader is near the bottom (see lib/chat/scroll.ts).
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
+  const scrollViewportHeightRef = useRef<number | null>(null);
   const followRef = useRef(true);
   const autoFollowRef = useRef(readChatFlag("autoFollow"));
   const pinLatestRef = useRef(true);
   const restoredRef = useRef(false);
-  const handleScroll = useStableCallback(() => { if (scrollRef.current) followRef.current = trackNearBottom(autoFollowRef.current, isNearBottom(scrollRef.current)); });
+  const handleScroll = useStableCallback(() => {
+    const viewport = scrollRef.current;
+    if (!viewport) return;
+    // A composer resize can fire scroll before ResizeObserver restores the bottom; it is not a reader scrolling up.
+    if (scrollViewportHeightRef.current !== null && scrollViewportHeightRef.current !== viewport.clientHeight) return;
+    followRef.current = trackNearBottom(autoFollowRef.current, isNearBottom(viewport));
+  });
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const closeMenuRef = useRef<HTMLButtonElement>(null);
   const drawerRef = useRef<HTMLElement>(null);
@@ -215,16 +230,19 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   }, [messages, activeId, loadingConversation]);
 
   useEffect(() => {
-    if (centeredComposer) return;
+    if (centeredComposer || showRoom) return;
     const viewport = scrollRef.current;
     const dock = composerDockRef.current;
     if (!viewport || !dock || typeof ResizeObserver === "undefined") return;
+    scrollViewportHeightRef.current = viewport.clientHeight;
     const observer = new ResizeObserver(() => {
+      scrollViewportHeightRef.current = viewport.clientHeight;
       if (autoFollowRef.current && followRef.current) viewport.scrollTop = viewport.scrollHeight;
     });
     observer.observe(dock);
-    return () => observer.disconnect();
-  }, [centeredComposer]);
+    observer.observe(viewport);
+    return () => { observer.disconnect(); scrollViewportHeightRef.current = null; };
+  }, [centeredComposer, showRoom]);
 
   // The navigation the user asked for has landed once the URL matches it; from then on the URL is the source of truth again.
   if (pendingId !== undefined && conversationParam === pendingId) setPendingId(undefined);
@@ -372,6 +390,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   // server work (and no empty "New chat" entries left in history) until the user actually sends something.
   const newChat = useStableCallback(() => {
     if (busy.current) return;
+    setWelcomeGreetingIndex((index) => (index + 1) % welcomeGreetings.length);
     composerRef.current?.clear();
     openConversation(null);
     requestAnimationFrame(() => composerRef.current?.focus());
@@ -430,7 +449,10 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     const controller = startLiveChatStream(id);
     let assistantId: string | null = null;
     let httpStatus: number | undefined;
+    let weeklyLimitResetAt: string | null = null;
     let buffer = "";
+    // Every reply character received, shown or still buffered; after a flush it is exactly the text on screen.
+    let received = "";
     let flushTimer: ReturnType<typeof setTimeout> | null = null;
     let shown = false;
     const flush = () => {
@@ -445,11 +467,13 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     const stopOwnedGeneration = () => {
       if (streamController.current !== controller || controller.signal.aborted) return;
       flush();
+      // The server keeps exactly this text for the stopped reply, so what the user sees now is what a reload shows.
+      const stop: StopRequest = { userMessageId, assistantId, content: received };
       if (assistantId) setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId
-        ? { ...message, content: message.content || "Response stopped.", status: "interrupted", terminationReason: "user_stopped" } : message) }));
+        ? { ...message, content: stoppedContent(received), status: "interrupted", terminationReason: "user_stopped" } : message) }));
       else clearPlaceholder();
-      const stops = stoppedReplies.current.get(id) ?? new Set<string>();
-      stops.add(userMessageId);
+      const stops = stoppedReplies.current.get(id) ?? new Map<string, StopRequest>();
+      stops.set(userMessageId, stop);
       stoppedReplies.current.set(id, stops);
       userStopEpoch.current += 1;
       controller.abort("user_stopped");
@@ -460,7 +484,9 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
       setSending(false); setStreaming(false); setAssistantActivity("idle");
       // The background acknowledgement is never a condition for using the composer. It is a plain request, not a
       // Server Action, because Next runs Server Actions one at a time and the next message's save must not queue behind it.
-      void fetch("/api/chat/stop", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: id, userMessageId }), keepalive: true })
+      // keepalive lets the Stop outlive a closing tab, but browsers cap keepalive bodies at 64 KiB.
+      const stopBody = JSON.stringify({ conversationId: id, ...stop });
+      void fetch("/api/chat/stop", { method: "POST", headers: { "content-type": "application/json" }, body: stopBody, keepalive: new Blob([stopBody]).size < 60_000 })
         .then(async (response) => {
           if (!response.ok) reportStopFailure(id, (await response.json().catch(() => null))?.error ?? failureNotice);
         }).catch(() => reportStopFailure(id, failureNotice));
@@ -468,7 +494,12 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     stopGeneration.current = stopOwnedGeneration;
     try {
       const response = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: id, userMessageId, model: mode, ...(options.regenerate ? { regenerate: true } : {}), ...(options.fileIds?.length ? { fileIds: options.fileIds } : {}) }), signal: controller.signal });
-      if (!response.ok || !response.body) { if (!response.ok) httpStatus = response.status; const payload = await response.json().catch(() => null); throw new Error(payload?.error ?? failureNotice); }
+      if (!response.ok || !response.body) {
+        if (!response.ok) httpStatus = response.status;
+        const payload = await response.json().catch(() => null);
+        if (payload?.code === operationalCodes.weeklyUsageLimitRejected && typeof payload.resetAt === "string" && Number.isFinite(Date.parse(payload.resetAt))) weeklyLimitResetAt = payload.resetAt;
+        throw new Error(payload?.error ?? failureNotice);
+      }
       for await (const data of readChatSse(response.body)) {
         if (controller.signal.aborted) throw new DOMException("Response aborted.", "AbortError");
         if (data.type === "start") {
@@ -479,7 +510,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
           const reply: PersistedMessage = { id: data.id, role: "assistant", content: "", position: data.position, status: "streaming", created_at: new Date().toISOString() };
           setLocalMessages((items) => { const rows = items[id] ?? []; return { ...items, [id]: options.placeholderId && rows.some((row) => row.id === options.placeholderId) ? rows.map((row) => row.id === options.placeholderId ? reply : row) : [...rows, reply] }; });
         }
-        if (data.type === "delta") { setAssistantActivity("streaming"); buffer += data.text; if (!shown) flush(); else if (!flushTimer) flushTimer = setTimeout(flush, streamFlushMs); }
+        if (data.type === "delta") { setAssistantActivity("streaming"); buffer += data.text; received += data.text; if (!shown) flush(); else if (!flushTimer) flushTimer = setTimeout(flush, streamFlushMs); }
         if (data.type === "status") { flush(); setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId ? { ...message, content: message.content || "Response stopped.", status: data.status } : message) })); }
       }
       flush();
@@ -487,6 +518,10 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     } catch (error) {
       flush();
       if (controller.signal.reason === "user_stopped" || epoch !== userStopEpoch.current) return;
+      if (weeklyLimitResetAt) {
+        setNotice(weeklyLimitNotice(weeklyLimitResetAt));
+        return;
+      }
       const kind = classifyStreamFailure({ error, aborted: controller.signal.aborted, httpStatus });
       if (!assistantId) clearPlaceholder();
       if (needsServerCheck(kind)) {
@@ -514,7 +549,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
       }
     }
   }
-  const submitMessage = useStableCallback(async (content: string) => {
+  const submitMessage = useStableCallback(async (content: string, attachments: AttachmentSummary[] = []) => {
     if (!content || busy.current || recovery || movePending.current) return;
     if (!activeId && selectedRoomId && !activeRoom) {
       setNotice("That room is no longer available. Choose General or another room before sending.");
@@ -535,21 +570,25 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
         return;
       }
       // The same submission keeps the same message id, so a retry after a failure can never save the message twice.
-      const messageId = submission.current && submission.current.content === content && submission.current.conversationId === id ? submission.current.id : crypto.randomUUID();
-      submission.current = { id: messageId, content, conversationId: id };
+      const attachmentIds = attachments.map((attachment) => attachment.id);
+      const attachmentKey = attachmentIds.join(",");
+      const messageId = submission.current && submission.current.content === content && submission.current.conversationId === id && submission.current.attachmentIds === attachmentKey ? submission.current.id : crypto.randomUUID();
+      submission.current = { id: messageId, content, conversationId: id, attachmentIds: attachmentKey };
+      // Attachment ids are sent only with attachments, so a plain message keeps its existing action arguments.
+      const withAttachments = attachmentIds.length ? [attachmentIds] as const : [] as const;
       const placeholderId = `pending-${messageId}`;
       const basePosition = lastMessage?.position ?? 0;
       const withoutPending = (rows: PersistedMessage[] = []) => rows.filter((row) => row.id !== messageId && row.id !== placeholderId);
       // Show the message and a thinking row immediately; the server confirms (or we roll back and restore the draft) below.
       const key = id ?? "";
       const stamped = new Date().toISOString();
-      setLocalMessages((items) => ({ ...items, [key]: [...withoutPending(items[key]), { id: messageId, role: "user", content, position: basePosition + 1, status: "complete", created_at: stamped }, { id: placeholderId, role: "assistant", content: "", position: basePosition + 2, status: "streaming", created_at: stamped }] }));
+      setLocalMessages((items) => ({ ...items, [key]: [...withoutPending(items[key]), { id: messageId, role: "user", content, position: basePosition + 1, status: "complete", created_at: stamped, ...(attachments.length ? { attachments } : {}) }, { id: placeholderId, role: "assistant", content: "", position: basePosition + 2, status: "streaming", created_at: stamped }] }));
       composerRef.current?.clear();
-      const rollback = (message: string, from: string) => { setLocalMessages((items) => ({ ...items, [from]: withoutPending(items[from]) })); composerRef.current?.restore(content); setNotice(message); };
+      const rollback = (message: string, from: string) => { setLocalMessages((items) => ({ ...items, [from]: withoutPending(items[from]) })); composerRef.current?.restore(content, attachments); setNotice(message); };
       let saved: { id: string; position: number };
       if (!id) {
         // The first message of a new chat creates the conversation and saves the message in a single round trip.
-        const started = await startConversationAction(mode, messageId, content, drafting ? selectedRoomId : null);
+        const started = await startConversationAction(mode, messageId, content, drafting ? selectedRoomId : null, ...withAttachments);
         if (started.error || !started.data) { rollback(started.error ?? "Conversation couldn't be created.", key); return; }
         const { conversation } = started.data;
         saved = started.data.message;
@@ -561,12 +600,12 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
         setPendingDraft(false);
         router.push(conversationPath(conversation.id));
       } else {
-        const stopped = [...(stoppedReplies.current.get(id) ?? [])];
-        const result = await addUserMessageAction(id, content, messageId, stopped);
+        const stopped = [...(stoppedReplies.current.get(id)?.values() ?? [])];
+        const result = await addUserMessageAction(id, content, messageId, stopped, ...withAttachments);
         if (result.error || !result.data) { rollback(result.error ?? "Message couldn't be saved.", id); return; }
         saved = result.data;
         const pendingStops = stoppedReplies.current.get(id);
-        for (const stoppedId of stopped) pendingStops?.delete(stoppedId);
+        for (const stop of stopped) if (pendingStops?.get(stop.userMessageId) === stop) pendingStops.delete(stop.userMessageId);
         if (!pendingStops?.size) stoppedReplies.current.delete(id);
       }
       submission.current = null;
@@ -838,6 +877,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     setSelectedFileIds([]);
     setFilePickerOpen(false);
   }
+  const toggleRoomFiles = useStableCallback(() => setFilePickerOpen((open) => !open));
   const attach = useStableCallback(() => {
     if (preview || !threadRoom) {
       setNotice(preview ? "This preview isn't connected." : "Add a file on the room page, then choose it from a thread in that room.");
@@ -854,22 +894,25 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     selectedFileCount: selectedFileIds.length,
   });
   const accountName = accountDisplayName({ email, metadataName, preferredName: savedPreferences.preferredName });
+  const greetingSource = savedPreferences.preferredName?.trim() || metadataName?.trim() || null;
+  const greetingName = greetingSource?.split(/\s+/)[0] ?? null;
+  const welcomeGreeting = welcomeGreetings[welcomeGreetingIndex](greetingName);
   const headerRoomName = (showRoom ? activeRoom?.name : threadRoom?.name) ?? null;
   const roomThreads = activeRoom ? shownConversations.filter((item) => item.room_id === activeRoom.id) : [];
   const sidebarProps = { conversations: shownConversations, archivedConversations, rooms, activeId: history, activeRoomId: showRoom ? selectedRoomId : threadRoom?.id ?? null, busy: controlsDisabled || recovering, activity: assistantActivity, preview, email, name: accountName, renderedAt, settingsActive: settingsOpen, onClose: closeDrawer, onOpen: openConversation, onOpenRoom: openRoom, onNewThreadInRoom: newThreadInRoom, onDeleteRoom: deleteRoomFromSidebar, onCreateRoom: openRoomSetup, onNewChat: newChat, onOpenSettings: openSettings, onRename: rename, onArchive: archive, onRestore: restore, onMove: moveThread };
-  const composerProps = { ref: composerRef, dockRef: composerDockRef, sending: sending || recovering || movingThread !== null, streaming, mode, models, onModelChange: changeModel, savingMode, caption, diagnostics: contextDiagnostics ?? contextPreview, onEditProfile: editProfile, onSubmit: submitMessage, onStop: stopStream, onAttach: attach, roomItems, roomId: threadRoomId ?? "", roomLabel, roomSelectionNotice, roomsLoading, onRoomChange: activeId ? rooms.length ? changeComposerRoom : undefined : chooseDraftRoom, attachmentPanel: filePickerOpen && threadRoom ? <RoomFilePicker roomId={threadRoom.id} selectedIds={selectedFileIds} disabled={controlsDisabled || sending || streaming} onChange={setSelectedFileIds} /> : null };
+  const composerProps = { ref: composerRef, dockRef: composerDockRef, sending: sending || recovering || movingThread !== null, streaming, mode, models, onModelChange: changeModel, savingMode, caption, diagnostics: contextDiagnostics ?? contextPreview, onEditProfile: editProfile, onSubmit: submitMessage, onStop: stopStream, onAttach: attach, attachmentsEnabled: !preview, onRoomFiles: threadRoom && !preview ? toggleRoomFiles : undefined, roomItems, roomId: threadRoomId ?? "", roomLabel, roomSelectionNotice, roomsLoading, onRoomChange: activeId ? rooms.length ? changeComposerRoom : undefined : chooseDraftRoom, attachmentPanel: filePickerOpen && threadRoom ? <RoomFilePicker roomId={threadRoom.id} selectedIds={selectedFileIds} disabled={controlsDisabled || sending || streaming} onChange={setSelectedFileIds} /> : null };
 
   return <main className="chat-workspace">
     <ChatSidebar {...sidebarProps} collapsed={desktopSidebarCollapsed} desktopToggleRef={desktopCollapseButtonRef} desktopExpandRef={desktopExpandButtonRef} onCollapse={collapseDesktopSidebar} onExpand={expandDesktopSidebar} />
     {drawerOpen && <div className="mobile-drawer"><button className="drawer-scrim" aria-label="Dismiss menu backdrop" onClick={closeDrawer} /><ChatSidebar {...sidebarProps} mobile drawerRef={drawerRef} closeMenuRef={closeMenuRef} /></div>}
     <section className="chat-main" aria-label="Chat workspace">
       <header className="chat-header">
-        <button ref={menuButtonRef} className="icon-button mobile-menu-button sidebar-logo-toggle" aria-label="Open conversation menu" onClick={() => setDrawerOpen(true)}><BrandMark activity={assistantActivity} /><PanelLeftOpen className="menu-toggle-mark" size={18} aria-hidden="true" /></button>
+        <button ref={menuButtonRef} type="button" className="icon-button mobile-menu-button" aria-label={drawerOpen ? "Close conversation menu" : "Open conversation menu"} title="Toggle sidebar" aria-haspopup="dialog" aria-expanded={drawerOpen} onClick={() => setDrawerOpen((open) => !open)}>{drawerOpen ? <PanelLeftClose size={18} aria-hidden="true" /> : <PanelLeftOpen size={18} aria-hidden="true" />}</button>
         <div className="header-model">{headerRoomName ? <span className="header-context is-room-name">{headerRoomName}</span> : null}</div>
         <button type="button" className="header-new-chat" aria-label="New chat" title="New chat" disabled={controlsDisabled} onClick={newChat}><SquarePen size={17} /></button>
       </header>
       <div ref={scrollRef} onScroll={handleScroll} className={`conversation-scroll ${showRoom ? "is-room" : messages.length || loadingConversation ? "has-messages" : "is-empty"}`}>
-        {showRoom && activeRoom ? <RoomDetail key={activeRoom.id} room={activeRoom} threads={roomThreads} busy={controlsDisabled} preview={preview} onOpenThread={openConversation} onNewThread={() => newThreadInRoom(activeRoom.id)} onSaveRoom={saveRoom} onSaveBrief={saveBrief} onCreatePin={createPin} onUpdatePin={updatePin} onDeletePin={removePin} onDelete={removeRoom} /> : loadingConversation ? <div className="message-list conversation-skeleton" role="status" aria-busy="true" aria-label="Loading conversation"><div className="skeleton-line is-short" /><div className="skeleton-line" /><div className="skeleton-line" /><div className="skeleton-line is-medium" /></div> : messages.length ? <div className="message-list" aria-live="polite">{messages.map((message) => <MessageRow key={message.id} message={message} initial={initial} isLast={message.id === lastMessage?.id} isLastUser={message.id === lastUser?.id} canMutate={!preview} disabled={messageActionsLocked} editing={editingId === message.id} responseFailed={notice === failureNotice} onRegenerate={regenerate} onStartEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} />)}{notice && <p className="local-notice" role="status">{notice}</p>}</div> : <div className="welcome-state"><div className="welcome-panel">{notice && <p className="local-notice" role="status">{notice}</p>}<div className="welcome-icon"><BrandMark activity={assistantActivity} /></div><p className="welcome-eyebrow">{drafting && activeRoom ? "NEW THREAD" : "A LITTLE ROOM TO THINK"}</p><h1>{drafting && activeRoom ? activeRoom.name : "What’s on your mind?"}</h1><p className="welcome-copy">{drafting && activeRoom ? "This thread starts inside the room. Nibie will use its instructions, brief, and pins." : "A fresh page for ideas, questions, and whatever you’re working through."}</p>{drafting ? null : <div className="suggestion-list" aria-label="Suggestions">{suggestions.map((suggestion) => <button key={suggestion} onClick={() => { composerRef.current?.set(suggestion); composerRef.current?.focus(); }}>{suggestion}<span>↗</span></button>)}</div>}</div>{centeredComposer ? <ChatComposer {...composerProps} centered /> : null}</div>}
+        {showRoom && activeRoom ? <RoomDetail key={activeRoom.id} room={activeRoom} threads={roomThreads} busy={controlsDisabled} preview={preview} onOpenThread={openConversation} onNewThread={() => newThreadInRoom(activeRoom.id)} onSaveRoom={saveRoom} onSaveBrief={saveBrief} onCreatePin={createPin} onUpdatePin={updatePin} onDeletePin={removePin} onDelete={removeRoom} /> : loadingConversation ? <div className="message-list conversation-skeleton" role="status" aria-busy="true" aria-label="Loading conversation"><div className="skeleton-line is-short" /><div className="skeleton-line" /><div className="skeleton-line" /><div className="skeleton-line is-medium" /></div> : messages.length ? <div className="message-list" aria-live="polite">{messages.map((message) => <MessageRow key={message.id} message={message} initial={initial} isLast={message.id === lastMessage?.id} isLastUser={message.id === lastUser?.id} canMutate={!preview} disabled={messageActionsLocked} editing={editingId === message.id} responseFailed={notice === failureNotice} onRegenerate={regenerate} onStartEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} />)}{notice && <p className="local-notice" role="status">{notice}</p>}</div> : <div className="welcome-state"><div className="welcome-panel">{notice && <p className="local-notice" role="status">{notice}</p>}<div className="welcome-copy-group"><h1 data-testid={drafting ? undefined : "welcome-greeting"}>{drafting && activeRoom ? activeRoom.name : welcomeGreeting}</h1>{drafting && activeRoom ? <><p className="welcome-eyebrow">NEW THREAD</p><p className="welcome-copy">This thread starts inside the room. Nibie will use its instructions, brief, and pins.</p></> : null}</div></div>{centeredComposer ? <ChatComposer {...composerProps} centered /> : null}</div>}
       </div>
       {!showRoom && !centeredComposer ? <ChatComposer {...composerProps} /> : null}    </section>
     {renaming && <dialog ref={renameDialogRef} className="room-setup-dialog" aria-labelledby={renameTitleId} aria-busy={renameSaving} onCancel={(event) => { event.preventDefault(); if (!renameSaving) setRenaming(null); }}>

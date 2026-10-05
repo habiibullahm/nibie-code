@@ -1,7 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { createClient, stream } = vi.hoisted(() => ({ createClient: vi.fn(), stream: vi.fn() }));
-vi.mock("@/lib/supabase/server", () => ({ createSupabaseServerClient: createClient }));
+// The chat route also reads this conversation's attachments. Tests that are not about attachments see none, while every
+// other table still goes to the test's own mock.
+const { withoutAttachments } = vi.hoisted(() => {
+  const none = () => {
+    const builder: Record<string, unknown> = {};
+    for (const method of ["select", "eq", "order", "limit"]) builder[method] = () => builder;
+    builder.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data: [], error: null }).then(resolve);
+    return builder;
+  };
+  return { withoutAttachments: (client: unknown) => {
+    const value = client as { from?: (table: string) => unknown } | undefined;
+    if (!value || typeof value.from !== "function") return client;
+    const from = value.from;
+    return { ...value, from: (table: string) => table === "message_attachments" ? none() : from(table) };
+  } };
+});
+vi.mock("@/lib/supabase/server", () => ({ createSupabaseServerClient: async () => withoutAttachments(await createClient()) }));
 vi.mock("@/lib/ai/provider", () => ({ chatProvider: { stream } }));
 vi.mock("@/lib/ai/registry", () => ({
   getModelOptions: () => ({ models: [{ id: "Balanced", label: "Balanced", description: "" }] }),
@@ -54,7 +70,11 @@ describe("new chat room persistence and server context", () => {
     });
     const rpc = vi.fn((name: string) => query(name === "append_user_message"
       ? { id: messageId, position: 1 }
-      : { id: assistantId, position: 2, content: "", status: "streaming", replayed: false }));
+      : name === "reserve_weekly_ai_usage"
+        ? { accepted: true, credits_charged: 3, credits_used: 3, credits_remaining: 97, reset_at: "2026-10-05T00:00:00.000Z" }
+        : name === "start_weekly_ai_usage"
+          ? true
+        : { id: assistantId, position: 2, content: "", status: "streaming", replayed: false }));
     createClient.mockResolvedValue({ auth, from, rpc });
     const started = await startConversationAction("Balanced", messageId, "hello", selectedRoom);
     expect(started.error).toBeUndefined();
@@ -111,7 +131,9 @@ describe("new chat room persistence and server context", () => {
       if (table === "messages") { reads += 1; return query(reads === 1 ? history[1] : reads === 2 ? [...history].reverse() : { id: assistantId }); }
       throw new Error(`Unexpected table: ${table}`);
     });
-    createClient.mockResolvedValue({ auth, from, rpc: () => query({ id: assistantId, position: 3, content: "", status: "streaming", replayed: false }) });
+    createClient.mockResolvedValue({ auth, from, rpc: (name: string) => query(name === "reserve_weekly_ai_usage"
+      ? { accepted: true, credits_charged: 3, credits_used: 3, credits_remaining: 97, reset_at: "2026-10-05T00:00:00.000Z" }
+      : name === "start_weekly_ai_usage" ? true : { id: assistantId, position: 3, content: "", status: "streaming", replayed: false }) });
     for (const target of [roomId, roomB, null]) {
       from.mockClear(); reads = 0; stream.mockClear();
       expect(await moveConversationAction(conversationId, target)).toEqual({});

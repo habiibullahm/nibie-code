@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { BookOpenText, DoorOpen, FileText, Info, MessagesSquare, Pin, UserRound, type LucideIcon } from "lucide-react";
+import { BookOpenText, DoorOpen, FileText, Info, MessagesSquare, Paperclip, Pin, UserRound, type LucideIcon } from "lucide-react";
 import type { ContextDiagnostics, ContextSourceDiagnostic } from "@/lib/context/context-types";
 
 const sourceIcons: Record<ContextSourceDiagnostic["type"], LucideIcon> = {
@@ -9,6 +9,7 @@ const sourceIcons: Record<ContextSourceDiagnostic["type"], LucideIcon> = {
   room: DoorOpen,
   pins: Pin,
   file: FileText,
+  attachment: Paperclip,
   thread_summary: BookOpenText,
   recent_messages: MessagesSquare,
 };

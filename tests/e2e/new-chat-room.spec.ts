@@ -16,7 +16,7 @@ test.beforeEach(async ({ page }) => { await page.goto("/preview"); });
 
 test("new chat starts in General; initial selection survives typing and becomes the thread context", async ({ page }) => {
   await expect(roomSelector(page)).toHaveAccessibleName("Room: General");
-  await expect(page.getByRole("textbox", { name: "Message Nibie" })).toHaveAttribute("placeholder", "Ask Nibie...");
+  await expect(page.getByRole("textbox", { name: "Message Nibie" })).toHaveAttribute("placeholder", "Ask Nibie anything...");
   await send(page, "General hello");
   await expect(roomSelector(page)).toHaveAccessibleName("Room: General");
   await newChat(page);
@@ -98,11 +98,14 @@ for (const width of [320, 390, 768, 1024, 1440]) {
     const textarea = page.getByRole("textbox", { name: "Message Nibie" });
     const composerBox = await composer.boundingBox();
     const textareaBox = await textarea.boundingBox();
+    const actions = page.locator(".composer-actions");
+    const actionsBox = await actions.boundingBox();
     const secondary = page.locator(".composer-secondary-tools");
     const secondaryBox = await secondary.boundingBox();
-    expect(secondaryBox!.y).toBeGreaterThanOrEqual(composerBox!.y + composerBox!.height);
     expect(textareaBox!.y).toBeGreaterThanOrEqual(composerBox!.y);
-    const actionsBox = await page.locator(".composer-actions").boundingBox();
+    expect(actionsBox!.y).toBeGreaterThanOrEqual(composerBox!.y);
+    expect(actionsBox!.y + actionsBox!.height).toBeLessThanOrEqual(composerBox!.y + composerBox!.height);
+    expect(secondaryBox!.y).toBeGreaterThanOrEqual(composerBox!.y + composerBox!.height);
     const plus = await page.getByRole("button", { name: "Attach file", exact: true }).boundingBox();
     const room = await roomSelector(page).boundingBox();
     const model = await page.getByRole("button", { name: /^Model:/ }).boundingBox();
@@ -111,14 +114,13 @@ for (const width of [320, 390, 768, 1024, 1440]) {
     expect(plus!.x + plus!.width).toBeLessThanOrEqual(composerBox!.x + composerBox!.width);
     expect(sendButton!.x + sendButton!.width).toBeLessThanOrEqual(composerBox!.x + composerBox!.width);
     expect(Math.abs(plus!.y + plus!.height / 2 - actionsBox!.y - actionsBox!.height / 2)).toBeLessThanOrEqual(1);
-    expect(room!.y).toBeGreaterThanOrEqual(composerBox!.y + composerBox!.height);
+    expect(room!.y).toBeGreaterThanOrEqual(secondaryBox!.y);
     expect(room!.x).toBeGreaterThanOrEqual(0);
     expect(room!.x + room!.width).toBeLessThanOrEqual(width);
     if (Math.abs(model!.y - room!.y) < 4) {
       expect(room!.x + room!.width).toBeLessThanOrEqual(model!.x);
       expect(model!.x + model!.width).toBeLessThanOrEqual(width);
     } else {
-      // On the narrowest phones a long room name pushes the mode picker onto a second row; it must stay fully on screen.
       expect(width).toBeLessThanOrEqual(320);
       expect(model!.y).toBeGreaterThan(room!.y);
       expect(model!.x).toBeGreaterThanOrEqual(0);

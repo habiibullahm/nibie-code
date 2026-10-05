@@ -28,8 +28,38 @@ describe("Supabase row-level security", () => {
     });
   }
 
+  async function createUsageUser() {
+    const id = randomUUID();
+    await sql`insert into auth.users (id) values (${id})`;
+    return id;
+  }
+
+  async function createGeneration(userId: string) {
+    const conversationId = randomUUID();
+    const userMessageId = randomUUID();
+    const generationId = randomUUID();
+    await sql`insert into public.conversations (id, user_id, title) values (${conversationId}, ${userId}, 'Usage test')`;
+    await sql`insert into public.messages (id, conversation_id, user_id, role, content, position) values
+      (${userMessageId}, ${conversationId}, ${userId}, 'user', 'test question', 1),
+      (${generationId}, ${conversationId}, ${userId}, 'assistant', '…', 2)`;
+    await sql`update public.messages set status = 'streaming' where id = ${generationId}`;
+    return generationId;
+  }
+
+  async function reserveUsage(userId: string, generationId: string, mode: "Fast" | "Balanced" | "High") {
+    return asUser(userId, (tx) => tx`select * from public.reserve_weekly_ai_usage(${generationId}::uuid, ${mode}::public.weekly_usage_mode)`);
+  }
+
+  async function startUsage(userId: string, generationId: string) {
+    return asUser(userId, (tx) => tx`select public.start_weekly_ai_usage(${generationId}::uuid) as started`);
+  }
+
   beforeAll(async () => {
     await sql`drop schema if exists drizzle cascade`;
+    await sql`drop table if exists public.weekly_usage_reservations cascade`;
+    await sql`drop table if exists public.weekly_ai_usage cascade`;
+    await sql`drop type if exists public.weekly_usage_mode cascade`;
+    await sql`drop table if exists public.message_attachments cascade`;
     await sql`drop table if exists public.workbench_documents cascade`;
     await sql`drop table if exists public.room_files cascade`;
     await sql`drop function if exists public.set_room_files_updated_at() cascade`;
@@ -54,6 +84,7 @@ describe("Supabase row-level security", () => {
     await sql`create table auth.users (id uuid primary key)`;
     await sql`create or replace function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$`;
     await sql`do $$ begin create role authenticated nologin; exception when duplicate_object then null; end $$`;
+    await sql`do $$ begin create role anon nologin; exception when duplicate_object then null; end $$`;
     await sql`grant usage on schema auth to authenticated`;
     await sql`insert into auth.users (id) values (${userA})`;
 
@@ -62,6 +93,106 @@ describe("Supabase row-level security", () => {
     await sql`insert into auth.users (id) values (${userB})`;
     await sql`insert into public.conversations (id, user_id, title) values (${conversationA}, ${userA}, 'A conversation'), (${conversationB}, ${userB}, 'B conversation')`;
     await sql`insert into public.messages (id, conversation_id, user_id, role, content, position) values (${messageB}, ${conversationB}, ${userB}, 'user', 'private message', 1)`;
+  });
+
+  it("charges Fast, Balanced, and High atomically and treats the same generation idempotently", async () => {
+    const owner = await createUsageUser();
+    const fastId = await createGeneration(owner);
+    const balancedId = await createGeneration(owner);
+    const highId = await createGeneration(owner);
+    const [fast] = await reserveUsage(owner, fastId, "Fast");
+    const [balanced] = await reserveUsage(owner, balancedId, "Balanced");
+    const [replay] = await reserveUsage(owner, balancedId, "Balanced");
+    const [high] = await reserveUsage(owner, highId, "High");
+    expect([fast.credits_charged, balanced.credits_charged, replay.credits_charged, high.credits_charged]).toEqual([1, 3, 3, 6]);
+    expect(replay.credits_used).toBe(4);
+    const rows = await asUser(owner, (tx) => tx`select credits_used, fast_requests, balanced_requests, high_requests from public.weekly_ai_usage`);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toEqual({ credits_used: 10, fast_requests: 1, balanced_requests: 1, high_requests: 1 });
+  });
+
+  it("rejects a 105-request concurrent race at exactly 100 credits", async () => {
+    const owner = await createUsageUser();
+    const generationIds = await Promise.all(Array.from({ length: 105 }, () => createGeneration(owner)));
+    const results = await Promise.all(generationIds.map((id) => reserveUsage(owner, id, "Fast")));
+    const reservations = results.map(([row]) => row);
+    expect(reservations.filter((row) => row.accepted)).toHaveLength(100);
+    expect(reservations.filter((row) => !row.accepted)).toHaveLength(5);
+    const [usage] = await asUser(owner, (tx) => tx`select credits_used, fast_requests from public.weekly_ai_usage`);
+    expect(usage).toEqual({ credits_used: 100, fast_requests: 100 });
+  }, 30_000);
+
+  it("isolates usage by owner and denies direct client writes", async () => {
+    const ownerA = await createUsageUser();
+    const ownerB = await createUsageUser();
+    const generation = await createGeneration(ownerA);
+    await reserveUsage(ownerA, generation, "High");
+    const visibleA = await asUser(ownerA, (tx) => tx`select credits_used from public.weekly_ai_usage`);
+    const visibleB = await asUser(ownerB, (tx) => tx`select credits_used from public.weekly_ai_usage`);
+    expect(visibleA).toEqual([{ credits_used: 6 }]);
+    expect(visibleB).toEqual([]);
+    await expect(asUser(ownerA, (tx) => tx`update public.weekly_ai_usage set credits_used = 0`)).rejects.toThrow(/permission denied/i);
+    await expect(asUser(ownerA, (tx) => tx`select * from public.weekly_usage_reservations`)).rejects.toThrow(/permission denied/i);
+    await expect(reserveUsage(ownerB, generation, "Fast")).rejects.toThrow();
+  });
+
+  it("starts a fresh allowance in the new UTC week and returns the server reset timestamp", async () => {
+    const owner = await createUsageUser();
+    const utcMonday = new Date();
+    utcMonday.setUTCHours(0, 0, 0, 0);
+    utcMonday.setUTCDate(utcMonday.getUTCDate() - ((utcMonday.getUTCDay() + 6) % 7));
+    const previousWeek = new Date(utcMonday);
+    previousWeek.setUTCDate(previousWeek.getUTCDate() - 7);
+    const previousWeekStart = previousWeek.toISOString().slice(0, 10);
+    await sql`insert into public.weekly_ai_usage (user_id, week_start, credits_used, fast_requests) values (${owner}, ${previousWeekStart}::date, 100, 100)`;
+    const generation = await createGeneration(owner);
+    const [usage] = await asUser(owner, (tx) => tx`select * from public.get_current_weekly_ai_usage()`);
+    expect(usage.credits_used).toBe(0);
+    expect(Date.parse(usage.reset_at as string)).toBeGreaterThan(Date.now());
+    const [reserved] = await reserveUsage(owner, generation, "Fast");
+    expect(reserved).toMatchObject({ accepted: true, credits_charged: 1, credits_used: 1, credits_remaining: 99 });
+  });
+
+  it("makes pre-stream reservation release atomic and idempotent without negative usage", async () => {
+    const owner = await createUsageUser();
+    const generation = await createGeneration(owner);
+    await reserveUsage(owner, generation, "Balanced");
+    const release = () => asUser(owner, (tx) => tx`select public.release_weekly_ai_usage(${generation}::uuid) AS released`);
+    await expect(release()).resolves.toEqual([{ released: true }]);
+    await expect(release()).resolves.toEqual([{ released: false }]);
+    const [usage] = await asUser(owner, (tx) => tx`select credits_used, balanced_requests from public.weekly_ai_usage`);
+    expect(usage).toEqual({ credits_used: 0, balanced_requests: 0 });
+    await expect(sql`update public.weekly_ai_usage set credits_used = -1 where user_id = ${owner}`).rejects.toThrow();
+  });
+
+  it("refuses to refund a reservation after provider execution starts", async () => {
+    const owner = await createUsageUser();
+    const generation = await createGeneration(owner);
+    await reserveUsage(owner, generation, "High");
+    await expect(startUsage(owner, generation)).resolves.toEqual([{ started: true }]);
+    await expect(startUsage(owner, generation)).resolves.toEqual([{ started: true }]);
+    await expect(asUser(owner, (tx) => tx`select public.release_weekly_ai_usage(${generation}::uuid) AS released`)).resolves.toEqual([{ released: false }]);
+    const [usage] = await asUser(owner, (tx) => tx`select credits_used, high_requests from public.weekly_ai_usage`);
+    expect(usage).toEqual({ credits_used: 6, high_requests: 1 });
+  });
+
+  it("serializes a concurrent start and refund so only one transition succeeds", async () => {
+    const owner = await createUsageUser();
+    const generation = await createGeneration(owner);
+    await reserveUsage(owner, generation, "Balanced");
+    const [started, released] = await Promise.all([
+      startUsage(owner, generation),
+      asUser(owner, (tx) => tx`select public.release_weekly_ai_usage(${generation}::uuid) AS released`),
+    ]);
+    if (started[0].started) {
+      expect(released).toEqual([{ released: false }]);
+      const [usage] = await asUser(owner, (tx) => tx`select credits_used, balanced_requests from public.weekly_ai_usage`);
+      expect(usage).toEqual({ credits_used: 3, balanced_requests: 1 });
+    } else {
+      expect(released).toEqual([{ released: true }]);
+      const [usage] = await asUser(owner, (tx) => tx`select credits_used, balanced_requests from public.weekly_ai_usage`);
+      expect(usage).toEqual({ credits_used: 0, balanced_requests: 0 });
+    }
   });
 
   afterAll(async () => {
@@ -487,5 +618,113 @@ describe("Supabase row-level security", () => {
     expect(await sql`select title from public.conversations where id = ${conversationB}`).toEqual([{ title: "B conversation" }]);
     expect(await sql`select id from public.users where id = ${userA}`).toEqual([{ id: userA }]);
     expect(await sql`select preferred_name from public.user_preferences where user_id = ${userA}`).toEqual([{ preferred_name: "Habib" }]);
+  });
+
+  describe("chat attachments", () => {
+    const owner = randomUUID();
+    const stranger = randomUUID();
+    const thread = randomUUID();
+    const otherThread = randomUUID();
+    const strangerThread = randomUUID();
+
+    async function draft(userId: string, name = "attachment-a.txt", size = 64, text = "The internal codename for this test document is Cedar Harbor.") {
+      const [row] = await asUser(userId, (tx) => tx`insert into public.message_attachments (user_id, original_name, mime_type, size_bytes, extracted_text)
+        values (${userId}, ${name}, 'text/plain', ${size}, ${text}) returning id`);
+      return row.id as string;
+    }
+    const send = (userId: string, conversation: string, message: string, ids: string[], content = "What is the codename?") =>
+      asUser(userId, (tx) => tx`select * from public.append_user_message_with_attachments(${conversation}, ${message}, ${content}, ${ids}::uuid[])`);
+
+    beforeAll(async () => {
+      await sql`insert into auth.users (id) values (${owner}), (${stranger})`;
+      await sql`insert into public.conversations (id, user_id, title) values (${thread}, ${owner}, 'Attachments'), (${otherThread}, ${owner}, 'Other'), (${strangerThread}, ${stranger}, 'Stranger')`;
+    });
+
+    it("has row-level security enabled and forced on the attachments table", async () => {
+      expect(await sql`select relrowsecurity, relforcerowsecurity from pg_class where oid = 'public.message_attachments'::regclass`).toEqual([{ relrowsecurity: true, relforcerowsecurity: true }]);
+    });
+
+    it("links a draft to the user message it was sent with, in one step, and keeps it for a reload", async () => {
+      const first = await draft(owner);
+      const second = await draft(owner, "attachment-b.md");
+      const message = randomUUID();
+      const [saved] = await send(owner, thread, message, [first, second]);
+      expect(saved).toMatchObject({ id: message, position: 1 });
+      const rows = await asUser(owner, (tx) => tx`select id, conversation_id, message_id, original_name from public.message_attachments where conversation_id = ${thread} order by created_at`);
+      expect(rows.map((row) => [row.id, row.conversation_id, row.message_id])).toEqual([[first, thread, message], [second, thread, message]]);
+      expect(rows.map((row) => row.original_name)).toEqual(["attachment-a.txt", "attachment-b.md"]);
+    });
+
+    it("treats a retried send as the same message and refuses a changed attachment set", async () => {
+      const id = await draft(owner);
+      const message = randomUUID();
+      const [first] = await send(owner, thread, message, [id], "Retry me");
+      const [again] = await send(owner, thread, message, [id], "Retry me");
+      expect(again).toEqual(first);
+      expect(await sql`select id from public.messages where id = ${message}`).toHaveLength(1);
+      const extra = await draft(owner);
+      await expect(send(owner, thread, message, [id, extra], "Retry me")).rejects.toMatchObject({ code: "PT409" });
+      expect(await sql`select message_id from public.message_attachments where id = ${extra}`).toEqual([{ message_id: null }]);
+    });
+
+    it("never lets another conversation or another user claim an attachment", async () => {
+      const id = await draft(owner);
+      await send(owner, thread, randomUUID(), [id], "First use");
+      const otherMessage = randomUUID();
+      await expect(send(owner, otherThread, otherMessage, [id])).rejects.toMatchObject({ code: "PT409" });
+      // The whole send rolled back: no message without its attachment.
+      expect(await sql`select id from public.messages where id = ${otherMessage}`).toHaveLength(0);
+
+      const ownersDraft = await draft(owner);
+      const strangerMessage = randomUUID();
+      await expect(send(stranger, strangerThread, strangerMessage, [ownersDraft])).rejects.toMatchObject({ code: "PT409" });
+      expect(await sql`select id from public.messages where id = ${strangerMessage}`).toHaveLength(0);
+      expect(await sql`select message_id from public.message_attachments where id = ${ownersDraft}`).toEqual([{ message_id: null }]);
+
+      // Linking directly, outside the function, cannot reach another owner's or another conversation's message either.
+      const [strangerOwn] = await asUser(stranger, (tx) => tx`select * from public.append_user_message(${strangerThread}, ${randomUUID()}, 'Mine')`);
+      await expect(asUser(owner, (tx) => tx`update public.message_attachments set conversation_id = ${strangerThread}, message_id = ${strangerOwn.id} where id = ${ownersDraft}`)).rejects.toThrow();
+      const ownMessage = (await sql`select id from public.messages where conversation_id = ${thread} order by position limit 1`)[0].id;
+      await expect(asUser(owner, (tx) => tx`update public.message_attachments set conversation_id = ${otherThread}, message_id = ${ownMessage} where id = ${ownersDraft}`)).rejects.toThrow();
+    });
+
+    it("keeps attachments invisible and untouchable for other users", async () => {
+      const id = await draft(owner);
+      expect(await asUser(stranger, (tx) => tx`select id from public.message_attachments where id = ${id}`)).toHaveLength(0);
+      expect(await asUser(stranger, (tx) => tx`delete from public.message_attachments where id = ${id} returning id`)).toHaveLength(0);
+      await expect(asUser(stranger, (tx) => tx`insert into public.message_attachments (user_id, original_name, mime_type, size_bytes, extracted_text) values (${owner}, 'x.txt', 'text/plain', 1, 'x')`)).rejects.toThrow();
+      expect(await sql`select id from public.message_attachments where id = ${id}`).toHaveLength(1);
+    });
+
+    it("creates drafts only unlinked, removes only drafts, and never unlinks a sent attachment", async () => {
+      const ownMessage = (await sql`select id from public.messages where conversation_id = ${thread} order by position limit 1`)[0].id;
+      await expect(asUser(owner, (tx) => tx`insert into public.message_attachments (user_id, conversation_id, message_id, original_name, mime_type, size_bytes, extracted_text) values (${owner}, ${thread}, ${ownMessage}, 'x.txt', 'text/plain', 1, 'x')`)).rejects.toThrow();
+      const removable = await draft(owner);
+      expect(await asUser(owner, (tx) => tx`delete from public.message_attachments where id = ${removable} returning id`)).toHaveLength(1);
+      const [linked] = await sql`select id from public.message_attachments where message_id is not null and user_id = ${owner} limit 1`;
+      expect(await asUser(owner, (tx) => tx`delete from public.message_attachments where id = ${linked.id} returning id`)).toHaveLength(0);
+      expect(await asUser(owner, (tx) => tx`update public.message_attachments set conversation_id = null, message_id = null where id = ${linked.id} returning id`)).toHaveLength(0);
+      await expect(asUser(owner, (tx) => tx`update public.message_attachments set extracted_text = 'changed' where id = ${linked.id}`)).rejects.toThrow();
+    });
+
+    it("saves nothing when an attachment is missing or the set is too large", async () => {
+      const missing = randomUUID();
+      const message = randomUUID();
+      await expect(send(owner, thread, message, [missing])).rejects.toMatchObject({ code: "PT409" });
+      expect(await sql`select id from public.messages where id = ${message}`).toHaveLength(0);
+      const big = [await draft(owner, "a.txt", 3_000_000), await draft(owner, "b.txt", 3_000_000), await draft(owner, "c.txt", 3_000_000)];
+      const tooLarge = randomUUID();
+      await expect(send(owner, thread, tooLarge, big)).rejects.toMatchObject({ code: "PT413" });
+      expect(await sql`select id from public.messages where id = ${tooLarge}`).toHaveLength(0);
+      expect(await sql`select count(*)::int as n from public.message_attachments where id = any(${big}::uuid[]) and message_id is null`).toEqual([{ n: 3 }]);
+      await expect(send(owner, thread, randomUUID(), [big[0], big[1], big[2], randomUUID()])).rejects.toMatchObject({ code: "PT400" });
+    });
+
+    it("removes sent attachments with their conversation", async () => {
+      const id = await draft(owner);
+      await send(owner, otherThread, randomUUID(), [id], "In the other thread");
+      await asUser(owner, (tx) => tx`delete from public.conversations where id = ${otherThread}`);
+      expect(await sql`select id from public.message_attachments where id = ${id}`).toHaveLength(0);
+    });
   });
 });

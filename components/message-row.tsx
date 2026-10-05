@@ -1,7 +1,9 @@
 "use client";
 
 import { memo, useState, type KeyboardEvent } from "react";
-import { Pencil, RefreshCw } from "lucide-react";
+import { FileText, Pencil, RefreshCw } from "lucide-react";
+import { attachmentTypeLabel, formatBytes } from "@/lib/attachments/limits";
+import type { AttachmentSummary } from "@/lib/attachments/types";
 import { CopyButton } from "@/components/copy-button";
 import { MessageMarkdown } from "@/components/message-markdown";
 import { useChatFlag } from "@/components/use-chat-preferences";
@@ -41,6 +43,15 @@ function MessageEditor({ message, disabled, onCancel, onSave }: { message: Persi
   </div>;
 }
 
+// Names only: a sent attachment is shown as a small chip, never as a preview or a link.
+function MessageAttachments({ attachments }: { attachments: AttachmentSummary[] }) {
+  return <ul className="message-attachments" aria-label="Attachments">
+    {attachments.map((attachment) => <li key={attachment.id} className="message-attachment" title={`${attachment.name} · ${attachmentTypeLabel(attachment.mimeType)} · ${formatBytes(attachment.sizeBytes)}${attachment.truncated ? " · partly read" : ""}`}>
+      <FileText size={13} aria-hidden="true" /><span>{attachment.name}</span>
+    </li>)}
+  </ul>;
+}
+
 function MessageTime({ value }: { value: string | undefined }) {
   const [showTimestamps] = useChatFlag("showTimestamps");
   if (!showTimestamps || !value) return null;
@@ -54,13 +65,15 @@ export const MessageRow = memo(function MessageRow({ message, initial, isLast, i
   if (message.role === "assistant") {
     const waiting = message.status === "streaming" && (!message.content || message.content === claimPlaceholder);
     const canCopy = message.status !== "streaming" && message.status !== "error" && Boolean(message.content) && !placeholderResponses.has(message.content);
+    const canRegenerate = canMutate && isLast && message.status === "complete" && canCopy;
     const canRetry = canMutate && isLast && (message.status === "error" || message.status === "interrupted");
     return <article className="message-row assistant">
       <div className="message-content assistant">
-        <div className="message-author">Nibie{message.status === "interrupted" ? " · Stopped" : message.status === "error" ? " · Couldn't respond" : ""}<MessageTime value={message.created_at} /></div>
+        <div className="message-author">Nibie{message.status === "interrupted" ? <span className="message-status"> · Stopped</span> : message.status === "error" ? <span className="message-status is-danger">{" · Couldn't respond"}</span> : null}<MessageTime value={message.created_at} /></div>
         {waiting ? <span className="thinking-dots" role="status" aria-label="Nibie is responding"><i /><i /><i /></span> : <><MessageMarkdown content={message.content} />{message.status === "streaming" && <span className="thinking-dots is-inline" role="status" aria-label="Nibie is responding"><i /><i /><i /></span>}</>}
-        {(canCopy || canRetry) && <div className="message-actions">
+        {(canCopy || canRegenerate || canRetry) && <div className="message-actions">
           {canCopy && <CopyButton text={message.content} label="Copy response" />}
+          {canRegenerate && <button type="button" className="message-action" disabled={disabled} onClick={onRegenerate}><RefreshCw size={13} aria-hidden="true" /><span>Regenerate</span></button>}
           {canRetry && <button type="button" className="message-action" disabled={disabled} onClick={onRegenerate}><RefreshCw size={13} aria-hidden="true" /><span>Retry</span></button>}
         </div>}
       </div>
@@ -70,6 +83,7 @@ export const MessageRow = memo(function MessageRow({ message, initial, isLast, i
     {editing
       ? <div className="message-column user"><MessageEditor message={message} disabled={disabled} onCancel={onCancelEdit} onSave={(content) => onSaveEdit(message.id, content)} /></div>
       : <div className="message-column user">
+        {message.attachments?.length ? <MessageAttachments attachments={message.attachments} /> : null}
         <div className="message-content user"><p>{message.content}</p></div>
         <MessageTime value={message.created_at} />
         {canMutate && isLastUser && <div className="message-actions">

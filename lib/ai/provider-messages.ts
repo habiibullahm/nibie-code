@@ -11,9 +11,10 @@ export function toProviderMessages(plan: ContextPlan): ProviderMessage[] {
   const room = plan.blocks.find((block) => block.id === "room" && block.included);
   const pins = plan.blocks.find((block) => block.id === "pins" && block.included);
   const file = plan.blocks.find((block) => block.id === "file" && block.included);
+  const attachment = plan.blocks.find((block) => block.id === "attachment" && block.included);
   const summary = plan.blocks.find((block) => block.id === "thread_summary" && block.included);
-  if (profile || room || pins || file || summary) {
-    messages.push({ role: "system", content: [CONTEXT_DATA_PREAMBLE, profile?.text, room?.text, pins?.text, file?.text, summary?.text].filter(Boolean).join("\n\n") });
+  if (profile || room || pins || file || attachment || summary) {
+    messages.push({ role: "system", content: [CONTEXT_DATA_PREAMBLE, profile?.text, room?.text, pins?.text, file?.text, attachment?.text, summary?.text].filter(Boolean).join("\n\n") });
   }
   for (const block of plan.blocks) {
     if (!block.included || !block.dialogueRole) continue;

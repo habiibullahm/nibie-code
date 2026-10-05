@@ -35,7 +35,7 @@ async function completedStream(page: Page, trigger: () => Promise<void>) {
 
 async function openNewChat(page: Page) {
   await page.getByRole("button", { name: "New chat", exact: true }).first().click();
-  await expect(page.getByRole("heading", { name: "What’s on your mind?" })).toBeVisible();
+  await expect(page.getByTestId("welcome-greeting")).toBeVisible();
 }
 
 async function send(page: Page, text: string) {

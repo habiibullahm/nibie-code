@@ -1,6 +1,7 @@
 "use client";
 
 import { DataPrivacyPanel } from "@/components/data-privacy-dialog";
+import { WeeklyUsageSummary } from "@/components/settings/weekly-usage-summary";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { useChatFlag } from "@/components/use-chat-preferences";
 import { SettingsChoice, SettingsSection, SettingsTextField } from "@/components/settings/settings-section";
@@ -38,13 +39,18 @@ const styleOptions = [
   { value: "direct", label: "Direct" },
 ] as const;
 
-export function GeneralSettingsSection({ preferences, disabled, onChange }: SettingsSectionProps) {
+export function GeneralSettingsSection({ preferences, disabled, preview, onChange }: SettingsSectionProps) {
   return <SettingsSection title="General" description="Language Nibie should prefer when you have not asked for one.">
     <SettingsChoice label="Preferred language" hint="Auto follows the language you are using. English and Bahasa Indonesia are saved on your account." value={preferences.preferredLanguage} options={[...languageOptions]} disabled={disabled} onChange={(preferredLanguage) => onChange({ preferredLanguage })} />
     <div className="settings-theme">
       <div className="settings-theme-label">Theme</div>
       <p>Dark, light, or match this device. Stored on this device.</p>
       <ThemeSwitcher />
+    </div>
+    <div className="weekly-usage">
+      <h3>Weekly AI usage</h3>
+      <p className="settings-note">Free usage resets weekly. There’s no paid plan or billing yet.</p>
+      <WeeklyUsageSummary preview={preview ?? false} />
     </div>
   </SettingsSection>;
 }

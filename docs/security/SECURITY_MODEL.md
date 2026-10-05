@@ -367,13 +367,13 @@ If a future direct-Postgres architecture is proposed, it requires a separate sec
 
 ### 9.3 RPC security
 
-User-facing database procedures should remain:
+User-facing data functions should normally remain:
 
 - `SECURITY INVOKER`;
 - owned by the authenticated session;
 - constrained by table policies and database constraints.
 
-Privileged procedures require explicit review.
+Privileged functions require explicit review. The weekly usage candidate is an intentional exception: its two quota-write procedures are narrowly scoped `SECURITY DEFINER` functions because authenticated clients cannot safely receive direct table write grants. They derive ownership from `auth.uid()`, validate an active owner-owned assistant generation, fix an empty `search_path`, and grant execution only to `authenticated`. Aggregate reads stay RLS-scoped and the current-usage function remains `SECURITY INVOKER`. No service-role runtime access is added. This candidate is **not production-released**; see [Weekly AI usage](../feature/weekly-usage/v1.md).
 
 ---
 
@@ -525,7 +525,11 @@ The backend should support account-level limits such as:
 
 Client-supplied quota values are ignored.
 
-### 13.4 Model allowlist
+### 13.4 Current weekly-usage candidate (not shipped)
+
+This worktree adds a 100-credit weekly weighted allowance (Fast 1, Balanced 3, High 6; Monday 00:00 UTC), but the production database/app have not been migrated, deployed, or verified for it. Weights are product policy, not provider-dollar prices. The guard reserves once per new provider generation, releases an unestablished stream via an idempotent atomic operation, and keeps charges after a stream is established (including Stop). Settings show a small remaining allowance/reset time; exhausted requests return `WEEKLY_USAGE_LIMIT`, never an upgrade prompt. It is not a true provider spend ceiling, per-minute rate limit, or IP/signup-abuse control. Logs are owner-identifier-free metadata only. Full behavior and the process-crash limitation are documented in [the release candidate](../feature/weekly-usage/v1.md).
+
+### 13.5 Model allowlist
 
 The browser may select only logical product modes.
 
@@ -845,6 +849,16 @@ Files V1 stores owner-scoped room text in the private `room-files` Supabase buck
 - Row policies allow select, insert, and delete of the caller's rows only. There is no update policy and no service-role path for ordinary file operations.
 - Storage policies, applied when the `storage` schema exists, allow the same owner-folder operations on the private bucket.
 - Extracted text is untrusted context. It is included only when the user selects that file for a message, and it is not copied into the product-policy prompt.
+
+### 24.2 Chat attachments V1
+
+Chat attachments store the extracted text of a file a person attached to their own message, in `message_attachments`. The design is in [Chat Attachments V1](../feature/attachments/v1.md).
+
+- The owner is `auth.uid()` from the session. The upload route refuses owner, message, conversation, and text fields.
+- Row-level security is enabled and forced. Policies allow reading own rows, inserting unlinked drafts only, deleting own unsent drafts only, and linking a draft once. Only `conversation_id` and `message_id` are updatable.
+- A composite foreign key ties a sent attachment to one of the owner's messages in the same conversation, so another person's message or another conversation cannot claim it.
+- The extension and bytes decide the type; images, binary content, and anything else are refused. PDF text is read without scripts, forms, or network access. Original bytes are not stored.
+- Attachment text is untrusted context inside explicit boundaries, never part of the product-policy prompt, never sent to the browser, and never logged.
 
 ---
 

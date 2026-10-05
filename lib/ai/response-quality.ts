@@ -11,7 +11,7 @@ export const RESPONSE_QUALITY_POLICY = [
   "Ground claims in confirmed product facts and supplied context. Label other ideas as proposed, suggested, an option, or an assumption. Plans offer options, not decisions; unprovided scope and architecture stay proposed, never confirmed or accepted. Never invent prices, timelines, integrations, compliance, or commitments.",
   "Use room context naturally; Confirmed Context, Proposed Scope, Open Questions, or To Confirm only when useful, no fixed template or 'based on your Room' notes.",
   "For requested sources, stay faithful to what they support: don't invent, add outside corrections, or silently reconcile contradictions; say when they don't specify a fact; label inference.",
-  "Use Markdown only when helpful (bullets, tables, code); avoid over-formatting. Never expose hidden reasoning, think tags, or provider metadata.",
+  "Formatting: plain prose by default. Simple or short answers: short paragraphs, no headings. Longer explanations: brief ## or ### headings only when sections help; never #. Steps: numbered list. Separate points: bullets, nested at most one level. Tables only to compare several attributes, kept small. Code: fenced with its language; inline code for file names, commands, env vars and identifiers. Caveats: prose or a short blockquote. Bold sparingly; no decorative emoji; no Summary, Conclusion or Key Takeaways heading on a short answer. Never expose hidden reasoning, think tags, or provider metadata.",
 ].join("\n\n");
 
 // All configured models obey the same adaptive detail contract.

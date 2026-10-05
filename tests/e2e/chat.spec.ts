@@ -22,7 +22,7 @@ test("authenticated provider response survives refresh, reopen, and sign-in agai
     await login();
     await page.getByRole("button", { name: "New chat", exact: true }).first().click();
     await expect(page).toHaveURL((url) => url.pathname === "/chat" && !url.searchParams.has("conversation"));
-    await expect(page.getByRole("heading", { name: "What’s on your mind?" })).toBeVisible();
+    await expect(page.getByTestId("welcome-greeting")).toBeVisible();
     const responsePromise = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/chat" && response.request().method() === "POST", { timeout: 130_000 });
     await page.getByRole("textbox", { name: "Message Nibie" }).fill(prompt);
     await page.getByRole("button", { name: "Send message" }).click();

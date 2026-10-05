@@ -9,19 +9,27 @@ What's new in Nibie.
 ### Added
 
 - Expandable chat composer with a compact default for long prompts.
+- Weekly usage allowance of 100 credits per UTC week, weighted 1 / 3 / 6 for Fast / Balanced / High; these are product units, not provider prices.
 - Deployment identity from the Vercel git commit, exposed safely at `GET /api/health`.
 - Structured server logs for chat generation, with one request id across start, context build, and completion or failure.
 - Release checklist, version policy, migration inventory rules, hotfix steps, and rollback notes.
 - `npm run release:check`, which fails on duplicate migration numbers, a journal that does not match `drizzle/*.sql`, missing release docs, or unresolved merge markers.
 - A release stays incomplete until the changelog, release note, and current product docs match verified production. The version tag comes after that.
+- Chat attachments: attach up to three text, Markdown, CSV, JSON, source-code, or text-based PDF files to a message with **+** or by dropping them on the composer. Nibie answers from their text in that conversation, including follow-ups, and the sent message shows its files. Attachments stay with their message: they are not Room files and are not shared with other threads. See [Chat Attachments V1](docs/feature/attachments/v1.md). Needs migration `0009_chat_attachments.sql`.
 
 ### Changed
 
+- Assistant answers use adaptive formatting: plain prose for simple answers, `##`/`###` headings only when sections help, numbered steps, small tables for comparisons, and fenced code with its language. Answer text is slightly larger and calmer, headings stay compact, inline code is quieter, and tables scroll inside their frame on phones instead of breaking words.
 - Chat and room-draft failure logs now use stable event names and operational codes. User-facing errors are unchanged.
 
 ### Fixed
 
-- None.
+- Stop is now decided on the server. A stopped reply keeps exactly the text that was on screen and stays marked Stopped after a reload or the next message, even if the model finished in the meantime. The server stops the generation within about a second, even when the host does not pass the browser disconnect on. A reply stopped before any text shows "Response stopped." instead of "…". Repeating Stop changes nothing, and sending right after Stop still works ([#12](https://github.com/habiibullahm/nibie-code/issues/12)).
+- The integration test suite resolves the `@/` import alias again, so the row-level security tests can run.
+
+### Known issues
+
+- Chat attachments: images and scanned PDFs are not supported, a sent attachment cannot be downloaded, and account export does not include attachments yet.
 
 ## Current development
 

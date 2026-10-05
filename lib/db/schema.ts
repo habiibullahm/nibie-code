@@ -1,5 +1,7 @@
 import {
+  boolean,
   check,
+  date,
   foreignKey,
   index,
   integer,
@@ -19,6 +21,7 @@ export const preferredLanguage = pgEnum("preferred_language", ["auto", "en", "id
 export const preferenceModel = pgEnum("preference_model", ["fast", "balanced", "reasoning"]);
 export const responseLength = pgEnum("response_length", ["concise", "balanced", "detailed"]);
 export const responseStyle = pgEnum("response_style", ["natural", "professional", "direct"]);
+export const weeklyUsageMode = pgEnum("weekly_usage_mode", ["Fast", "Balanced", "High"]);
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey(),
@@ -195,6 +198,47 @@ export const messages = pgTable(
   ],
 );
 
+// Exactly-once generation-level reservation records prevent a logical provider generation from being charged twice.
+export const weeklyUsageReservations = pgTable(
+  "weekly_usage_reservations",
+  {
+    generationId: uuid("generation_id").primaryKey().references(() => messages.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    weekStart: date("week_start", { mode: "date" }).notNull(),
+    logicalMode: weeklyUsageMode("logical_mode").notNull(),
+    creditsCharged: integer("credits_charged").notNull(),
+    releasedAt: timestamp("released_at", { withTimezone: true, mode: "date" }),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("weekly_usage_reservations_user_week_idx").on(table.userId, table.weekStart),
+    check("weekly_usage_reservations_credits_positive", sql`${table.creditsCharged} > 0`),
+  ],
+);
+
+// Per-user weekly totals. Database functions own reservation/release writes; users can only read their row through RLS.
+export const weeklyAiUsage = pgTable(
+  "weekly_ai_usage",
+  {
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    weekStart: date("week_start", { mode: "date" }).notNull(),
+    creditsUsed: integer("credits_used").notNull().default(0),
+    fastRequests: integer("fast_requests").notNull().default(0),
+    balancedRequests: integer("balanced_requests").notNull().default(0),
+    highRequests: integer("high_requests").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("weekly_ai_usage_user_week_key").on(table.userId, table.weekStart),
+    check("weekly_ai_usage_credits_nonnegative", sql`${table.creditsUsed} between 0 and 100`),
+    check("weekly_ai_usage_fast_nonnegative", sql`${table.fastRequests} >= 0`),
+    check("weekly_ai_usage_balanced_nonnegative", sql`${table.balancedRequests} >= 0`),
+    check("weekly_ai_usage_high_nonnegative", sql`${table.highRequests} >= 0`),
+  ],
+);
+
 // Account-level defaults. One row per owner. Conversation rows keep their own selected_model.
 export const userPreferences = pgTable(
   "user_preferences",
@@ -247,5 +291,43 @@ export const workbenchDocuments = pgTable(
       sql`char_length(${table.title}) between 1 and 120 and ${table.title} = btrim(${table.title})`,
     ),
     check("workbench_documents_content_length", sql`char_length(${table.content}) <= 100000`),
+  ],
+);
+
+// A chat attachment: text extracted from a file the owner attached to one of their messages.
+// A draft has no conversation or message yet. Once sent, the same-owner composite key ties it to exactly one user
+// message in one conversation. It is not room knowledge and is never shared with other threads.
+export const messageAttachments = pgTable(
+  "message_attachments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id"),
+    messageId: uuid("message_id"),
+    originalName: text("original_name").notNull(),
+    mimeType: text("mime_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    extractedText: text("extracted_text").notNull(),
+    truncated: boolean("truncated").notNull().default(false),
+    pageCount: integer("page_count"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "message_attachments_message_owner_fk",
+      columns: [table.messageId, table.conversationId, table.userId],
+      foreignColumns: [messages.id, messages.conversationId, messages.userId],
+    }).onDelete("cascade"),
+    index("message_attachments_message_idx").on(table.conversationId, table.messageId),
+    index("message_attachments_draft_idx").on(table.userId, table.createdAt).where(sql`${table.messageId} IS NULL`),
+    check("message_attachments_link_pair", sql`(${table.conversationId} IS NULL) = (${table.messageId} IS NULL)`),
+    check("message_attachments_name_length", sql`char_length(${table.originalName}) between 1 and 120 and ${table.originalName} = btrim(${table.originalName})`),
+    check(
+      "message_attachments_mime_allowlist",
+      sql`${table.mimeType} in ('text/plain', 'text/markdown', 'text/csv', 'application/json', 'application/pdf', 'text/x-typescript', 'text/javascript', 'text/x-python', 'text/x-java', 'text/x-go', 'text/x-rust', 'application/sql', 'text/html', 'text/css', 'application/yaml', 'application/xml')`,
+    ),
+    check("message_attachments_size_bounds", sql`${table.sizeBytes} between 1 and 4194304`),
+    check("message_attachments_text_bounds", sql`char_length(${table.extractedText}) between 1 and 24000`),
+    check("message_attachments_page_bounds", sql`${table.pageCount} IS NULL OR ${table.pageCount} between 1 and 100000`),
   ],
 );

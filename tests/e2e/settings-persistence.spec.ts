@@ -25,7 +25,7 @@ test("preferred language persists across a refresh", async ({ page }) => {
   await expect(english).toBeEnabled();
   const startedOnEnglish = (await english.getAttribute("aria-checked")) === "true";
   await (startedOnEnglish ? auto : english).click();
-  await expect(dialog(page).getByRole("status")).toHaveText("Saved");
+  await expect(dialog(page).locator(".settings-status")).toHaveText("Saved");
   await page.keyboard.press("Escape");
 
   await page.reload();
@@ -34,5 +34,5 @@ test("preferred language persists across a refresh", async ({ page }) => {
   await expect(language.getByRole("radio", { name: startedOnEnglish ? "Auto" : "English" })).toHaveAttribute("aria-checked", "true");
 
   await (startedOnEnglish ? english : auto).click();
-  await expect(dialog(page).getByRole("status")).toHaveText("Saved");
+  await expect(dialog(page).locator(".settings-status")).toHaveText("Saved");
 });

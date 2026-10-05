@@ -11,16 +11,16 @@ export function conversationIdFromUrl(url: string | undefined): string | null {
   }
 }
 
-// Deletes one conversation, the id captured from that test's URL. Titles are not unique.
+// Archive only the conversation captured from that test's URL to keep the dedicated E2E account's active history clean.
 export async function removeConversation(page: Page, url: string | undefined) {
   const id = conversationIdFromUrl(url);
   if (!id) return;
   await page.unrouteAll({ behavior: "ignoreErrors" });
   await page.goto(`/chat?conversation=${encodeURIComponent(id)}`);
   await expect(page).toHaveURL((url) => url.pathname === "/chat" && url.searchParams.get("conversation") === id);
-  const remove = page.locator(".desktop-sidebar").locator(`[data-conversation-id="${id}"]`).getByRole("button", { name: /^Delete / });
-  if (await remove.count() !== 1) return;
-  page.once("dialog", (dialog) => dialog.accept());
-  await remove.click();
-  await expect(page.locator(".desktop-sidebar").locator(`[data-conversation-id="${id}"]`)).toHaveCount(0);
+  const row = page.locator(".desktop-sidebar").locator(`[data-conversation-id="${id}"]`);
+  const archive = row.getByRole("button", { name: /^Archive / });
+  if (await archive.count() !== 1) return;
+  await archive.click();
+  await expect(row).toHaveCount(0);
 }

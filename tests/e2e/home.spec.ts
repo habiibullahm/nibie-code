@@ -94,7 +94,7 @@ test("sign-up page provides an account creation form", async ({ page }) => {
 test("desktop chat workspace opens history and submits local messages", async ({ page }) => {
   await page.goto("/preview");
   await page.getByRole("button", { name: "New chat" }).first().click();
-  await expect(page.getByRole("heading", { name: "What’s on your mind?" })).toBeVisible();
+  await expect(page.getByTestId("welcome-greeting")).toBeVisible();
   await expect(page.getByRole("button", { name: "A thoughtful note to the team", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "A thoughtful note to the team", exact: true }).click();
   await expect(page.getByText("A good note can recognize the effort")).toBeVisible();

@@ -101,9 +101,11 @@ for (const mode of ["Fast", "Balanced", "High"]) {
     await expect(page.locator(".message-row.assistant").last()).toContainText("Second response");
     const sends = server.actions.filter((args) => args.length === 4);
     expect(sends).toHaveLength(2);
-    expect(sends[1][3]).toEqual([sends[0][2]]);
+    // Stop carries the reply it stopped and exactly the text on screen, both on the next save and on the acknowledgement.
+    const stopped = { userMessageId: sends[0][2], assistantId: "e3b624e6-d792-47a8-8ff2-46724452c1ca", content: "Partial first response" };
+    expect(sends[1][3]).toEqual([stopped]);
     // The next save ran while the Stop acknowledgement was still pending, and Stop never used the Server Action queue.
-    expect(server.stops).toEqual([{ conversationId: conversation, userMessageId: sends[0][2] }]);
+    expect(server.stops).toEqual([{ conversationId: conversation, ...stopped }]);
     expect(server.actions.filter((args) => args.length !== 4)).toEqual([]);
     expect(await page.evaluate(() => window.userStopHarness!.requests[1].signal.aborted)).toBe(false);
     await page.evaluate(() => window.userStopHarness!.releaseOldReader());
@@ -140,6 +142,35 @@ for (const mode of ["Fast", "Balanced", "High"]) {
     expect(errors).toEqual([]);
   });
 }
+
+test("a completed answer saved before Stop landed never replaces the stopped reply on screen (issue #12)", async ({ page }) => {
+  const server = await workspace(page, "High");
+  const input = page.getByRole("textbox", { name: "Message Nibie" });
+  await input.fill("First synthetic prompt"); await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.locator(".message-row.assistant")).toContainText("Partial first response");
+  await input.fill("Next before persistence confirmation"); await page.getByRole("button", { name: "Stop response" }).click();
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.locator(".message-row.assistant")).toHaveCount(2);
+  server.releaseStop();
+  await page.evaluate(() => {
+    const ids = window.userStopHarness!.requests.map((request) => request.body.userMessageId);
+    document.cookie = "chat-core-stop-snapshot=" + encodeURIComponent(JSON.stringify(ids)) + ";path=/preview/chat-core";
+    // The refresh after the next reply reads the first reply as the generation's finished answer.
+    document.cookie = "chat-core-stop-partial=complete;path=/preview/chat-core";
+  });
+  await input.fill("Third draft");
+  const refreshed = page.waitForResponse((response) => response.url().includes("/preview/chat-core") && response.request().headers()["rsc"] === "1");
+  await page.evaluate(() => window.userStopHarness!.completeSecond());
+  await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();
+  await expect(page.locator(".message-row.assistant").last()).toContainText("Second response completed.");
+  // Let the refreshed server snapshot render before checking that it did not replace the stopped reply.
+  await (await refreshed).finished();
+  await page.waitForTimeout(500);
+  const first = page.locator(".message-row.assistant").first();
+  await expect(first).toContainText("Partial first response");
+  await expect(first).toContainText("Stopped");
+  await expect(first).not.toContainText("the rest of the finished answer");
+});
 
 test("failed background Stop acknowledgement preserves the partial and never re-locks the main composer", async ({ page }) => {
   const server = await workspace(page, "Fast", true);

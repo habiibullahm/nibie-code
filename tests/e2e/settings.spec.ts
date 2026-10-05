@@ -40,7 +40,7 @@ test.describe("settings shell", () => {
     // The open conversation keeps its own mode; a new chat follows the saved default (Fast).
     await expect(page.getByRole("button", { name: "Model: High", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "New chat", exact: true }).first().click();
-    await expect(page.getByRole("heading", { name: "What’s on your mind?" })).toBeVisible();
+    await expect(page.getByTestId("welcome-greeting")).toBeVisible();
     await expect(page.getByRole("button", { name: "Model: Fast", exact: true })).toBeVisible();
   });
 });
