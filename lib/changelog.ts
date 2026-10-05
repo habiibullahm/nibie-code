@@ -1,12 +1,5 @@
 export const changelogPath = "/changelog";
 
-// Newest public notes, one line each. The first three items in CHANGELOG.md use this same wording.
-export const changelogPreview = [
-  "Rooms keep a brief, instructions, and their own threads",
-  "Pins and selected files stay with the Room you are in",
-  "Settings cover language, the model, and how Nibie replies",
-] as const;
-
 export type ChangelogGroup = {
   heading: string;
   items: string[];
@@ -23,6 +16,53 @@ export type ChangelogDocument = {
   intro: string[];
   entries: ChangelogEntry[];
 };
+
+export type ChangelogReleasePreview = {
+  version: string;
+  date: string;
+  highlights: string[];
+};
+
+const nonReleaseHeadings = new Set(["unreleased", "current development"]);
+const highlightGroupHeadings = new Set(["added", "changed", "fixed", "removed", "deprecated"]);
+
+function previewText(markdown: string) {
+  return markdown
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .trim();
+}
+
+export function getLatestShippedReleasePreview(document: ChangelogDocument): ChangelogReleasePreview | null {
+  const entry = document.entries.find((item) => {
+    const heading = item.version.trim().toLowerCase();
+    return heading.length > 0 && !nonReleaseHeadings.has(heading) && Boolean(item.date?.trim());
+  });
+  const date = entry?.date?.trim();
+  if (!entry || !date) return null;
+
+  const version = entry.version.trim();
+  const highlights = entry.groups
+    .filter((group) => highlightGroupHeadings.has(group.heading.trim().toLowerCase()))
+    .flatMap((group) => group.items)
+    .filter((item) => item.trim() && item.trim().toLowerCase() !== "none.")
+    .map(previewText)
+    .slice(0, 4);
+
+  return { version: /^v/i.test(version) ? version : `v${version}`, date, highlights };
+}
+
+export function getCurrentDevelopmentPreview(document: ChangelogDocument): string[] {
+  const entry = document.entries.find((item) => item.version.trim().toLowerCase() === "current development");
+  if (!entry) return [];
+  const firstItems = (heading: string, count: number) => entry.groups
+    .find((group) => group.heading.trim().toLowerCase() === heading.toLowerCase())
+    ?.items.slice(0, count) ?? [];
+  const selected = [...firstItems("Workspace", 2), ...firstItems("Account", 1)];
+  return selected.length ? selected : entry.groups.flatMap((group) => group.items).slice(0, 3);
+}
 
 export type ChangelogMenuLink = {
   href: string;

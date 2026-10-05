@@ -4,6 +4,7 @@ import { memo, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore
 import { Archive, ChevronDown, ChevronRight, DoorOpen, MessageSquare, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Plus, RotateCcw, Search, Settings, SquarePen, Trash2, X } from "lucide-react";
 import { SIGN_OUT_LABEL } from "@/lib/privacy/sign-out";
 import { AccountMenu } from "@/components/account-menu";
+import type { ChangelogReleasePreview } from "@/lib/changelog";
 import { Brand, BrandMark, type BrandActivity } from "@/components/brand";
 import { chatPath } from "@/lib/routes";
 import { groupFor, groupThreads, historyGroups, requestTime } from "@/lib/chat/groups";
@@ -22,6 +23,7 @@ type Props = {
   preview: boolean;
   email: string;
   name: string;
+  releasePreview?: ChangelogReleasePreview | null;
   // The server's clock when the page was rendered; used (with the UTC calendar) until hydration has finished.
   renderedAt?: number;
   mobile?: boolean;
@@ -76,7 +78,7 @@ function ConversationSearchDialog({ conversations, archivedConversations, onOpen
 }
 
 // Memoized: streaming tokens and typing never re-render the history list.
-export const ChatSidebar = memo(function ChatSidebar({ conversations, archivedConversations, rooms, activeId, activeRoomId, busy, activity, preview, email, name, renderedAt, mobile = false, drawerRef, closeMenuRef, desktopToggleRef, desktopExpandRef, collapsed = false, settingsActive = false, onCollapse, onExpand, onClose, onOpen, onOpenRoom, onNewThreadInRoom, onDeleteRoom, onCreateRoom, onNewChat, onOpenSettings, onRename, onArchive, onRestore, onMove }: Props) {
+export const ChatSidebar = memo(function ChatSidebar({ conversations, archivedConversations, rooms, activeId, activeRoomId, busy, activity, preview, email, name, releasePreview = null, renderedAt, mobile = false, drawerRef, closeMenuRef, desktopToggleRef, desktopExpandRef, collapsed = false, settingsActive = false, onCollapse, onExpand, onClose, onOpen, onOpenRoom, onNewThreadInRoom, onDeleteRoom, onCreateRoom, onNewChat, onOpenSettings, onRename, onArchive, onRestore, onMove }: Props) {
   // Server render and hydration group by the UTC calendar from the server's clock so both agree; once mounted, the viewer's own clock and
   // time zone are used (the grouping is recomputed whenever the list changes).
   const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false);
@@ -222,7 +224,7 @@ export const ChatSidebar = memo(function ChatSidebar({ conversations, archivedCo
         <div className="room-setup-actions"><button type="button" className="privacy-button" onClick={() => setMoveItem(null)}>Cancel</button><button type="submit" className="privacy-button" disabled={busy}>Move thread</button></div>
       </form>
     </dialog>}
-    <div className="account-area"><div className="account-row"><AccountMenu email={email} name={name} signOutLabel={SIGN_OUT_LABEL} onOpenSettings={onOpenSettings} compact={collapsed && !mobile} /><button type="button" className={"icon-button account-settings" + (settingsActive ? " is-active" : "")} aria-label="Settings" title="Settings" aria-current={settingsActive ? "page" : undefined} onClick={onOpenSettings}><Settings size={16} aria-hidden="true" /></button></div></div>
+    <div className="account-area"><div className="account-row"><AccountMenu email={email} name={name} releasePreview={releasePreview} signOutLabel={SIGN_OUT_LABEL} onOpenSettings={onOpenSettings} compact={collapsed && !mobile} /><button type="button" className={"icon-button account-settings" + (settingsActive ? " is-active" : "")} aria-label="Settings" title="Settings" aria-current={settingsActive ? "page" : undefined} onClick={onOpenSettings}><Settings size={16} aria-hidden="true" /></button></div></div>
     {searchOpen && <ConversationSearchDialog conversations={conversations} archivedConversations={archivedConversations} onOpen={onOpen} onRestore={onRestore} onClose={() => setSearchOpen(false)} />}
   </aside>;
 });

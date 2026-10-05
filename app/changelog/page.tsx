@@ -1,12 +1,12 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { Metadata } from "next";
 import Link from "next/link";
+import ReactMarkdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Brand } from "@/components/brand";
 import { SiteHeader } from "@/components/site-header";
 import { getWordmark } from "@/lib/config/branding";
 import { absolutePublicUrl, publicShareImage } from "@/lib/config/public-metadata";
-import { parseChangelog } from "@/lib/changelog";
+import { loadChangelog } from "@/lib/changelog-source";
 import { chatPath } from "@/lib/routes";
 import "../landing.css";
 import "./changelog.css";
@@ -40,9 +40,10 @@ export const metadata: Metadata = {
 
 export const dynamic = "error";
 
-function loadChangelog() {
-  return parseChangelog(readFileSync(join(process.cwd(), "CHANGELOG.md"), "utf8"));
-}
+const changelogMarkdownComponents: Components = {
+  p: ({ children }) => <>{children}</>,
+  a: ({ href, children }) => href && /^https?:\/\//i.test(href) ? <a href={href}>{children}</a> : <span>{children}</span>,
+};
 
 function sectionId(version: string, heading: string) {
   return `${version}-${heading}`.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -62,19 +63,38 @@ export default function ChangelogPage() {
     <a className="skip-link" href="#content">Skip to content</a>
     <SiteHeader />
     <main id="content" className="landing-shell landing-document changelog-column">
-      <p className="changelog-name">{name}</p>
-      <h1>{changelog.title}</h1>
-      {changelog.intro.map((paragraph) => <p className="changelog-intro" key={paragraph}>{paragraph}</p>)}
-      {changelog.entries.map((entry) => <article className="changelog-entry" key={entry.version}>
-        <h2>{entry.version}</h2>
-        {entry.date ? <p className="changelog-date">{entry.date}</p> : null}
-        {entry.groups.map((group) => <section className="changelog-group" key={group.heading} aria-labelledby={sectionId(entry.version, group.heading)}>
-          <h3 id={sectionId(entry.version, group.heading)}>{group.heading}</h3>
-          <ul>
-            {group.items.map((item) => <li key={item}>{item}</li>)}
-          </ul>
-        </section>)}
-      </article>)}
+      <header className="changelog-hero">
+        <p className="changelog-eyebrow">Product updates</p>
+        <h1>{changelog.title}</h1>
+        {changelog.intro.map((paragraph) => <p className="changelog-intro" key={paragraph}>{paragraph}</p>)}
+      </header>
+      {changelog.entries.map((entry) => {
+        const versionLabel = entry.version.trim().toLowerCase();
+        const isUnreleased = versionLabel === "unreleased";
+        const isDevelopment = versionLabel === "current development";
+        return <article className={`changelog-entry${isUnreleased ? " changelog-entry--unreleased" : ""}${isDevelopment ? " changelog-entry--development" : ""}`} key={entry.version}>
+          <header className="changelog-entry-header">
+            <div className="changelog-entry-title">
+              {isDevelopment ? <p className="changelog-entry-kind">Development snapshot</p> : null}
+              <h2>{entry.version}</h2>
+              {isUnreleased ? <span className="changelog-entry-status">In progress</span> : null}
+            </div>
+            {entry.date ? <p className="changelog-date">{entry.date}</p> : null}
+          </header>
+          <div className="changelog-entry-content">
+            {entry.groups.map((group) => {
+              const headingId = sectionId(entry.version, group.heading);
+              const isKnownIssues = group.heading.trim().toLowerCase() === "known issues";
+              return <section className={`changelog-group${isKnownIssues ? " changelog-group--known-issues" : ""}`} key={group.heading} aria-labelledby={headingId}>
+                <h3 id={headingId}>{group.heading}</h3>
+                <ul>
+                  {group.items.map((item) => <li key={item}><ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={changelogMarkdownComponents}>{item}</ReactMarkdown></li>)}
+                </ul>
+              </section>;
+            })}
+          </div>
+        </article>;
+      })}
     </main>
     <footer className="landing-footer landing-shell">
       <div className="landing-footer-brand">
