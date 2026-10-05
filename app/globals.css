@@ -325,14 +325,14 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .header-new-chat { display: none; align-items: center; justify-content: center; flex: none; width: 36px; height: 36px; border: 1px solid var(--border); border-radius: 10px; padding: 0; background: var(--bg-raised); cursor: pointer; }
 .header-new-chat:hover:not(:disabled) { background: var(--hover); }
 .mobile-menu-button { display: none; }
-.sidebar-logo-toggle { position: relative; }
-.sidebar-logo-toggle .brand-mark, .sidebar-logo-toggle .menu-toggle-mark { transition: opacity .15s ease; }
-.sidebar-logo-toggle .menu-toggle-mark { position: absolute; opacity: 0; }
-.sidebar-logo-toggle:hover .brand-mark, .sidebar-logo-toggle:focus-visible .brand-mark { opacity: 0; }
-.sidebar-logo-toggle:hover .menu-toggle-mark, .sidebar-logo-toggle:focus-visible .menu-toggle-mark { opacity: 1; }
 .conversation-scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 .conversation-scroll.is-empty { display: flex; align-items: center; justify-content: center; padding: 30px 20px; }
 .welcome-state { display: flex; flex-direction: column; align-items: center; gap: 24px; width: min(100%, 760px); }
+.welcome-state:has(.composer-prompt-label) { gap: 4px; }
+.welcome-state:has(.composer-prompt-label) > .welcome-panel { display: flex; flex-direction: column; align-items: center; }
+.welcome-state:has(.composer-prompt-label) .welcome-panel > :not(.welcome-icon):not(.local-notice) { display: none; }
+.welcome-state:has(.composer-prompt-label) .welcome-icon { width: 28px; height: 28px; margin: 0; border-radius: 9px; }
+.welcome-state:has(.composer-prompt-label) .welcome-icon .brand-mark { width: 18px; height: 18px; }
 .welcome-panel { width: min(100%, 530px); text-align: center; }
 .welcome-icon { display: grid; place-items: center; width: 43px; height: 43px; margin: 0 auto 22px; border: 1px solid var(--border); border-radius: 14px; color: var(--accent); background: var(--bg-subtle); }
 .welcome-icon .brand-mark { width: 27px; height: 27px; }
@@ -367,16 +367,28 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .composer-dock.is-centered { position: static; width: min(100%, 760px); padding: 0; background: none; }
 .composer { display: flex; flex-direction: column; gap: 4px; width: min(100%, 760px); margin: 0 auto; padding: 7px 9px 6px; border: 1px solid var(--border); border-radius: 15px; background: var(--bg-raised); box-shadow: var(--shadow-composer); transition: border-color .15s,box-shadow .15s; }
 .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 62%, var(--border-strong)); box-shadow: var(--shadow-composer-focus); }
-.composer-form { display: flex; flex-direction: column; gap: 4px; width: 100%; min-width: 0; margin: 0; }
+.composer-form { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; grid-template-areas: "attach input actions"; align-items: end; column-gap: 6px; row-gap: 4px; width: 100%; min-width: 0; margin: 0; }
+.composer-form.has-attachments { grid-template-areas: "attachments attachments attachments" "attach input actions"; }
+.composer-form.has-prompt-label:not(.has-attachments) { grid-template-areas: "prompt prompt prompt" "input input input" "attach . actions"; }
+.composer-form.has-attachments.has-prompt-label { grid-template-areas: "attachments attachments attachments" "prompt prompt prompt" "input input input" "attach . actions"; }
+.composer-attachments { grid-area: attachments; }
+.composer-prompt-label { grid-area: prompt; display: flex; align-items: center; justify-content: space-between; min-width: 0; min-height: 26px; color: var(--text-4); font-size: 11.5px; line-height: 1.2; animation: composer-prompt-enter .15s ease-out both; }
+.composer-prompt-label .composer-icon { width: 26px; height: 26px; }
+@keyframes composer-prompt-enter { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .composer-prompt-label { animation: none; } }
+.composer-attach { grid-area: attach; align-self: end; }
 .composer textarea { display: block; width: 100%; min-width: 0; max-height: min(112px, 24dvh); min-height: 26px; padding: 3px 2px; resize: none; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 13px; line-height: 1.55; }
-.composer.is-expanded textarea { max-height: min(55dvh, 440px); }
+.composer-form > textarea { grid-area: input; }
+.composer-form:not(.has-prompt-label) .composer-attach { align-self: center; }
+.composer-form:not(.has-prompt-label) > textarea { align-self: center; transform: translateY(-1px); }
+.composer-form:not(.has-prompt-label) .send-button > svg { stroke-width: 2; }
+.composer.is-expanded textarea { max-height: min(45dvh, 440px); }
 .composer textarea::-webkit-scrollbar { width: 6px; }
 .composer textarea::-webkit-scrollbar-track { background: transparent; }
 .composer textarea::-webkit-scrollbar-thumb { border-radius: 999px; background: var(--border-strong); }
 .composer textarea:focus-visible { outline: none; }
 .composer textarea::placeholder { color: var(--text-4); }
-.composer-actions { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; min-height: 32px; }
-.composer-actions-right { display: flex; align-items: center; gap: 4px; flex: none; }
+.composer-actions { grid-area: actions; display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; min-height: 32px; }
 .composer-tools { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .composer-left-tools { position: relative; display: flex; flex: 1; flex-wrap: wrap; align-items: center; gap: 5px; min-width: 0; }
 .composer-secondary-tools { width: min(100%, 760px); margin: 8px auto 0; }
@@ -507,9 +519,12 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .code-block { margin: 0 0 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-code); overflow: hidden; }
 .code-block-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; padding: 3px 6px 3px 12px; border-bottom: 1px solid var(--border-soft); background: color-mix(in srgb, var(--bg-code) 70%, var(--bg-app)); color: var(--text-3); font-size: 11px; }
 .code-block-header > span { font-family: var(--md-mono, ui-monospace, monospace); letter-spacing: .02em; }
+.code-block-actions { display: flex; align-items: center; gap: 4px; }
+.code-wrap-button[aria-pressed="true"] { color: var(--accent); background: var(--active); }
 .code-block pre { margin: 0; padding: 12px 14px; overflow-x: auto; overscroll-behavior-x: contain; tab-size: 2; }
 .code-block pre:focus-visible { outline: 2px solid var(--link); outline-offset: -2px; }
 .code-block pre code { display: block; width: max-content; min-width: 100%; color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.65; white-space: pre; }
+.code-block.is-wrapped pre code { width: auto; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 760px) {
   .markdown { --md-gap: 10px; font-size: 14px; }
   .markdown h1, .markdown h2 { font-size: 16.5px; }
@@ -573,12 +588,18 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .auth-switch a { color: var(--link); font-weight: 500; text-decoration: underline; text-underline-offset: 4px; }
 
 /* Composer pickers (room, reasoning effort) */
-.composer-left-tools .composer-menu-button { max-width: 220px; }
-.composer-left-tools .composer-menu-list { max-height: min(320px, 45dvh); overflow-y: auto; }
+.composer-left-tools .composer-menu-button { max-width: min(220px, 40vw); }
+.composer-left-tools .composer-menu-list { max-height: min(320px, 45dvh); overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.composer-menu-list::-webkit-scrollbar { width: 6px; }
+.composer-menu-list::-webkit-scrollbar-track { background: transparent; }
+.composer-menu-list::-webkit-scrollbar-thumb { border-radius: 999px; background: var(--border-strong); }
+.composer-menu-list::-webkit-scrollbar-thumb:hover { background: var(--text-4); }
+.composer-menu-list::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+.composer-left-tools > .composer-menu:last-child .composer-menu-list { right: 0; left: auto; }
 .composer-room-context { max-width: min(220px, 100%); padding: 6px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: 11.5px; }
 .composer-file-input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; opacity: 0; pointer-events: none; }
 .composer.is-dropping { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
-.composer-attachments { margin: 2px 0 8px; }
+.composer-attachments { min-width: 0; margin: 0 0 4px; }
 .attachment-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .attachment-chip { display: flex; align-items: center; gap: 7px; min-width: 0; max-width: min(100%, 260px); min-height: 38px; padding: 5px 4px 5px 9px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-subtle); color: var(--text-3); }
 .attachment-chip.is-error { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); color: var(--danger); }
@@ -624,17 +645,14 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 /* Touch: larger tap targets in the composer on phones (desktop sizes are unchanged) */
 @media (max-width: 760px) {
   .composer { gap: 4px; padding: 6px 7px 5px; border-radius: 14px; }
-  .composer-form { gap: 4px; }
+  .composer-form { column-gap: 4px; row-gap: 4px; }
   .composer.is-expanded textarea { max-height: min(42dvh, 260px); }
-  .composer-secondary-tools { gap: 3px; margin-top: 5px; }
-  .composer-left-tools .composer-menu-button, .composer-room-context { max-width: min(140px, 34vw); }
-  .send-button { width: 40px; height: 40px; border-radius: 11px; }
-  .composer-icon { width: 38px; height: 38px; }
-  .composer-menu-button { min-height: 38px; padding: 0 10px 0 12px; font-size: 12px; }
-  .composer-left-tools { gap: 4px; }
-  /* Tools can wrap on phones, so menus open from the tools row's left edge rather than from their own button. */
+  .composer-actions { gap: 3px; }
+  .composer-left-tools .composer-menu-button, .composer-room-context { max-width: min(140px, 34vw); min-height: 38px; padding-inline: 4px; font-size: 11px; }
   .composer-left-tools > .composer-menu { position: static; }
   .composer-left-tools .composer-menu-list { left: 0; right: auto; }
+  .send-button { width: 32px; height: 32px; border-radius: 9px; }
+  .composer-icon, .context-indicator-button { width: 32px; height: 32px; }
   .composer-menu-item { padding: 10px 10px; }
   .history-action { opacity: 1; width: 32px; height: 32px; }
 }

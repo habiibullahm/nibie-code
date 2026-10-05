@@ -58,7 +58,7 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
   const { reset: resetAttachments, restore: restoreAttachments } = attachments;
   const expandedBeforeClearRef = useRef<boolean | null>(null);
   useImperativeHandle(ref, () => ({
-    set: (text) => { expandedBeforeClearRef.current = null; setDraft(text); },
+    set: (text) => { expandedBeforeClearRef.current = null; setDraft(text); if (text.includes("\n") || text.length > 120) setExpanded(true); },
     restore: (text, restored = []) => {
       setDraft((current) => current || text);
       setExpanded(expandedBeforeClearRef.current ?? (text.includes("\n") || text.length > 120));
@@ -68,6 +68,8 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
     clear: () => { expandedBeforeClearRef.current = expanded; setDraft(""); setExpanded(false); resetAttachments(); },
     focus: () => textareaRef.current?.focus(),
   }), [expanded, resetAttachments, restoreAttachments]);
+
+  useEffect(() => { if (attachments.items.length) setExpanded(true); }, [attachments.items.length]);
 
   useEffect(() => {
     const element = textareaRef.current;
@@ -143,24 +145,27 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
   }
 
   const modelItems: MenuItem<ChatModel>[] = models.map((option) => ({ value: option.id, label: option.label, detail: option.description }));
-  const showExpandControl = expanded || draft.includes("\n") || draft.length > 120;
+  const showPromptLabel = draft.length > 0;
+  const hasAttachments = attachments.items.length > 0 || Boolean(attachments.notice);
 
   return <div ref={dockRef} className={`composer-dock${centered ? " is-centered" : ""}`}>
     {attachmentPanel}
     <div className={`composer${expanded ? " is-expanded" : ""}${dragging ? " is-dropping" : ""}`}>
-      <form ref={formRef} className="composer-form" onSubmit={(event) => { event.preventDefault(); submit(); }}>
-        <textarea ref={textareaRef} aria-label="Message Nibie" placeholder="Ask Nibie..." enterKeyHint={enterToSend ? "send" : "enter"} value={draft} rows={1} onChange={(event) => { expandedBeforeClearRef.current = null; setDraft(event.target.value); }} onKeyDown={handleKeyDown} />
+      <form ref={formRef} className={`composer-form${hasAttachments ? " has-attachments" : ""}${showPromptLabel ? " has-prompt-label" : ""}`} onSubmit={(event) => { event.preventDefault(); submit(); }}>
         <ComposerAttachments items={attachments.items} notice={attachments.notice} disabled={sending} onRemove={attachments.remove} onRetry={attachments.retry} />
+        {showPromptLabel ? <div className="composer-prompt-label"><span aria-hidden="true">Ask Nibie anything...</span><button className="composer-icon" type="button" aria-label={expanded ? "Collapse composer" : "Expand composer"} title={expanded ? "Collapse composer" : "Expand composer"} onClick={toggleExpanded}>{expanded ? <Minimize2 size={16} aria-hidden="true" /> : <Maximize2 size={16} aria-hidden="true" />}</button></div> : null}
+        <span className="composer-attach">
+          <button className="composer-icon" type="button" aria-label="Attach file" title="Attach file" aria-haspopup={attachmentsEnabled && onRoomFiles ? "menu" : undefined} aria-expanded={attachmentsEnabled && onRoomFiles ? attachMenuOpen : undefined} aria-pressed={attachmentsEnabled && onRoomFiles ? undefined : Boolean(attachmentPanel)} disabled={attachmentsEnabled && sending} onClick={plus}><Plus size={18} /></button>
+          {attachMenuOpen ? <span className="attach-menu" role="menu" aria-label="Attach">
+            <button type="button" role="menuitem" onClick={chooseFiles}><Paperclip size={14} aria-hidden="true" />Upload from device</button>
+            <button type="button" role="menuitemcheckbox" aria-checked={Boolean(attachmentPanel)} onClick={() => { setAttachMenuOpen(false); onRoomFiles?.(); }}><FileText size={14} aria-hidden="true" />Room files</button>
+          </span> : null}
+        </span>
+        <textarea ref={textareaRef} aria-label="Message Nibie" placeholder="Ask Nibie anything..." enterKeyHint={enterToSend ? "send" : "enter"} value={draft} rows={1} onChange={(event) => { const value = event.target.value; expandedBeforeClearRef.current = null; setDraft(value); if (value.includes("\n") || value.length > 120) setExpanded(true); }} onKeyDown={handleKeyDown} />
         {attachmentsEnabled ? <input ref={fileInputRef} className="composer-file-input" type="file" multiple accept={ATTACHMENT_ACCEPT} tabIndex={-1} aria-hidden="true" onChange={(event) => { attachments.add([...(event.target.files ?? [])]); event.target.value = ""; }} /> : null}
         <div className="composer-actions">
-          <span className="composer-attach">
-            <button className="composer-icon" type="button" aria-label="Attach file" title="Attach file" aria-haspopup={attachmentsEnabled && onRoomFiles ? "menu" : undefined} aria-expanded={attachmentsEnabled && onRoomFiles ? attachMenuOpen : undefined} aria-pressed={attachmentsEnabled && onRoomFiles ? undefined : Boolean(attachmentPanel)} disabled={attachmentsEnabled && sending} onClick={plus}><Plus size={18} /></button>
-            {attachMenuOpen ? <span className="attach-menu" role="menu" aria-label="Attach">
-              <button type="button" role="menuitem" onClick={chooseFiles}><Paperclip size={14} aria-hidden="true" />Upload from device</button>
-              <button type="button" role="menuitemcheckbox" aria-checked={Boolean(attachmentPanel)} onClick={() => { setAttachMenuOpen(false); onRoomFiles?.(); }}><FileText size={14} aria-hidden="true" />Room files</button>
-            </span> : null}
-          </span>
-          <div className="composer-actions-right"><ContextIndicator diagnostics={diagnostics} onEditProfile={onEditProfile} />{showExpandControl ? <button className="composer-icon" type="button" aria-label={expanded ? "Collapse composer" : "Expand composer"} title={expanded ? "Collapse composer" : "Expand composer"} onClick={toggleExpanded}>{expanded ? <Minimize2 size={16} aria-hidden="true" /> : <Maximize2 size={16} aria-hidden="true" />}</button> : null}{streaming ? <button key="stop" className="send-button" type="button" aria-label="Stop response" onClick={onStop}><X size={18} /></button> : <button key="send" className="send-button" type="submit" aria-label="Send message" disabled={!draft.trim() || sending || attachmentsBlocked}>{sending ? <span className="send-spinner" /> : <ArrowUp size={18} strokeWidth={2.3} />}</button>}</div>
+          <ContextIndicator diagnostics={diagnostics} onEditProfile={onEditProfile} />
+          {streaming ? <button key="stop" className="send-button" type="button" aria-label="Stop response" onClick={onStop}><X size={18} /></button> : <button key="send" className="send-button" type="submit" aria-label="Send message" disabled={!draft.trim() || sending || attachmentsBlocked}>{sending ? <span className="send-spinner" /> : <ArrowUp size={18} strokeWidth={2.3} />}</button>}
         </div>
       </form>
     </div>
