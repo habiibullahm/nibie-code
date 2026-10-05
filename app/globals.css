@@ -328,11 +328,13 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .conversation-scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 .conversation-scroll.is-empty { display: flex; align-items: center; justify-content: center; padding: 30px 20px; }
 .welcome-state { display: flex; flex-direction: column; align-items: center; gap: 24px; width: min(100%, 760px); }
-.welcome-state:has(.composer-form.has-draft) { gap: 4px; }
-.welcome-state:has(.composer-form.has-draft) > .welcome-panel { display: flex; flex-direction: column; align-items: center; }
-.welcome-state:has(.composer-form.has-draft) .welcome-panel > :not(.welcome-icon):not(.local-notice) { display: none; }
-.welcome-state:has(.composer-form.has-draft) .welcome-icon { width: 28px; height: 28px; margin: 0; border-radius: 9px; }
-.welcome-state:has(.composer-form.has-draft) .welcome-icon .brand-mark { width: 18px; height: 18px; }
+.welcome-state:has(.composer-form.has-draft) { gap: 12px; }
+.welcome-state:has(.composer-form.has-draft) .suggestion-list { display: none; }
+.welcome-state:has(.composer.is-expanded) { gap: 4px; }
+.welcome-state:has(.composer.is-expanded) > .welcome-panel { display: flex; flex-direction: column; align-items: center; width: auto; }
+.welcome-state:has(.composer.is-expanded) .welcome-panel > :not(.welcome-icon):not(.local-notice) { display: none; }
+.welcome-state:has(.composer.is-expanded) .welcome-icon { width: 28px; height: 28px; margin: 0; border-radius: 9px; }
+.welcome-state:has(.composer.is-expanded) .welcome-icon .brand-mark { width: 18px; height: 18px; }
 .welcome-panel { width: min(100%, 530px); text-align: center; }
 .welcome-icon { display: grid; place-items: center; width: 43px; height: 43px; margin: 0 auto 22px; border: 1px solid var(--border); border-radius: 14px; color: var(--accent); background: var(--bg-subtle); }
 .welcome-icon .brand-mark { width: 27px; height: 27px; }
@@ -378,7 +380,8 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .composer-form:not(.has-draft) .composer-attach { align-self: center; }
 .composer-form:not(.has-draft) > textarea { align-self: center; transform: translateY(-1px); }
 .composer-form:not(.has-draft) .send-button > svg { stroke-width: 2; }
-.composer.is-expanded textarea { max-height: min(45dvh, 440px); }
+.composer.is-expanded textarea { max-height: min(78dvh, 720px); }
+.composer.is-manually-expanded textarea { min-height: min(78dvh, 720px); }
 .composer textarea::-webkit-scrollbar { width: 6px; }
 .composer textarea::-webkit-scrollbar-track { background: transparent; }
 .composer textarea::-webkit-scrollbar-thumb { border-radius: 999px; background: var(--border-strong); }
@@ -642,7 +645,8 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 @media (max-width: 760px) {
   .composer { gap: 4px; padding: 6px 7px 5px; border-radius: 14px; }
   .composer-form { column-gap: 4px; row-gap: 4px; }
-  .composer.is-expanded textarea { max-height: min(42dvh, 260px); }
+  .composer.is-expanded textarea { max-height: min(70dvh, 520px); }
+  .composer.is-manually-expanded textarea { min-height: min(70dvh, 520px); }
   .composer-actions { gap: 3px; }
   .composer-left-tools .composer-menu-button, .composer-room-context { max-width: min(140px, 34vw); min-height: 38px; padding-inline: 4px; font-size: 11px; }
   .composer-left-tools > .composer-menu { position: static; }

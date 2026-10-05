@@ -49,6 +49,7 @@ type Props = {
 export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, streaming, mode, models, onModelChange, savingMode, caption, diagnostics, onEditProfile, onSubmit, onStop, onAttach, attachmentsEnabled = false, onRoomFiles, attachmentPanel = null, roomItems, roomId, roomLabel, roomSelectionNotice, roomsLoading, onRoomChange, centered = false }: Props) {
   const [draft, setDraft] = useState("");
   const [expanded, setExpanded] = useState(false);
+  const [manualExpanded, setManualExpanded] = useState(false);
   const [enterToSend] = useChatFlag("enterToSend");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -57,17 +58,20 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
   const attachments = useDraftAttachments();
   const { reset: resetAttachments, restore: restoreAttachments } = attachments;
   const expandedBeforeClearRef = useRef<boolean | null>(null);
+  const manualExpandedBeforeClearRef = useRef<boolean | null>(null);
   useImperativeHandle(ref, () => ({
-    set: (text) => { expandedBeforeClearRef.current = null; setDraft(text); if (text.includes("\n") || text.length > 120) setExpanded(true); },
+    set: (text) => { expandedBeforeClearRef.current = null; manualExpandedBeforeClearRef.current = null; setDraft(text); setManualExpanded(false); if (text.includes("\n") || text.length > 120) setExpanded(true); },
     restore: (text, restored = []) => {
       setDraft((current) => current || text);
       setExpanded(expandedBeforeClearRef.current ?? (text.includes("\n") || text.length > 120));
+      setManualExpanded(manualExpandedBeforeClearRef.current ?? false);
       expandedBeforeClearRef.current = null;
+      manualExpandedBeforeClearRef.current = null;
       restoreAttachments(restored);
     },
-    clear: () => { expandedBeforeClearRef.current = expanded; setDraft(""); setExpanded(false); resetAttachments(); },
+    clear: () => { expandedBeforeClearRef.current = expanded; manualExpandedBeforeClearRef.current = manualExpanded; setDraft(""); setExpanded(false); setManualExpanded(false); resetAttachments(); },
     focus: () => textareaRef.current?.focus(),
-  }), [expanded, resetAttachments, restoreAttachments]);
+  }), [expanded, manualExpanded, resetAttachments, restoreAttachments]);
 
   useEffect(() => { if (attachments.items.length) setExpanded(true); }, [attachments.items.length]);
 
@@ -136,7 +140,9 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
   function toggleExpanded() {
     const textarea = textareaRef.current;
     const selection = textarea ? { start: textarea.selectionStart, end: textarea.selectionEnd, direction: textarea.selectionDirection } : null;
-    setExpanded((value) => !value);
+    const nextExpanded = !expanded;
+    setExpanded(nextExpanded);
+    setManualExpanded(nextExpanded);
     requestAnimationFrame(() => {
       if (!textarea) return;
       textarea.focus({ preventScroll: true });
@@ -150,7 +156,7 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
 
   return <div ref={dockRef} className={`composer-dock${centered ? " is-centered" : ""}`}>
     {attachmentPanel}
-    <div className={`composer${expanded ? " is-expanded" : ""}${dragging ? " is-dropping" : ""}`}>
+    <div className={`composer${expanded ? " is-expanded" : ""}${manualExpanded ? " is-manually-expanded" : ""}${dragging ? " is-dropping" : ""}`}>
       <form ref={formRef} className={`composer-form${hasAttachments ? " has-attachments" : ""}${hasDraft ? " has-draft" : ""}`} onSubmit={(event) => { event.preventDefault(); submit(); }}>
         <ComposerAttachments items={attachments.items} notice={attachments.notice} disabled={sending} onRemove={attachments.remove} onRetry={attachments.retry} />
         <span className="composer-attach">
@@ -164,7 +170,7 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
         {attachmentsEnabled ? <input ref={fileInputRef} className="composer-file-input" type="file" multiple accept={ATTACHMENT_ACCEPT} tabIndex={-1} aria-hidden="true" onChange={(event) => { attachments.add([...(event.target.files ?? [])]); event.target.value = ""; }} /> : null}
         <div className="composer-actions">
           <ContextIndicator diagnostics={diagnostics} onEditProfile={onEditProfile} />
-          {hasDraft ? <button className="composer-icon" type="button" aria-label={expanded ? "Collapse composer" : "Expand composer"} title={expanded ? "Collapse composer" : "Expand composer"} onClick={toggleExpanded}>{expanded ? <Minimize2 size={16} aria-hidden="true" /> : <Maximize2 size={16} aria-hidden="true" />}</button> : null}
+          <button className="composer-icon" type="button" aria-label={expanded ? "Collapse composer" : "Expand composer"} title={expanded ? "Collapse composer" : "Expand composer"} onClick={toggleExpanded}>{expanded ? <Minimize2 size={16} aria-hidden="true" /> : <Maximize2 size={16} aria-hidden="true" />}</button>
           {streaming ? <button key="stop" className="send-button" type="button" aria-label="Stop response" onClick={onStop}><X size={18} /></button> : <button key="send" className="send-button" type="submit" aria-label="Send message" disabled={!draft.trim() || sending || attachmentsBlocked}>{sending ? <span className="send-spinner" /> : <ArrowUp size={18} strokeWidth={2.3} />}</button>}
         </div>
       </form>
