@@ -23,6 +23,7 @@ What's new in Nibie.
 
 ### Fixed
 
+- Stop is now decided on the server. A stopped reply keeps exactly the text that was on screen and stays marked Stopped after a reload or the next message, even if the model finished in the meantime. The server stops the generation within about a second, even when the host does not pass the browser disconnect on. A reply stopped before any text shows "Response stopped." instead of "…". Repeating Stop changes nothing, and sending right after Stop still works ([#12](https://github.com/habiibullahm/nibie-code/issues/12)).
 - The integration test suite resolves the `@/` import alias again, so the row-level security tests can run.
 
 ### Known issues

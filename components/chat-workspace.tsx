@@ -36,6 +36,7 @@ import { ChatStreamServerError, readChatSse } from "@/lib/ai/sse";
 import { compareNames, compareText } from "@/lib/chat/order";
 import { readRoomFileSelection, rememberRoomFileSelection } from "@/lib/files/selection-memory";
 import { abortLiveChatStream, finishLiveChatStream, liveChatConversationId, shouldStopLiveChatOnLeave, startLiveChatStream } from "@/lib/chat/live-stream";
+import { stoppedContent, type StopRequest } from "@/lib/chat/stop";
 import { activeAssistantId, classifyStreamFailure, hasActiveGeneration, isRecoverySettled, isRegressiveSnapshot, latestReplyFailed, messagePersistenceConfirmed, needsServerCheck, recoveryPollAction, recoveryPollMs, unseenGenerationSettled } from "@/lib/chat/recovery";
 
 type Conversation = ConversationSummary & { messages: PersistedMessage[] };
@@ -135,7 +136,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const streamController = useRef<AbortController | null>(null);
   const stopGeneration = useRef<(() => void) | null>(null);
   const userStopEpoch = useRef(0);
-  const stoppedReplies = useRef(new Map<string, Set<string>>());
+  const stoppedReplies = useRef(new Map<string, Map<string, StopRequest>>());
   const recoveryEpoch = useRef(0);
   const [acceptedMessages, setAcceptedMessages] = useState<PersistedMessage[]>(initialData?.messages ?? []);
   const acceptedMessagesRef = useRef(acceptedMessages);
@@ -432,6 +433,8 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     let assistantId: string | null = null;
     let httpStatus: number | undefined;
     let buffer = "";
+    // Every reply character received, shown or still buffered; after a flush it is exactly the text on screen.
+    let received = "";
     let flushTimer: ReturnType<typeof setTimeout> | null = null;
     let shown = false;
     const flush = () => {
@@ -446,11 +449,13 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     const stopOwnedGeneration = () => {
       if (streamController.current !== controller || controller.signal.aborted) return;
       flush();
+      // The server keeps exactly this text for the stopped reply, so what the user sees now is what a reload shows.
+      const stop: StopRequest = { userMessageId, assistantId, content: received };
       if (assistantId) setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId
-        ? { ...message, content: message.content || "Response stopped.", status: "interrupted", terminationReason: "user_stopped" } : message) }));
+        ? { ...message, content: stoppedContent(received), status: "interrupted", terminationReason: "user_stopped" } : message) }));
       else clearPlaceholder();
-      const stops = stoppedReplies.current.get(id) ?? new Set<string>();
-      stops.add(userMessageId);
+      const stops = stoppedReplies.current.get(id) ?? new Map<string, StopRequest>();
+      stops.set(userMessageId, stop);
       stoppedReplies.current.set(id, stops);
       userStopEpoch.current += 1;
       controller.abort("user_stopped");
@@ -461,7 +466,9 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
       setSending(false); setStreaming(false); setAssistantActivity("idle");
       // The background acknowledgement is never a condition for using the composer. It is a plain request, not a
       // Server Action, because Next runs Server Actions one at a time and the next message's save must not queue behind it.
-      void fetch("/api/chat/stop", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: id, userMessageId }), keepalive: true })
+      // keepalive lets the Stop outlive a closing tab, but browsers cap keepalive bodies at 64 KiB.
+      const stopBody = JSON.stringify({ conversationId: id, ...stop });
+      void fetch("/api/chat/stop", { method: "POST", headers: { "content-type": "application/json" }, body: stopBody, keepalive: new Blob([stopBody]).size < 60_000 })
         .then(async (response) => {
           if (!response.ok) reportStopFailure(id, (await response.json().catch(() => null))?.error ?? failureNotice);
         }).catch(() => reportStopFailure(id, failureNotice));
@@ -480,7 +487,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
           const reply: PersistedMessage = { id: data.id, role: "assistant", content: "", position: data.position, status: "streaming", created_at: new Date().toISOString() };
           setLocalMessages((items) => { const rows = items[id] ?? []; return { ...items, [id]: options.placeholderId && rows.some((row) => row.id === options.placeholderId) ? rows.map((row) => row.id === options.placeholderId ? reply : row) : [...rows, reply] }; });
         }
-        if (data.type === "delta") { setAssistantActivity("streaming"); buffer += data.text; if (!shown) flush(); else if (!flushTimer) flushTimer = setTimeout(flush, streamFlushMs); }
+        if (data.type === "delta") { setAssistantActivity("streaming"); buffer += data.text; received += data.text; if (!shown) flush(); else if (!flushTimer) flushTimer = setTimeout(flush, streamFlushMs); }
         if (data.type === "status") { flush(); setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId ? { ...message, content: message.content || "Response stopped.", status: data.status } : message) })); }
       }
       flush();
@@ -566,12 +573,12 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
         setPendingDraft(false);
         router.push(conversationPath(conversation.id));
       } else {
-        const stopped = [...(stoppedReplies.current.get(id) ?? [])];
+        const stopped = [...(stoppedReplies.current.get(id)?.values() ?? [])];
         const result = await addUserMessageAction(id, content, messageId, stopped, ...withAttachments);
         if (result.error || !result.data) { rollback(result.error ?? "Message couldn't be saved.", id); return; }
         saved = result.data;
         const pendingStops = stoppedReplies.current.get(id);
-        for (const stoppedId of stopped) pendingStops?.delete(stoppedId);
+        for (const stop of stopped) if (pendingStops?.get(stop.userMessageId) === stop) pendingStops.delete(stop.userMessageId);
         if (!pendingStops?.size) stoppedReplies.current.delete(id);
       }
       submission.current = null;

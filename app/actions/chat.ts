@@ -9,6 +9,7 @@ import { getModelOptions } from "@/lib/ai/registry";
 import { logError, logInfo } from "@/lib/observability/logger";
 import { operationalCodes } from "@/lib/observability/codes";
 import { attachmentErrors, parseAttachmentIds } from "@/lib/attachments/rules";
+import { parseStopRequest, parseStopRequests, stopDecision, stoppedContent, type StopRequest } from "@/lib/chat/stop";
 
 export type ChatActionResult<T = undefined> = { data?: T; error?: string };
 type ConversationRow = { id: string; title: string; selected_model: string; room_id: string | null; created_at: string; updated_at: string };
@@ -50,48 +51,51 @@ async function insertConversation(supabase: Supabase, userId: string, model: Cha
   return { data: { ...(legacy.data as unknown as Omit<ConversationRow, "room_id">), room_id: null }, error: null };
 }
 
-function parseStoppedReplies(value: unknown): string[] | null {
-  if (!Array.isArray(value) || value.length > 32) return null;
-  const ids: string[] = [];
-  for (const id of value) {
-    const parsed = validateConversationId(id);
-    if (!parsed.success) return null;
-    ids.push(parsed.data);
-  }
-  return [...new Set(ids)];
-}
-
-// Retire only this owner's reply to the explicitly stopped user message.
-// No content is written here: the original stream owns that one final save.
-async function retireStoppedReplies(supabase: Supabase, conversationId: string, ids: readonly string[]) {
-  for (const id of ids) {
-    const owned = await supabase.from("messages").select("id").eq("id", id).eq("conversation_id", conversationId).eq("role", "user").maybeSingle();
+// Applies explicit Stops: each reply keeps exactly the text its user saw and becomes interrupted.
+// Only this owner's reply to the stopped user message is touched (RLS also scopes every query to the owner).
+// The generation sees the interrupted row and stops itself; its late saves only apply while the row is still streaming.
+async function stopReplies(supabase: Supabase, conversationId: string, stops: readonly StopRequest[]) {
+  for (const stop of stops) {
+    const owned = await supabase.from("messages").select("id").eq("id", stop.userMessageId).eq("conversation_id", conversationId).eq("role", "user").maybeSingle();
     if (owned.error || !owned.data) return false;
-    const retired = await supabase.from("messages").update({ status: "interrupted" })
-      .eq("conversation_id", conversationId).eq("reply_to_message_id", id).eq("role", "assistant").eq("status", "streaming").select("id");
-    if (retired.error) return false;
-    if (retired.data?.length) logInfo("chat.response.user_stopped", { reason: "user_stopped", status: "interrupted" });
+    // The row can change between the read and the guarded write (the stream finishing, or another Stop); read it again then.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      let read = supabase.from("messages").select("id,status,content").eq("conversation_id", conversationId).eq("reply_to_message_id", stop.userMessageId).eq("role", "assistant");
+      // A known reply id keeps a late Stop from reaching a newer reply to the same message (Retry after Stop).
+      if (stop.assistantId) read = read.eq("id", stop.assistantId);
+      const reply = await read.maybeSingle<{ id: string; status: string; content: string }>();
+      if (reply.error) return false;
+      // Nothing claimed yet: the claim cannot start once the next message is saved, and the stopped stream never reached the user.
+      if (!reply.data || stopDecision(reply.data, stop.content) !== "write") break;
+      const written = await supabase.from("messages").update({ status: "interrupted", content: stoppedContent(stop.content ?? "") })
+        .eq("id", reply.data.id).eq("status", reply.data.status).select("id");
+      if (written.error) return false;
+      if (written.data?.length) {
+        logInfo("chat.response.user_stopped", { reason: "user_stopped", status: "interrupted", previousStatus: reply.data.status });
+        break;
+      }
+    }
   }
   return true;
 }
 
-export async function stopChatResponseAction(conversationId: unknown, userMessageId: unknown): Promise<ChatActionResult> {
+export async function stopChatResponseAction(conversationId: unknown, userMessageId: unknown, assistantId: unknown = null, content: unknown = null): Promise<ChatActionResult> {
   const conversation = validateConversationId(conversationId);
-  const message = validateConversationId(userMessageId);
-  if (!conversation.success || !message.success) return { error: "Choose a valid message." };
+  const stop = parseStopRequest(userMessageId, assistantId, content);
+  if (!conversation.success || !stop) return { error: "Choose a valid message." };
   try {
     const { supabase } = await authenticatedClient();
-    if (await retireStoppedReplies(supabase, conversation.data, [message.data])) return {};
+    if (await stopReplies(supabase, conversation.data, [stop])) return {};
   } catch { /* report a safe background-persistence failure below */ }
   logError("chat.persistence.failed", { code: operationalCodes.assistantPersistFailed, reason: "user_stopped", stage: "stop" });
   return failure();
 }
 
 // The same message id makes the append idempotent, including the one allowed
-// retry when a cancelled claim committed between stop retirement and append.
+// retry when a cancelled claim committed between the Stop and the append.
 // With attachments, the message and its attachment links are saved in one transaction (see 0009_chat_attachments.sql).
-async function appendMessage(supabase: Supabase, conversationId: string, messageId: string, content: string, stopped: readonly string[] = [], attachmentIds: readonly string[] = []): Promise<{ data: SavedMessage } | { error: string }> {
-  if (stopped.length && !await retireStoppedReplies(supabase, conversationId, stopped)) return { error: saveFailed };
+async function appendMessage(supabase: Supabase, conversationId: string, messageId: string, content: string, stopped: readonly StopRequest[] = [], attachmentIds: readonly string[] = []): Promise<{ data: SavedMessage } | { error: string }> {
+  if (stopped.length && !await stopReplies(supabase, conversationId, stopped)) return { error: saveFailed };
   const append = () => attachmentIds.length
     ? supabase.rpc("append_user_message_with_attachments", {
       p_conversation_id: conversationId, p_message_id: messageId, p_content: content, p_attachment_ids: [...attachmentIds],
@@ -100,7 +104,7 @@ async function appendMessage(supabase: Supabase, conversationId: string, message
       p_conversation_id: conversationId, p_message_id: messageId, p_content: content,
     }).single<SavedMessage>();
   let result = await append();
-  if (result.error?.code === "PT409" && stopped.length && await retireStoppedReplies(supabase, conversationId, stopped)) result = await append();
+  if (result.error?.code === "PT409" && stopped.length && await stopReplies(supabase, conversationId, stopped)) result = await append();
   const { data, error } = result;
   if (attachmentIds.length) {
     if (error?.code === "PT409" && error.message === "Attachment unavailable.") return { error: attachmentErrors.unavailable };
@@ -180,7 +184,7 @@ export async function addUserMessageAction(id: unknown, content: unknown, messag
   if (!parsedAttachments.ok) return { error: attachmentErrors.tooMany };
   const parsedId = validateConversationId(id);
   const parsedContent = validateMessage(content);
-  const stopped = parseStoppedReplies(stoppedReplies);
+  const stopped = parseStopRequests(stoppedReplies);
   if (!stopped) return { error: "Choose a valid message." };
   if (!parsedId.success) return { error: "Choose a valid conversation." };
   if (!parsedContent.success) return { error: "Messages must be between 1 and 20,000 characters." };

@@ -12,7 +12,8 @@ export async function POST(request: Request) {
   if (request.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== "application/json") return NextResponse.json({ error: "A JSON request is required." }, { status: 415 });
   let body: unknown;
   try { body = await request.json(); } catch { return NextResponse.json({ error: "Invalid request." }, { status: 400 }); }
-  const value = body as { conversationId?: unknown; userMessageId?: unknown } | null;
-  const result = await stopChatResponseAction(value?.conversationId, value?.userMessageId);
+  const value = body as { conversationId?: unknown; userMessageId?: unknown; assistantId?: unknown; content?: unknown } | null;
+  // `content` is the exact reply text the user saw when they pressed Stop; the reply keeps it.
+  const result = await stopChatResponseAction(value?.conversationId, value?.userMessageId, value?.assistantId, value?.content);
   return result.error ? NextResponse.json({ error: result.error }, { status: 503 }) : NextResponse.json({});
 }

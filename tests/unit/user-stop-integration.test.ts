@@ -7,11 +7,14 @@ vi.mock("@/lib/ai/registry", () => ({
   contextCapabilitiesFor: () => ({ contextWindowTokens: 16384, maxOutputTokens: 2048 }),
   providerFor: () => "openai",
 }));
+// The generation notices a server-side Stop on its next status check; a short interval keeps these tests fast.
+vi.mock("@/lib/chat/stop", async (original) => ({ ...await original<typeof import("../../lib/chat/stop")>(), stopPollMs: 5 }));
 import { POST } from "../../app/api/chat/route";
 import { POST as stopRoute } from "../../app/api/chat/stop/route";
 import { addUserMessageAction, stopChatResponseAction } from "../../app/actions/chat";
-import { readChatSse } from "../../lib/ai/sse";
+import { readChatSse, type ChatStreamEvent } from "../../lib/ai/sse";
 import { messagePersistenceConfirmed } from "../../lib/chat/recovery";
+import { stopDecision, stoppedContent } from "../../lib/chat/stop";
 
 const conversation = "5e9bdcca-9205-4fea-a773-13952bb78c44";
 const firstUser = "b79e56e1-b479-46f4-97d3-30b2e22be90e";
@@ -20,37 +23,37 @@ const firstAssistant = "e3b624e6-d792-47a8-8ff2-46724452c1ca";
 const secondAssistant = "22222222-2222-4222-8222-222222222222";
 type Row = { id: string; conversation_id: string; role: string; content: string; status: string; position: number; reply_to_message_id?: string };
 const encoder = new TextEncoder();
-function deferred() { let resolve!: () => void; const promise = new Promise<void>((done) => { resolve = done; }); return { promise, resolve }; }
+const delta = (text: string) => encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`);
+const finish = encoder.encode('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
 
-function database(mode: string, failSave = false, lateClaim = false) {
+// A small owner-scoped messages table with the claim/append rules of 0001_chat_generation_safety.sql.
+function database(mode: string, options: { lateClaim?: boolean; failStopWrite?: boolean } = {}) {
   const rows: Row[] = [{ id: firstUser, conversation_id: conversation, role: "user", content: "First", status: "complete", position: 1 }];
-  const contentGate = deferred(), stopAck = deferred();
-  let stoppedContentWrites = 0, stoppedStatusWrites = 0, appendCalls = 0;
+  const writes: { id?: string; write: Partial<Row>; applied: number }[] = [];
+  let appendCalls = 0; let lateClaim = options.lateClaim ?? false;
   function from(table: string) {
     const filters: ((row: Row) => boolean)[] = [];
-    let write: Partial<Row> | undefined, single = false;
+    let write: Partial<Row> | undefined;
     const query = {
       select: () => query, order: () => query, limit: () => query,
       eq: (key: keyof Row, value: unknown) => { filters.push((row) => row[key] === value); return query; },
       in: (key: keyof Row, values: unknown[]) => { filters.push((row) => values.includes(row[key])); return query; },
       update: (value: Partial<Row>) => { write = value; return query; },
-      maybeSingle: () => { single = true; return execute(); },
-      then: (resolve: (value: unknown) => unknown) => execute().then(resolve),
+      maybeSingle: () => execute(true),
+      then: (resolve: (value: unknown) => unknown) => execute(false).then(resolve),
     };
-    async function execute() {
+    async function execute(single: boolean) {
       if (table === "user_preferences") return { data: null, error: null };
+      if (table === "message_attachments") return { data: [], error: null };
       if (table === "conversations") return { data: { id: conversation, selected_model: mode, room_id: null }, error: null };
-      if (write?.content !== undefined && filters.some((filter) => filter({ ...rows[0], id: firstAssistant }))) {
-        stoppedContentWrites++;
-        await contentGate.promise;
-        if (failSave) return { data: null, error: { code: "XX000" } };
-      }
       const matches = rows.filter((row) => filters.every((filter) => filter(row)));
       if (write) {
+        if (options.failStopWrite && write.status === "interrupted" && write.content !== undefined && matches.some((row) => row.status === "streaming")) return { data: null, error: { code: "XX000" } };
         for (const row of matches) Object.assign(row, write);
-        if (write.content === undefined && matches.length) { stoppedStatusWrites++; await stopAck.promise; }
+        writes.push({ id: matches[0]?.id, write, applied: matches.length });
       }
-      return { data: single ? matches[0] ?? null : [...matches].sort((left, right) => right.position - left.position), error: null };
+      const data = matches.map((row) => ({ ...row }));
+      return { data: single ? data[0] ?? null : data.sort((left, right) => right.position - left.position), error: null };
     }
     return query;
   }
@@ -65,85 +68,224 @@ function database(mode: string, failSave = false, lateClaim = false) {
       rows.push(row); return { data: row, error: null };
     }
     const old = rows.find((row) => row.reply_to_message_id === args.p_user_message_id);
-    if (old || rows.some((row) => row.status === "streaming")) return { data: null, error: { code: "PT409" } };
-    const row: Row = { id: args.p_user_message_id === firstUser ? firstAssistant : secondAssistant, conversation_id: conversation, role: "assistant", content: "…", status: "streaming", position: Math.max(...rows.map((item) => item.position)) + 1, reply_to_message_id: args.p_user_message_id };
+    if (old?.status === "complete") return { data: { ...old, replayed: true }, error: null };
+    if (rows.some((row) => row.status === "streaming")) return { data: null, error: { code: "PT409" } };
+    if (old) rows.splice(rows.indexOf(old), 1);
+    const id = args.p_user_message_id === firstUser ? old ? "44444444-4444-4444-8444-444444444444" : firstAssistant : secondAssistant;
+    const row: Row = { id, conversation_id: conversation, role: "assistant", content: "…", status: "streaming", position: old?.position ?? Math.max(...rows.map((item) => item.position)) + 1, reply_to_message_id: args.p_user_message_id };
     rows.push(row); return { data: { ...row, replayed: false }, error: null };
   } }));
   createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc });
-  return { rows, contentGate, stopAck, rpc, counts: () => ({ stoppedContentWrites, stoppedStatusWrites, appendCalls }) };
+  const reply = (id = firstAssistant) => rows.find((row) => row.id === id);
+  const contentWrites = (id = firstAssistant) => writes.filter((entry) => entry.id === id && entry.applied && entry.write.content !== undefined);
+  return { rows, writes, rpc, reply, contentWrites, appendCalls: () => appendCalls };
 }
-function request(user: string) { return new Request("http://localhost/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: conversation, userMessageId: user }) }); }
+
+// A provider stream that sends `parts`, then stays open (a long High reply still being written) until it is cancelled or released.
+function openProvider(parts: string[]) {
+  let release!: () => void;
+  const cancelled = vi.fn();
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const part of parts) controller.enqueue(delta(part));
+      release = () => { try { controller.enqueue(delta(" and the rest of a complete answer.")); controller.enqueue(finish); controller.close(); } catch { /* already cancelled */ } };
+    },
+    cancel: cancelled,
+  });
+  return { body, cancelled, release: () => release() };
+}
+function completeProvider(text: string) {
+  return new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(delta(text)); controller.enqueue(finish); controller.close(); } });
+}
+// The hosted case from issue #12: the browser has gone, but nothing ever aborts request.signal.
+function request(user: string, regenerate = false) {
+  return new Request("http://localhost/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: conversation, userMessageId: user, ...(regenerate ? { regenerate } : {}) }) });
+}
+// Reads events until `until` matches, leaving the rest of the stream to `rest()`.
+async function readUntil(response: Response, until: (event: ChatStreamEvent) => boolean) {
+  const events: ChatStreamEvent[] = [];
+  const iterator = readChatSse(response.body!)[Symbol.asyncIterator]();
+  for (;;) {
+    const next = await iterator.next();
+    if (next.done) return { events, rest: async () => events };
+    events.push(next.value);
+    if (until(next.value)) break;
+  }
+  return { events, rest: async () => { for (let next = await iterator.next(); !next.done; next = await iterator.next()) events.push(next.value); return events; } };
+}
+const shown = (events: ChatStreamEvent[]) => events.flatMap((event) => event.type === "delta" ? [event.text] : []).join("");
 afterEach(() => { vi.restoreAllMocks(); provider.mockReset(); createClient.mockReset(); });
 
-describe("main chat route/action Stop handoff", () => {
-  it.each(["Fast", "Balanced", "High"])("starts a new %s request while stopped partial-save and stop acknowledgement are pending", async (mode) => {
+describe("server-authoritative Stop (issue #12)", () => {
+  it.each(["Fast", "Balanced", "High"])("%s: Stop reaches the running generation, aborts the provider and keeps exactly the text shown", async (mode) => {
     const db = database(mode);
-    const cancelled = vi.fn();
-    provider.mockResolvedValueOnce(new ReadableStream<Uint8Array>({ start(controller) {
-      controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"Partial first"}}]}\n\n'));
-    }, cancel: cancelled })).mockResolvedValueOnce(new ReadableStream<Uint8Array>({ start(controller) {
-      controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"Second complete"}}]}\n\ndata: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')); controller.close();
-    } }));
-    const first = await POST(request(firstUser));
-    const reader = first.body!.getReader();
-    await reader.read(); await reader.read();
-    await reader.cancel();
-    await vi.waitFor(() => expect(db.counts().stoppedContentWrites).toBe(1));
-    let acknowledged = false;
-    const stop = stopChatResponseAction(conversation, firstUser).then((result) => { acknowledged = true; return result; });
-    await vi.waitFor(() => expect(db.rows.find((row) => row.id === firstAssistant)?.status).toBe("interrupted"));
-    expect(acknowledged).toBe(false);
-    const next = await addUserMessageAction(conversation, "Second", secondUser, [firstUser]);
-    expect(next.error).toBeUndefined();
-    const second = await POST(request(secondUser));
-    expect((await Array.fromAsync(readChatSse(second.body!))).at(-2)).toEqual({ type: "status", status: "complete" });
-    expect(provider).toHaveBeenCalledTimes(2);
-    expect(provider.mock.calls.map((call) => call[0])).toEqual([mode, mode]);
-    expect(acknowledged).toBe(false);
-    expect(db.rows.find((row) => row.id === firstAssistant)?.content).toBe("…");
-    db.contentGate.resolve(); db.stopAck.resolve();
-    await expect(stop).resolves.toEqual({});
-    await vi.waitFor(() => expect(db.rows.find((row) => row.id === firstAssistant)?.content).toBe("Partial first"));
-    expect(db.counts()).toEqual({ stoppedContentWrites: 1, stoppedStatusWrites: 1, appendCalls: 1 });
-    expect(db.rows.filter((row) => row.role === "assistant")).toHaveLength(2);
-    expect(db.rows.find((row) => row.id === firstAssistant)?.status).toBe("interrupted");
-    expect(cancelled).toHaveBeenCalledOnce();
+    const upstream = openProvider(["Partial ", "first"]);
+    provider.mockResolvedValueOnce(upstream.body);
+    const live = await readUntil(await POST(request(firstUser)), (event) => event.type === "delta" && event.text === "first");
+    const visible = shown(live.events);
+    expect(visible).toBe("Partial first");
+
+    await expect(stopChatResponseAction(conversation, firstUser, firstAssistant, visible)).resolves.toEqual({});
+    expect(db.reply()).toMatchObject({ status: "interrupted", content: "Partial first" });
+    // 1-2. The generation sees the stopped row and stops the provider itself; request.signal never aborted.
+    await vi.waitFor(() => expect(upstream.cancelled).toHaveBeenCalledOnce());
+    expect(provider.mock.calls[0][0]).toBe(mode);
+    expect((provider.mock.calls[0][2] as AbortSignal).aborted).toBe(true);
+    const events = await live.rest();
+    expect(events.slice(-2)).toEqual([{ type: "status", status: "interrupted" }, { type: "done" }]);
+    // 3-4. The exact partial, as interrupted; the generation never wrote its own content over it.
+    expect(db.reply()).toMatchObject({ status: "interrupted", content: "Partial first" });
+    expect(db.contentWrites()).toHaveLength(1);
   });
 
-  it("records a stopped-content persistence failure without blocking the next message or overwriting the local partial", async () => {
+  it("keeps what the user saw even when the server had produced more by the time Stop landed", async () => {
+    const db = database("High");
+    const upstream = openProvider(["Seen text", " that never reached the screen"]);
+    provider.mockResolvedValueOnce(upstream.body);
+    const live = await readUntil(await POST(request(firstUser)), (event) => event.type === "delta");
+    await stopChatResponseAction(conversation, firstUser, firstAssistant, shown(live.events));
+    await live.rest();
+    expect(db.reply()).toMatchObject({ status: "interrupted", content: "Seen text" });
+  });
+
+  it("5/9. a generation that finishes after Stop cannot complete or overwrite the stopped reply", async () => {
+    const db = database("High");
+    const upstream = openProvider(["Half an answer"]);
+    provider.mockResolvedValueOnce(upstream.body);
+    const live = await readUntil(await POST(request(firstUser)), (event) => event.type === "delta");
+    await stopChatResponseAction(conversation, firstUser, firstAssistant, "Half an answer");
+    upstream.release(); // the provider finishes before the generation's next status check
+    const events = await live.rest();
+    expect(events).not.toContainEqual({ type: "status", status: "complete" });
+    expect(events.some((event) => event.type === "error")).toBe(false);
+    expect(db.reply()).toMatchObject({ status: "interrupted", content: "Half an answer" });
+    expect(db.contentWrites()).toHaveLength(1);
+    // Retrying the same message starts a fresh reply: no completed answer was ever saved to replay.
+    provider.mockResolvedValueOnce(completeProvider("Fresh answer"));
+    const retry = await Array.fromAsync(readChatSse((await POST(request(firstUser, true))).body!));
+    expect(shown(retry)).toBe("Fresh answer");
+  });
+
+  it("5. a Stop that lands after the generation saved its completed answer still leaves the reply stopped", async () => {
+    const db = database("High");
+    provider.mockResolvedValueOnce(completeProvider("Complete answer with more words"));
+    await Array.fromAsync(readChatSse((await POST(request(firstUser))).body!));
+    expect(db.reply()).toMatchObject({ status: "complete", content: "Complete answer with more words" });
+    // The user pressed Stop while "Complete answer" was on screen; the completion was still on its way to the browser.
+    await expect(stopChatResponseAction(conversation, firstUser, firstAssistant, "Complete answer")).resolves.toEqual({});
+    expect(db.reply()).toMatchObject({ status: "interrupted", content: "Complete answer" });
+    // A reload reads the same row: never the completed answer.
+    expect(messagePersistenceConfirmed({ role: "assistant", content: "Complete answer", terminationReason: "user_stopped" }, db.reply()!)).toBe(true);
+  });
+
+  it("6. Stop before any text keeps a readable notice, never the claim placeholder", async () => {
+    const db = database("High");
+    const upstream = openProvider([]);
+    provider.mockResolvedValueOnce(upstream.body);
+    const live = await readUntil(await POST(request(firstUser)), (event) => event.type === "start");
+    expect(db.reply()?.content).toBe("…");
+    await stopChatResponseAction(conversation, firstUser, firstAssistant, "");
+    await live.rest();
+    expect(db.reply()).toMatchObject({ status: "interrupted", content: "Response stopped." });
+    expect(db.rows.some((row) => row.content === "…")).toBe(false);
+  });
+
+  it("7. repeated Stop is idempotent and a Stop can never put different words in a reply", async () => {
+    const db = database("Balanced");
+    const upstream = openProvider(["Stopped here"]);
+    provider.mockResolvedValueOnce(upstream.body);
+    const live = await readUntil(await POST(request(firstUser)), (event) => event.type === "delta");
+    for (let index = 0; index < 3; index++) await expect(stopChatResponseAction(conversation, firstUser, firstAssistant, "Stopped here")).resolves.toEqual({});
+    await expect(stopChatResponseAction(conversation, firstUser, firstAssistant, "Something else entirely")).resolves.toEqual({});
+    await live.rest();
+    expect(db.contentWrites()).toHaveLength(1);
+    expect(db.reply()).toMatchObject({ status: "interrupted", content: "Stopped here" });
+  });
+
+  it.each(["Fast", "Balanced", "High"])("8. %s: Stop then an immediate Send works before the Stop acknowledgement arrives", async (mode) => {
+    const db = database(mode);
+    const upstream = openProvider(["Partial first"]);
+    provider.mockResolvedValueOnce(upstream.body).mockResolvedValueOnce(completeProvider("Second complete"));
+    const live = await readUntil(await POST(request(firstUser)), (event) => event.type === "delta");
+    // The next message carries the Stop, so it does not depend on the background acknowledgement.
+    const stop = { userMessageId: firstUser, assistantId: firstAssistant, content: "Partial first" };
+    await expect(addUserMessageAction(conversation, "Second", secondUser, [stop])).resolves.toMatchObject({ data: { id: secondUser } });
+    const second = await Array.fromAsync(readChatSse((await POST(request(secondUser))).body!));
+    expect(second.slice(-2)).toEqual([{ type: "status", status: "complete" }, { type: "done" }]);
+    // The acknowledgement lands late and changes nothing.
+    await expect(stopChatResponseAction(conversation, firstUser, firstAssistant, "Partial first")).resolves.toEqual({});
+    await live.rest();
+    await vi.waitFor(() => expect(upstream.cancelled).toHaveBeenCalledOnce());
+    expect(db.reply()).toMatchObject({ status: "interrupted", content: "Partial first" });
+    expect(db.reply(secondAssistant)).toMatchObject({ status: "complete", content: "Second complete" });
+    expect(db.contentWrites()).toHaveLength(1);
+    expect(provider.mock.calls.map((call) => call[0])).toEqual([mode, mode]);
+  });
+
+  it("a browser disconnect without Stop still saves the generation's partial as interrupted", async () => {
+    const db = database("High");
+    const upstream = openProvider(["Kept on disconnect"]);
+    provider.mockResolvedValueOnce(upstream.body);
+    const reader = (await POST(request(firstUser))).body!.getReader();
+    await reader.read(); await reader.read();
+    await reader.cancel();
+    await vi.waitFor(() => expect(db.reply()).toMatchObject({ status: "interrupted", content: "Kept on disconnect" }));
+    // A Stop that follows the disconnect cuts it back to exactly what was on screen.
+    await stopChatResponseAction(conversation, firstUser, firstAssistant, "Kept on");
+    expect(db.reply()).toMatchObject({ status: "interrupted", content: "Kept on" });
+  });
+
+  it("a late Stop for an earlier reply never reaches a newer reply to the same message", async () => {
+    const db = database("Fast");
+    db.rows.push({ id: firstAssistant, conversation_id: conversation, role: "assistant", content: "Old partial", status: "interrupted", position: 2, reply_to_message_id: firstUser });
+    const upstream = openProvider(["New attempt"]);
+    provider.mockResolvedValueOnce(upstream.body);
+    const live = await readUntil(await POST(request(firstUser, true)), (event) => event.type === "delta");
+    const retried = db.rows.find((row) => row.role === "assistant")!;
+    expect(retried).toMatchObject({ status: "streaming", content: "…" });
+    await expect(stopChatResponseAction(conversation, firstUser, firstAssistant, "Old")).resolves.toEqual({});
+    expect(retried.status).toBe("streaming");
+    upstream.release();
+    await live.rest();
+    expect(retried).toMatchObject({ status: "complete", content: "New attempt and the rest of a complete answer." });
+  });
+
+  it("reports a Stop that could not be saved without blocking the next message", async () => {
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    const db = database("Fast", true);
-    provider.mockResolvedValue(new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"Keep partial"}}]}\n\n')); } }));
-    const first = await POST(request(firstUser)); const reader = first.body!.getReader();
-    await reader.read(); await reader.read(); await reader.cancel();
-    const stop = stopChatResponseAction(conversation, firstUser);
-    await vi.waitFor(() => expect(db.counts().stoppedStatusWrites).toBe(1));
-    expect((await addUserMessageAction(conversation, "Next", secondUser, [firstUser])).error).toBeUndefined();
-    db.contentGate.resolve(); db.stopAck.resolve(); await stop;
-    await vi.waitFor(() => expect(errors.mock.calls.some(([line]) => String(line).includes("chat.persistence.failed"))).toBe(true));
-    expect(db.counts().stoppedContentWrites).toBe(1);
-    expect(messagePersistenceConfirmed({ role: "assistant", content: "Keep partial", terminationReason: "user_stopped" }, db.rows.find((row) => row.id === firstAssistant)!)).toBe(false);
+    database("Fast", { failStopWrite: true });
+    const upstream = openProvider(["Keep partial"]);
+    provider.mockResolvedValueOnce(upstream.body);
+    const live = await readUntil(await POST(request(firstUser)), (event) => event.type === "delta");
+    await expect(stopChatResponseAction(conversation, firstUser, firstAssistant, "Keep partial")).resolves.toHaveProperty("error");
+    expect(errors.mock.calls.some(([line]) => String(line).includes("chat.persistence.failed"))).toBe(true);
+    upstream.release();
+    await live.rest();
   });
 
   it("retries only the cancelled-claim race, using the same idempotent user message id", async () => {
-    const db = database("Fast", false, true); db.stopAck.resolve();
+    const db = database("Fast", { lateClaim: true });
     await expect(addUserMessageAction(conversation, "Next", secondUser, [firstUser])).resolves.toMatchObject({ data: { id: secondUser } });
-    expect(db.counts()).toEqual({ stoppedContentWrites: 0, stoppedStatusWrites: 1, appendCalls: 2 });
+    expect(db.appendCalls()).toBe(2);
     expect(db.rows.filter((row) => row.id === secondUser)).toHaveLength(1);
     expect(db.rpc.mock.calls[0][1]).toEqual(db.rpc.mock.calls[1][1]);
+    // The claim that never reached the screen is stopped with a readable notice, not the placeholder.
+    expect(db.reply()).toMatchObject({ status: "interrupted", content: "Response stopped." });
   });
 
   it("rejects malformed stop handoffs and RLS-hidden prior messages before appending", async () => {
     createClient.mockReset();
     await expect(addUserMessageAction(conversation, "Next", secondUser, ["bad"])).resolves.toHaveProperty("error");
+    await expect(addUserMessageAction(conversation, "Next", secondUser, [{ userMessageId: firstUser, content: 42 }])).resolves.toHaveProperty("error");
+    await expect(addUserMessageAction(conversation, "Next", secondUser, [{ userMessageId: firstUser, content: "x".repeat(100_001) }])).resolves.toHaveProperty("error");
     await expect(stopChatResponseAction("bad", firstUser)).resolves.toHaveProperty("error");
+    await expect(stopChatResponseAction(conversation, firstUser, "bad", "text")).resolves.toHaveProperty("error");
     expect(createClient).not.toHaveBeenCalled();
     const db = database("Fast");
     await expect(addUserMessageAction(conversation, "Next", secondUser, ["33333333-3333-4333-8333-333333333333"])).resolves.toHaveProperty("error");
     expect(db.rpc).not.toHaveBeenCalled();
   });
 
-  it("acknowledges Stop through a plain route that retires only the stopped reply", async () => {
+  it("acknowledges Stop through a plain route that saves the shown text on the stopped reply only", async () => {
     const db = database("Fast");
     db.rows.push({ id: firstAssistant, conversation_id: conversation, role: "assistant", content: "…", status: "streaming", position: 2, reply_to_message_id: firstUser });
     const stop = (body: unknown, headers: Record<string, string> = {}) => stopRoute(new Request("http://localhost/api/chat/stop", { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) }));
@@ -153,19 +295,56 @@ describe("main chat route/action Stop handoff", () => {
     const invalid = await stop({ conversationId: conversation, userMessageId: "bad" });
     expect(invalid.status).toBe(503);
     await expect(invalid.json()).resolves.toHaveProperty("error");
-    expect(db.rows.find((row) => row.id === firstAssistant)?.status).toBe("streaming");
-    db.stopAck.resolve();
-    const ok = await stop({ conversationId: conversation, userMessageId: firstUser });
+    expect(db.reply()?.status).toBe("streaming");
+    const ok = await stop({ conversationId: conversation, userMessageId: firstUser, assistantId: firstAssistant, content: "Shown text" });
     expect(ok.status).toBe(200);
     await expect(ok.json()).resolves.toEqual({});
-    expect(db.rows.find((row) => row.id === firstAssistant)).toMatchObject({ status: "interrupted", content: "…" });
-    expect(db.counts()).toEqual({ stoppedContentWrites: 0, stoppedStatusWrites: 1, appendCalls: 0 });
+    expect(db.reply()).toMatchObject({ status: "interrupted", content: "Shown text" });
+    expect(db.rows.find((row) => row.id === firstUser)).toMatchObject({ status: "complete", content: "First" });
   });
 
-  it("does not replace visible user_stopped text with a status-only acknowledgement", () => {
+  it("an older client's status-only Stop still never leaves the claim placeholder", async () => {
+    const db = database("Fast");
+    db.rows.push({ id: firstAssistant, conversation_id: conversation, role: "assistant", content: "…", status: "streaming", position: 2, reply_to_message_id: firstUser });
+    await expect(stopChatResponseAction(conversation, firstUser)).resolves.toEqual({});
+    expect(db.reply()).toMatchObject({ status: "interrupted", content: "Response stopped." });
+    // A later Stop with the shown text replaces the notice; a completed reply is never touched by a status-only Stop.
+    await stopChatResponseAction(conversation, firstUser, firstAssistant, "Shown");
+    expect(db.reply()).toMatchObject({ status: "interrupted", content: "Shown" });
+    db.reply()!.status = "complete";
+    await stopChatResponseAction(conversation, firstUser);
+    expect(db.reply()?.status).toBe("complete");
+  });
+});
+
+describe("Stop rules", () => {
+  it("decides when a Stop may write a reply", () => {
+    expect(stopDecision({ status: "streaming", content: "…" }, "Any")).toBe("write");
+    expect(stopDecision({ status: "streaming", content: "…" }, null)).toBe("write");
+    expect(stopDecision({ status: "complete", content: "Full answer" }, "Full")).toBe("write");
+    expect(stopDecision({ status: "complete", content: "Full answer" }, "Other")).toBe("skip");
+    expect(stopDecision({ status: "complete", content: "Full answer" }, null)).toBe("skip");
+    expect(stopDecision({ status: "interrupted", content: "Full" }, "Full")).toBe("done");
+    expect(stopDecision({ status: "interrupted", content: "Response stopped." }, "Seen")).toBe("write");
+    expect(stopDecision({ status: "interrupted", content: "…" }, "")).toBe("write");
+    // A provider failure racing the Stop: the user's Stop wins, still only with the words they saw.
+    expect(stopDecision({ status: "error", content: "Response unavailable." }, "Seen")).toBe("write");
+    expect(stopDecision({ status: "error", content: "Seen and more" }, "Seen")).toBe("write");
+    expect(stopDecision({ status: "error", content: "Seen and more" }, "Other")).toBe("skip");
+    expect(stopDecision({ status: "error", content: "Response unavailable." }, null)).toBe("skip");
+    expect(stoppedContent("")).toBe("Response stopped.");
+    expect(stoppedContent("  \n")).toBe("Response stopped.");
+    expect(stoppedContent("…")).toBe("Response stopped.");
+    expect(stoppedContent("Partial")).toBe("Partial");
+  });
+
+  it("only confirms a stopped reply when the server holds it stopped with exactly the text on screen", () => {
     const local = { role: "assistant", content: "Partial", terminationReason: "user_stopped" as const };
     expect(messagePersistenceConfirmed(local, { content: "…", status: "interrupted" })).toBe(false);
     expect(messagePersistenceConfirmed(local, { content: "Partial", status: "streaming" })).toBe(false);
-    expect(messagePersistenceConfirmed(local, { content: "Partial tail", status: "interrupted" })).toBe(true);
+    // The issue's bug: a completed answer that starts with the partial replaced the stopped reply.
+    expect(messagePersistenceConfirmed(local, { content: "Partial and the finished rest", status: "complete" })).toBe(false);
+    expect(messagePersistenceConfirmed(local, { content: "Partial tail", status: "interrupted" })).toBe(false);
+    expect(messagePersistenceConfirmed(local, { content: "Partial", status: "interrupted" })).toBe(true);
   });
 });
