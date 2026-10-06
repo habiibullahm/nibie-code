@@ -1,13 +1,22 @@
 import { spawnSync } from "node:child_process";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const isWindows = process.platform === "win32";
 const npx = isWindows ? "npx.cmd" : "npx";
 const npm = isWindows ? "npm.cmd" : "npm";
 
+// Pinned so a new CLI release cannot change the `status` output this script reads. Bump it on purpose and re-run `npm run dev:local`.
+export const SUPABASE_CLI = "supabase@2.119.0";
+
+// Node refuses to run .cmd files (npx.cmd, npm.cmd) without a shell, so Windows needs one. Every argument here is a fixed
+// word, with no spaces or user input, so the shell adds no quoting risk.
+const shell = isWindows;
+
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     stdio: "inherit",
-    shell: false,
+    shell,
     ...options,
   });
 
@@ -20,7 +29,7 @@ function run(command, args, options = {}) {
 function capture(command, args) {
   const result = spawnSync(command, args, {
     encoding: "utf8",
-    shell: false,
+    shell,
   });
 
   if (result.error) throw result.error;
@@ -32,7 +41,7 @@ function capture(command, args) {
   return result.stdout;
 }
 
-function parseEnv(text) {
+export function parseEnv(text) {
   return Object.fromEntries(
     text
       .split(/\r?\n/)
@@ -53,48 +62,48 @@ function parseEnv(text) {
   );
 }
 
-console.log("\n[Nibie] Starting local Supabase...");
-run(npx, ["--yes", "supabase@latest", "start"]);
-
-console.log("\n[Nibie] Reading local Supabase connection...");
-const localEnv = parseEnv(
-  capture(npx, [
-    "--yes",
-    "supabase@latest",
-    "status",
-    "--env",
-    "--output-format",
-    "text",
-    "--override-name",
-    "API_URL=NEXT_PUBLIC_SUPABASE_URL,PUBLISHABLE_KEY=NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,DB_URL=DATABASE_URL",
-  ]),
-);
-
-const required = [
-  "NEXT_PUBLIC_SUPABASE_URL",
-  "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
-  "DATABASE_URL",
-];
-
-for (const key of required) {
-  if (!localEnv[key]) {
-    console.error(`[Nibie] Missing local Supabase value: ${key}`);
-    process.exit(1);
-  }
+// `supabase status -o env` prints the CLI's own names. The app reads these three.
+export function localEnvFromStatus(text) {
+  const status = parseEnv(text);
+  const env = {
+    NEXT_PUBLIC_SUPABASE_URL: status.API_URL,
+    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: status.PUBLISHABLE_KEY,
+    DATABASE_URL: status.DB_URL,
+  };
+  const missing = Object.keys(env).filter((key) => !env[key]);
+  return { env, missing };
 }
 
-const env = {
-  ...process.env,
-  ...localEnv,
-  NEXT_PUBLIC_APP_URL: "http://localhost:3000",
-};
+function main() {
+  console.log("\n[Nibie] Starting local Supabase...");
+  run(npx, ["--yes", SUPABASE_CLI, "start"]);
 
-console.log("\n[Nibie] Applying Drizzle migrations to local Supabase...");
-run(npm, ["run", "db:migrate"], { env });
+  console.log("\n[Nibie] Reading local Supabase connection...");
+  const { env: localEnv, missing } = localEnvFromStatus(
+    capture(npx, ["--yes", SUPABASE_CLI, "status", "-o", "env"]),
+  );
 
-console.log("\n[Nibie] Local stack ready:");
-console.log(`  App:      http://localhost:3000`);
-console.log(`  Supabase: ${env.NEXT_PUBLIC_SUPABASE_URL}`);
-console.log("\n[Nibie] Starting Next.js...\n");
+  for (const key of missing) {
+    console.error(`[Nibie] Missing local Supabase value: ${key}`);
+  }
+  if (missing.length) process.exit(1);
 
-run(npm, ["run", "dev"], { env });
+  const env = {
+    ...process.env,
+    ...localEnv,
+    NEXT_PUBLIC_APP_URL: "http://localhost:3000",
+  };
+
+  console.log("\n[Nibie] Applying Drizzle migrations to local Supabase...");
+  run(npm, ["run", "db:migrate"], { env });
+
+  console.log("\n[Nibie] Local stack ready:");
+  console.log(`  App:      http://localhost:3000`);
+  console.log(`  Supabase: ${env.NEXT_PUBLIC_SUPABASE_URL}`);
+  console.log("\n[Nibie] Starting Next.js...\n");
+
+  run(npm, ["run", "dev"], { env });
+}
+
+const invokedDirectly = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (invokedDirectly) main();
