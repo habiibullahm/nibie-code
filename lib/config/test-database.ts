@@ -1,4 +1,4 @@
-const TEST_DATABASE_NAME = "general_ai_workspace_test";
+const TEST_DATABASE_NAME = "nibie_ai";
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
 export function assertSafeIntegrationDatabaseUrl(

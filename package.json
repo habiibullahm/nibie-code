@@ -15,7 +15,12 @@
     "test:chat:e2e": "node scripts/chat-e2e.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "release:check": "node scripts/check-release.mjs"
+    "release:check": "node scripts/check-release.mjs",
+    "db:test:up": "docker compose -f docker-compose.test.yml up -d --wait",
+    "db:test:down": "docker compose -f docker-compose.test.yml down -v",
+    "test:integration:local": "node scripts/test-integration-local.mjs",
+    "dev:local": "node scripts/dev-local.mjs",
+    "local:down": "npx --yes supabase@latest stop"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
