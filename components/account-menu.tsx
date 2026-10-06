@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
-import { ArrowUpRight, CircleHelp, LogOut, Settings } from "lucide-react";
+import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
+import { ArrowRight, CircleHelp, LogOut, Settings } from "lucide-react";
 import { signOutAction } from "@/app/actions/auth";
-import { changelogAnchorHref, changelogMenuLink, changelogPreview } from "@/lib/changelog";
+import { changelogAnchorHref, changelogMenuLink, type ChangelogReleasePreview } from "@/lib/changelog";
 
 type Props = {
   email: string;
@@ -12,12 +12,32 @@ type Props = {
   signOutLabel: string;
   onOpenSettings: () => void;
   compact?: boolean;
+  releasePreview?: ChangelogReleasePreview | null;
 };
 
 // Long enough to cross the gap between the account row and the panel, short enough that leaving feels immediate.
 const CLOSE_DELAY_MS = 100;
+const LAST_SEEN_RELEASE_KEY = "nibie:last-seen-release";
+const RELEASE_SEEN_EVENT = "nibie:release-seen";
 
-export function AccountMenu({ email, name, onOpenSettings, compact = false }: Props) {
+function subscribeToReleaseSeen(onChange: () => void) {
+  window.addEventListener("storage", onChange);
+  window.addEventListener(RELEASE_SEEN_EVENT, onChange);
+  return () => {
+    window.removeEventListener("storage", onChange);
+    window.removeEventListener(RELEASE_SEEN_EVENT, onChange);
+  };
+}
+
+function readLastSeenRelease() {
+  try {
+    return window.localStorage.getItem(LAST_SEEN_RELEASE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function AccountMenu({ email, name, onOpenSettings, compact = false, releasePreview = null }: Props) {
   const menuId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -31,8 +51,21 @@ export function AccountMenu({ email, name, onOpenSettings, compact = false }: Pr
   const [helpOpen, setHelpOpen] = useState(false);
   const open = pinned || (hovering && !suppressHover);
   const updatesHref = changelogAnchorHref(process.env.NEXT_PUBLIC_APP_URL);
+  const releaseVersion = releasePreview?.version ?? null;
+  const lastSeenRelease = useSyncExternalStore(subscribeToReleaseSeen, readLastSeenRelease, () => null);
+  const releaseIsNew = Boolean(releaseVersion && lastSeenRelease !== releaseVersion);
   const pendingFocus = useRef<"first" | "last" | null>(null);
   const initial = (name || email).slice(0, 1).toUpperCase();
+
+  const markReleaseSeen = useCallback(() => {
+    if (!releaseVersion) return;
+    try {
+      window.localStorage.setItem(LAST_SEEN_RELEASE_KEY, releaseVersion);
+      window.dispatchEvent(new Event(RELEASE_SEEN_EVENT));
+    } catch {
+      // The badge remains visible if this browser does not allow local storage.
+    }
+  }, [releaseVersion]);
 
   function clearCloseTimer() {
     if (closeTimer.current == null) return;
@@ -56,6 +89,7 @@ export function AccountMenu({ email, name, onOpenSettings, compact = false }: Pr
 
   function toggle() {
     if (pinned) {
+      if (helpOpen) markReleaseSeen();
       setPinned(false);
       setSuppressHover(true);
       setHelpOpen(false);
@@ -65,12 +99,13 @@ export function AccountMenu({ email, name, onOpenSettings, compact = false }: Pr
     setPinned(true);
   }
 
-  function dismiss(holdHover: boolean) {
+  const dismiss = useCallback((holdHover: boolean) => {
+    if (helpOpen) markReleaseSeen();
     setPinned(false);
     setHovering(false);
     setSuppressHover(holdHover);
     setHelpOpen(false);
-  }
+  }, [helpOpen, markReleaseSeen]);
 
   function openHelp() {
     setHelpOpen(true);
@@ -124,6 +159,7 @@ export function AccountMenu({ email, name, onOpenSettings, compact = false }: Pr
   }
 
   function openUpdates(event: React.MouseEvent<HTMLAnchorElement>) {
+    markReleaseSeen();
     const link = changelogMenuLink(process.env.NEXT_PUBLIC_APP_URL, window.location.origin);
     if (!link.external) return;
     event.preventDefault();
@@ -152,6 +188,7 @@ export function AccountMenu({ email, name, onOpenSettings, compact = false }: Pr
       event.preventDefault();
       event.stopPropagation();
       if (helpOpen) {
+        markReleaseSeen();
         setHelpOpen(false);
         helpButtonRef.current?.focus();
         return;
@@ -165,7 +202,7 @@ export function AccountMenu({ email, name, onOpenSettings, compact = false }: Pr
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [open, helpOpen]);
+  }, [open, helpOpen, dismiss, markReleaseSeen]);
 
   return <div className={`account-menu${compact ? " is-compact" : ""}`} ref={rootRef} onPointerEnter={pointerEnter} onPointerLeave={pointerLeave}>
     <button ref={triggerRef} type="button" className="account-profile" aria-label={compact ? "Account" : undefined} title={compact ? "Account" : undefined} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined} onClick={toggle} onKeyDown={onTriggerKeyDown}>
@@ -180,15 +217,24 @@ export function AccountMenu({ email, name, onOpenSettings, compact = false }: Pr
       <p className="account-menu-identity">{email}</p>
       <button type="button" className="account-menu-action" role="menuitem" onClick={openSettings}><Settings size={15} aria-hidden="true" />Settings</button>
       <div className="account-help" onPointerEnter={() => setHelpOpen(true)} onPointerLeave={() => setHelpOpen(false)}>
-        <button ref={helpButtonRef} type="button" className="account-menu-action" role="menuitem" aria-haspopup="menu" aria-expanded={helpOpen} aria-label="Help" onClick={openHelp} onKeyDown={onHelpKeyDown}><CircleHelp size={15} aria-hidden="true" />Help</button>
+        <button ref={helpButtonRef} type="button" className="account-menu-action" role="menuitem" aria-haspopup="menu" aria-expanded={helpOpen} aria-label="Help" onClick={openHelp} onKeyDown={onHelpKeyDown}><CircleHelp size={15} aria-hidden="true" />Help{releaseIsNew ? <span className="account-help-new" aria-hidden="true">New</span> : null}</button>
         {helpOpen && <div className="account-help-panel" role="menu" aria-label="Help">
-          <p className="account-help-kicker">What&apos;s new</p>
-          <ul className="account-help-preview">
-            {changelogPreview.map((line) => <li key={line}>{line}</li>)}
-          </ul>
-          <a ref={helpLinkRef} className="account-menu-action" role="menuitem" href={updatesHref} aria-label="View Nibie updates" onClick={openUpdates}>
-            Full changelog
-            <ArrowUpRight size={13} aria-hidden="true" />
+          <p className="account-help-kicker">What’s new</p>
+          {releasePreview ? <div className="account-help-release">
+            <div className="account-help-release-meta">
+              <div>
+                <p className="account-help-release-version">Nibie {releasePreview.version}</p>
+                <p className="account-help-release-date">{releasePreview.date}</p>
+              </div>
+              {releaseIsNew ? <span className="account-help-new">New</span> : null}
+            </div>
+            {releasePreview.highlights.length ? <ul className="account-help-preview">
+              {releasePreview.highlights.map((line) => <li key={line}>{line}</li>)}
+            </ul> : null}
+          </div> : <p className="account-help-empty">No shipped release yet.</p>}
+          <a ref={helpLinkRef} className="account-menu-action" role="menuitem" href={updatesHref} aria-label="View full changelog" onClick={openUpdates}>
+            View full changelog
+            <ArrowRight size={13} aria-hidden="true" />
           </a>
         </div>}
       </div>

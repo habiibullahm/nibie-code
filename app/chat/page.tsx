@@ -4,6 +4,7 @@ import { getChatWorkspaceData } from "@/lib/chat/read";
 import { getModelOptions } from "@/lib/ai/registry";
 import { readOwnerPreferences } from "@/lib/preferences/store";
 import { requestTime } from "@/lib/chat/groups";
+import { loadLatestShippedReleasePreview } from "@/lib/changelog-source";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -19,5 +20,6 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
   ]);
   // Only configured modes are offered; this reads environment variable names, never the provider URL or key.
   const { models } = getModelOptions();
-  return <ChatWorkspace email={user.email ?? "Your account"} metadataName={user.name} initialData={data} models={models} renderedAt={requestTime()} preferences={preferenceState.preferences} preferencesError={preferenceState.error} />;
+  const releasePreview = loadLatestShippedReleasePreview();
+  return <ChatWorkspace email={user.email ?? "Your account"} metadataName={user.name} initialData={data} models={models} renderedAt={requestTime()} preferences={preferenceState.preferences} preferencesError={preferenceState.error} releasePreview={releasePreview} />;
 }
