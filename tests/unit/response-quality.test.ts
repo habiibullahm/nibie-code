@@ -45,7 +45,7 @@ describe("response quality rules and compatibility", () => {
   it.each([
     /Start with the useful answer/i, /Give a complete, useful answer by default/i, /Don't shorten merely to be concise, and don't pad/i,
     /A simple question or definition gets a few sentences/i, /give each step or option useful substance, not just a label/i,
-    /Read ambiguous acronyms in the sense the conversation makes likeliest/i,
+    /Resolve ambiguous acronyms from the conversation; assume no default domain/i, /state your assumption or briefly disambiguate; answer before asking/i,
     /Depth: Complete is the default/i, /Explicit length or format requests in the current message win/i,
     /terse follow-ups as refinements of the current task/i, /Preserve companies, products, people, technologies, roles, places, acronyms/i,
     /never reinterpret an unfamiliar one as an unrelated generic concept without evidence/i,
