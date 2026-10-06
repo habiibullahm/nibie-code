@@ -13,11 +13,9 @@ export type ProfilePiece = {
 };
 
 const languageLine = { en: "Preferred language: English", id: "Preferred language: Bahasa Indonesia" } as const;
-// Complete (stored as "balanced") is the core policy's default, so only a deviation from it is sent as profile data.
-const depthLine = {
-  concise: "Response depth: Concise — answer directly with only the essential explanation.",
-  detailed: "Response depth: Detailed — explore the topic more deeply, including relevant examples, alternatives, edge cases, and trade-offs.",
-} as const;
+// The core policy states what each depth means for every request (responseDepthInstruction); the profile only records a
+// non-default choice so the context panel lists it. Default (stored as "balanced") is a product default and adds nothing here.
+const depthLine = { concise: "Response depth: Concise", detailed: "Response depth: Detailed" } as const;
 const styleLine = { professional: "Response style: Professional", direct: "Response style: Direct" } as const;
 
 function boundedText(value: string | null, max: number) {
