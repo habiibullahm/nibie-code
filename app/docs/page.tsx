@@ -146,10 +146,10 @@ export default function DocsPage() {
           <dl>
             <div><dt>Profile</dt><dd>Set the name shown on your account. Leave it blank to use your sign-in name.</dd></div>
             <div><dt>General</dt><dd>Choose Auto, English, or Bahasa Indonesia. Auto follows the language you are using.</dd></div>
-            <div><dt>Nibie</dt><dd>Choose a default model, response length (Concise, Balanced, Detailed), and response style (Natural, Professional, Direct).</dd></div>
+            <div><dt>Nibie</dt><dd>Choose a default model, response depth (Concise, Default, Detailed), and response style (Natural, Professional, Direct).</dd></div>
             <div><dt>Personalization</dt><dd>Add an <strong>About you</strong> note with your role, goals, or working context. Leave it blank to clear it.</dd></div>
           </dl>
-          <p>You can ask for a different language, length, or tone in an individual message. These are preferences, and personalization comes from the details you explicitly save.</p>
+          <p>You can ask for a different language, depth, or tone in an individual message. These are preferences, and personalization comes from the details you explicitly save.</p>
         </section>
 
         <section id="chat-preferences" className="docs-section" aria-labelledby="chat-preferences-title">

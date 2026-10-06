@@ -27,9 +27,10 @@ const languageOptions = [
   { value: "id", label: "Bahasa Indonesia" },
 ] as const;
 
-const lengthOptions = [
+// "balanced" stays the stored value; Default is its product name.
+const depthOptions = [
   { value: "concise", label: "Concise" },
-  { value: "balanced", label: "Balanced" },
+  { value: "balanced", label: "Default" },
   { value: "detailed", label: "Detailed" },
 ] as const;
 
@@ -66,7 +67,7 @@ export function NibieSettingsSection({ preferences, models, disabled, onChange }
     : `${modelPickerCopy[storedMode].label} isn't available, so new chats use ${modelPickerCopy[fallback].label}. Conversations you already have keep their own model.`;
   return <SettingsSection title="Nibie" description="Defaults for new conversations. They do not change a chat you already started.">
     <SettingsChoice label="Default model" hint={hint} value={preferences.defaultModel} options={options} disabled={disabled || options.length === 0} onChange={(defaultModel) => onChange({ defaultModel })} />
-    <SettingsChoice label="Response length" value={preferences.responseLength} options={[...lengthOptions]} disabled={disabled} onChange={(responseLength) => onChange({ responseLength })} />
+    <SettingsChoice label="Response depth" hint="Default fully answers the task without padding. A request in your message, like “in one sentence”, still wins." value={preferences.responseLength} options={[...depthOptions]} disabled={disabled} onChange={(responseLength) => onChange({ responseLength })} />
     <SettingsChoice label="Response style" value={preferences.responseStyle} options={[...styleOptions]} disabled={disabled} onChange={(responseStyle) => onChange({ responseStyle })} />
   </SettingsSection>;
 }
