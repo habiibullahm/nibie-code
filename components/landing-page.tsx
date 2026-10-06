@@ -3,7 +3,8 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { Brand, BrandMark } from "@/components/brand";
 import { SiteHeader } from "@/components/site-header";
-import { changelogPreview } from "@/lib/changelog";
+import { getCurrentDevelopmentPreview } from "@/lib/changelog";
+import { loadChangelog } from "@/lib/changelog-source";
 import { chatPath } from "@/lib/routes";
 
 const useCases: { title: string; copy: string; visual: ReactNode }[] = [
@@ -130,6 +131,7 @@ function WorkspaceFrame() {
 }
 
 export function LandingPage() {
+  const changelogPreview = getCurrentDevelopmentPreview(loadChangelog());
   return <div className="landing">
     <a className="skip-link" href="#content">Skip to content</a>
     <SiteHeader />

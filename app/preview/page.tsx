@@ -3,6 +3,7 @@ import { ChatWorkspace } from "@/components/chat-workspace";
 import { modelPickerCopy, type ModelOption } from "@/lib/chat/models";
 import { weeklyCreditCost } from "@/lib/usage/policy";
 import { requestTime } from "@/lib/chat/groups";
+import { loadLatestShippedReleasePreview } from "@/lib/changelog-source";
 
 export const dynamic = "force-dynamic";
 
@@ -11,5 +12,5 @@ const previewModels: ModelOption[] = (["Fast", "Balanced", "High"] as const).map
 
 export default function PreviewPage() {
   if (process.env.NODE_ENV === "production") notFound();
-  return <ChatWorkspace email="preview@nibie.local" preview models={previewModels} renderedAt={requestTime()} />;
+  return <ChatWorkspace email="preview@nibie.local" preview models={previewModels} renderedAt={requestTime()} releasePreview={loadLatestShippedReleasePreview()} />;
 }

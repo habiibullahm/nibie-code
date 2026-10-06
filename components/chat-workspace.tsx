@@ -17,6 +17,7 @@ import type { SettingsSectionId } from "@/components/settings/registry";
 import { MessageRow } from "@/components/message-row";
 import { forgetLastConversationId, readChatFlag, readLastConversationId, subscribeChatPreferences, writeLastConversationId } from "@/components/use-chat-preferences";
 import { useStableCallback } from "@/components/use-stable-callback";
+import type { ChangelogReleasePreview } from "@/lib/changelog";
 import type { ConversationSummary, PersistedMessage, RoomSummary } from "@/lib/chat/read";
 import type { AttachmentSummary } from "@/lib/attachments/types";
 import type { ModelChoice, ModelOption } from "@/lib/chat/models";
@@ -70,7 +71,7 @@ const mockRooms: RoomSummary[] = [
 
 const noModels: ModelOption[] = [];
 
-export function ChatWorkspace({ email, metadataName = null, initialData, preview = false, models = noModels, renderedAt, preferences, preferencesError = null }: { email: string; metadataName?: string | null; initialData?: WorkspaceData; preview?: boolean; models?: ModelOption[]; renderedAt?: number; preferences?: UserPreferences; preferencesError?: string | null }) {
+export function ChatWorkspace({ email, metadataName = null, initialData, preview = false, models = noModels, renderedAt, preferences, preferencesError = null, releasePreview = null }: { email: string; metadataName?: string | null; initialData?: WorkspaceData; preview?: boolean; models?: ModelOption[]; renderedAt?: number; preferences?: UserPreferences; preferencesError?: string | null; releasePreview?: ChangelogReleasePreview | null }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const conversationParam = searchParams.get("conversation");
@@ -899,7 +900,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const welcomeGreeting = welcomeGreetings[welcomeGreetingIndex](greetingName);
   const headerRoomName = (showRoom ? activeRoom?.name : threadRoom?.name) ?? null;
   const roomThreads = activeRoom ? shownConversations.filter((item) => item.room_id === activeRoom.id) : [];
-  const sidebarProps = { conversations: shownConversations, archivedConversations, rooms, activeId: history, activeRoomId: showRoom ? selectedRoomId : threadRoom?.id ?? null, busy: controlsDisabled || recovering, activity: assistantActivity, preview, email, name: accountName, renderedAt, settingsActive: settingsOpen, onClose: closeDrawer, onOpen: openConversation, onOpenRoom: openRoom, onNewThreadInRoom: newThreadInRoom, onDeleteRoom: deleteRoomFromSidebar, onCreateRoom: openRoomSetup, onNewChat: newChat, onOpenSettings: openSettings, onRename: rename, onArchive: archive, onRestore: restore, onMove: moveThread };
+  const sidebarProps = { conversations: shownConversations, archivedConversations, rooms, activeId: history, activeRoomId: showRoom ? selectedRoomId : threadRoom?.id ?? null, busy: controlsDisabled || recovering, activity: assistantActivity, preview, email, name: accountName, releasePreview, renderedAt, settingsActive: settingsOpen, onClose: closeDrawer, onOpen: openConversation, onOpenRoom: openRoom, onNewThreadInRoom: newThreadInRoom, onDeleteRoom: deleteRoomFromSidebar, onCreateRoom: openRoomSetup, onNewChat: newChat, onOpenSettings: openSettings, onRename: rename, onArchive: archive, onRestore: restore, onMove: moveThread };
   const composerProps = { ref: composerRef, dockRef: composerDockRef, sending: sending || recovering || movingThread !== null, streaming, mode, models, onModelChange: changeModel, savingMode, caption, diagnostics: contextDiagnostics ?? contextPreview, onEditProfile: editProfile, onSubmit: submitMessage, onStop: stopStream, onAttach: attach, attachmentsEnabled: !preview, onRoomFiles: threadRoom && !preview ? toggleRoomFiles : undefined, roomItems, roomId: threadRoomId ?? "", roomLabel, roomSelectionNotice, roomsLoading, onRoomChange: activeId ? rooms.length ? changeComposerRoom : undefined : chooseDraftRoom, attachmentPanel: filePickerOpen && threadRoom ? <RoomFilePicker roomId={threadRoom.id} selectedIds={selectedFileIds} disabled={controlsDisabled || sending || streaming} onChange={setSelectedFileIds} /> : null };
 
   return <main className="chat-workspace">
