@@ -198,6 +198,42 @@ export const messages = pgTable(
   ],
 );
 
+const summaryFieldBounds = (column: AnyColumn) => sql`char_length(${column}) <= 3200`;
+
+// One rolling summary per conversation. It represents messages up to covers_through_position, which only moves forward.
+// Original messages are never deleted. The summary is derived, untrusted data, and is deleted with its conversation.
+export const threadSummaries = pgTable(
+  "thread_summaries",
+  {
+    conversationId: uuid("conversation_id").primaryKey(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    objective: text("objective").notNull(),
+    importantContext: text("important_context").notNull(),
+    decisions: text("decisions").notNull(),
+    completedWork: text("completed_work").notNull(),
+    currentState: text("current_state").notNull(),
+    openQuestions: text("open_questions").notNull(),
+    coversThroughPosition: integer("covers_through_position").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "thread_summaries_conversation_owner_fk",
+      columns: [table.conversationId, table.userId],
+      foreignColumns: [conversations.id, conversations.userId],
+    }).onDelete("cascade"),
+    index("thread_summaries_user_idx").on(table.userId),
+    check("thread_summaries_coverage_positive", sql`${table.coversThroughPosition} >= 1`),
+    check("thread_summaries_objective_length", summaryFieldBounds(table.objective)),
+    check("thread_summaries_important_context_length", summaryFieldBounds(table.importantContext)),
+    check("thread_summaries_decisions_length", summaryFieldBounds(table.decisions)),
+    check("thread_summaries_completed_work_length", summaryFieldBounds(table.completedWork)),
+    check("thread_summaries_current_state_length", summaryFieldBounds(table.currentState)),
+    check("thread_summaries_open_questions_length", summaryFieldBounds(table.openQuestions)),
+  ],
+);
+
 // Exactly-once generation-level reservation records prevent a logical provider generation from being charged twice.
 export const weeklyUsageReservations = pgTable(
   "weekly_usage_reservations",

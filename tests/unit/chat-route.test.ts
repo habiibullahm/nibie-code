@@ -34,6 +34,10 @@ const { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc
 vi.mock("@/lib/supabase/server", () => ({ createSupabaseServerClient: async () => withoutAttachments(await createClient()) }));
 vi.mock("@/lib/ai/provider", () => ({ chatProvider: { stream } }));
 vi.mock("@/lib/ai/registry", () => ({ getModelOptions: modelOptions, contextCapabilitiesFor: contextCapabilities, providerFor: (mode: string) => mode === "Fast" ? "sumopod" : "openai" }));
+// The thread summary read and its after-response maintenance are their own module (tested in thread-summary-store.test.ts).
+// Mocked here so the ordered table results above stay about the reply itself.
+const summaryStore = vi.hoisted(() => ({ load: vi.fn(), defer: vi.fn(), complete: vi.fn(), finish: vi.fn() }));
+vi.mock("@/lib/context/thread-summary-store", () => ({ loadThreadSummary: summaryStore.load, deferThreadSummaryMaintenance: summaryStore.defer }));
 const allModes = { models: ["Fast", "Balanced", "High"].map((id) => ({ id, label: id, description: "" })) };
 
 import { POST } from "../../app/api/chat/route";
@@ -59,6 +63,9 @@ describe("POST /api/chat", () => {
     usageRelease.mockReset().mockImplementation(() => query({ data: true, error: null }));
     usageStart.mockReset().mockImplementation(() => query({ data: true, error: null }));
     rpc.mockClear();
+    summaryStore.load.mockReset().mockResolvedValue(null);
+    summaryStore.complete.mockReset(); summaryStore.finish.mockReset();
+    summaryStore.defer.mockReset().mockImplementation(() => ({ complete: summaryStore.complete, finish: summaryStore.finish }));
   });
   afterEach(() => vi.useRealTimers());
 
@@ -292,6 +299,8 @@ describe("POST /api/chat", () => {
     const pending = POST(validRequest());
     // The conversation, both message reads, and preferences are issued before any of them has finished.
     await vi.waitFor(() => expect(started).toHaveLength(4));
+    // The optional thread summary is read in the same step, so it adds no serial round trip before the provider.
+    expect(summaryStore.load).toHaveBeenCalledWith(expect.anything(), "5e9bdcca-9205-4fea-a773-13952bb78c44", expect.any(String));
     gate.release?.();
     expect((await pending).status).toBe(404);
     expect(getClaims).toHaveBeenCalledOnce();
@@ -847,6 +856,135 @@ describe("POST /api/chat", () => {
       expect(denied.status).toBe(400);
       expect(stream).toHaveBeenCalledTimes(1);
       expect(claim).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("thread summary", () => {
+    const summary = {
+      objective: "Launch the clinic pilot", importantContext: "Budget fixed", decisions: "Use Postgres", completedWork: "Schema drafted",
+      currentState: "Writing tests", openQuestions: "Pricing", coversThroughPosition: 15, updatedAt: "2026-10-05T00:00:00.000Z",
+    };
+    // Positions 1–26, alternating, ending on the user message being answered.
+    function longThreadClient(writes: unknown[], summaryRead?: { data: unknown; error: unknown }) {
+      const rows = Array.from({ length: 26 }, (_, index) => ({ id: `m${index + 1}`, role: index % 2 === 0 ? "assistant" : "user", content: `turn ${index + 1}`, status: "complete", position: index + 1 })).reverse();
+      const results = [
+        { data: { id: "user-message", position: 26, content: "turn 26" }, error: null },
+        { data: rows, error: null },
+        { data: { id: assistantId }, error: null },
+      ];
+      const from = vi.fn((table: string) => table === "user_preferences" ? query(preferenceResult) : table === "conversations"
+        ? query({ data: { id: "conversation", selected_model: "Balanced" }, error: null })
+        : table === "thread_summaries" ? query(summaryRead ?? { data: null, error: null })
+          : query(results.shift(), (write) => writes.push(write)));
+      createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc });
+      claim.mockReturnValue(query({ data: { ...assistant, position: 27 }, error: null }));
+      return from;
+    }
+    const dialogue = () => (stream.mock.calls[0][1] as { role: string; content: string }[]).filter((message) => message.role !== "system").map((message) => message.content);
+
+    it("passes the persisted summary to the context builder and keeps the bridge messages raw", async () => {
+      longThreadClient([]);
+      summaryStore.load.mockResolvedValue(summary);
+      stream.mockResolvedValue(providerChunks(["Done."], "stop"));
+      const response = await POST(validRequest());
+      const events = await Array.fromAsync(readChatSse(response.body!));
+      expect(events.slice(-2)).toEqual([{ type: "status", status: "complete" }, { type: "done" }]);
+      const prompt = stream.mock.calls[0][1] as { role: string; content: string }[];
+      expect(prompt[1].content).toContain("Objective\nLaunch the clinic pilot");
+      // Summary 1–15, raw bridge 16–20, protected recent 21–25, current 26 once and last.
+      expect(dialogue()).toEqual(Array.from({ length: 11 }, (_, index) => `turn ${index + 16}`));
+      expect(events[0]).toMatchObject({ type: "start", context: { sources: expect.arrayContaining([expect.objectContaining({ type: "thread_summary", state: "included" })]) } });
+    });
+
+    it("replies normally when the conversation has no summary", async () => {
+      longThreadClient([]);
+      stream.mockResolvedValue(providerChunks(["Done."], "stop"));
+      const response = await POST(validRequest());
+      const events = await Array.fromAsync(readChatSse(response.body!));
+      expect(events.slice(-2)).toEqual([{ type: "status", status: "complete" }, { type: "done" }]);
+      expect(dialogue()).toEqual(Array.from({ length: 26 }, (_, index) => `turn ${index + 1}`));
+      expect(events[0]).toMatchObject({ type: "start", context: { sources: expect.arrayContaining([expect.objectContaining({ type: "thread_summary", state: "not_used" })]) } });
+    });
+
+    it("degrades a failed summary read to no summary and still completes the reply", async () => {
+      const actual = await vi.importActual<typeof import("../../lib/context/thread-summary-store")>("../../lib/context/thread-summary-store");
+      summaryStore.load.mockImplementation(actual.loadThreadSummary);
+      const writes: unknown[] = [];
+      longThreadClient(writes, { data: null, error: { code: "XX000", message: "read failed" } });
+      stream.mockResolvedValue(providerChunks(["Done."], "stop"));
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      try {
+        const response = await POST(validRequest());
+        const events = await Array.fromAsync(readChatSse(response.body!));
+        expect(events.slice(-2)).toEqual([{ type: "status", status: "complete" }, { type: "done" }]);
+        expect(writes).toContainEqual({ content: "Done.", status: "complete" });
+        expect(dialogue()).toHaveLength(26);
+        const failed = warn.mock.calls.map((call) => String(call[0])).find((line) => line.includes("thread_summary.read.failed"));
+        expect(failed).toBeTruthy();
+        expect(failed).not.toContain("read failed");
+      } finally { warn.mockRestore(); }
+    });
+
+    it("schedules maintenance only after a reply is saved as complete", async () => {
+      const writes: unknown[] = [];
+      readyClient(writes);
+      stream.mockResolvedValue(providerChunks(["Done."], "stop"));
+      await (await POST(validRequest())).text();
+      expect(summaryStore.defer).toHaveBeenCalledWith(expect.objectContaining({ conversationId: "conversation", requestId: expect.any(String) }));
+      expect(summaryStore.complete).toHaveBeenCalledExactlyOnceWith(assistant.position);
+      expect(summaryStore.finish).toHaveBeenCalledOnce();
+      expect(writes).toContainEqual({ content: "Done.", status: "complete" });
+    });
+
+    it("does not schedule maintenance for a provider error", async () => {
+      readyClient([]);
+      stream.mockResolvedValue(providerChunks(["Partial"], "length"));
+      await expect(Array.fromAsync(readChatSse((await POST(validRequest())).body!))).rejects.toThrow();
+      expect(summaryStore.complete).not.toHaveBeenCalled();
+      expect(summaryStore.finish).toHaveBeenCalledOnce();
+    });
+
+    it("does not schedule maintenance when the reply could not be saved", async () => {
+      readyClient([], [{ data: null, error: { message: "database unavailable" } }, { data: { id: assistantId }, error: null }]);
+      stream.mockResolvedValue(providerChunks(["Hello"], "stop"));
+      await (await POST(validRequest())).text();
+      expect(summaryStore.complete).not.toHaveBeenCalled();
+      expect(summaryStore.finish).toHaveBeenCalledOnce();
+    });
+
+    it("does not schedule maintenance for an interrupted reply", async () => {
+      const writes: unknown[] = [];
+      readyClient(writes);
+      stream.mockResolvedValue(new ReadableStream<Uint8Array>({ start(controller) {
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'));
+      } }));
+      const reader = (await POST(validRequest())).body!.getReader();
+      await reader.read();
+      await reader.read();
+      await reader.cancel();
+      await vi.waitFor(() => expect(writes).toContainEqual({ content: "partial", status: "interrupted" }));
+      await vi.waitFor(() => expect(summaryStore.finish).toHaveBeenCalledOnce());
+      expect(summaryStore.complete).not.toHaveBeenCalled();
+    });
+
+    it("does not schedule maintenance for an idempotent replay", async () => {
+      readyClient([]);
+      claim.mockReturnValue(query({ data: { ...assistant, content: "Already saved", status: "complete", replayed: true }, error: null }));
+      expect((await POST(validRequest())).status).toBe(200);
+      expect(summaryStore.defer).not.toHaveBeenCalled();
+      expect(summaryStore.complete).not.toHaveBeenCalled();
+    });
+
+    it("keeps a completed reply complete when summary maintenance fails", async () => {
+      const writes: unknown[] = [];
+      readyClient(writes);
+      summaryStore.complete.mockImplementation(() => { throw new Error("maintenance exploded"); });
+      summaryStore.finish.mockImplementation(() => { throw new Error("maintenance exploded"); });
+      stream.mockResolvedValue(providerChunks(["Done."], "stop"));
+      const events = await Array.fromAsync(readChatSse((await POST(validRequest())).body!));
+      expect(events.slice(-2)).toEqual([{ type: "status", status: "complete" }, { type: "done" }]);
+      expect(writes).toContainEqual({ content: "Done.", status: "complete" });
+      expect(writes).not.toContainEqual(expect.objectContaining({ status: "error" }));
     });
   });
 });

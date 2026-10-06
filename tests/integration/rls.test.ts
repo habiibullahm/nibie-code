@@ -56,6 +56,9 @@ describe("Supabase row-level security", () => {
 
   beforeAll(async () => {
     await sql`drop schema if exists drizzle cascade`;
+    await sql`drop table if exists public.thread_summaries cascade`;
+    await sql`drop function if exists public.save_thread_summary(uuid, text, text, text, text, text, text, integer) cascade`;
+    await sql`drop function if exists public.guard_thread_summary_update() cascade`;
     await sql`drop table if exists public.weekly_usage_reservations cascade`;
     await sql`drop table if exists public.weekly_ai_usage cascade`;
     await sql`drop type if exists public.weekly_usage_mode cascade`;
@@ -725,6 +728,82 @@ describe("Supabase row-level security", () => {
       await send(owner, otherThread, randomUUID(), [id], "In the other thread");
       await asUser(owner, (tx) => tx`delete from public.conversations where id = ${otherThread}`);
       expect(await sql`select id from public.message_attachments where id = ${id}`).toHaveLength(0);
+    });
+  });
+
+  describe("thread summaries", () => {
+    const owner = randomUUID();
+    const stranger = randomUUID();
+    const thread = randomUUID();
+    const strangerThread = randomUUID();
+    const fields = ["Objective", "Context", "Decisions", "Done", "State", "Questions"];
+
+    const save = (userId: string, conversation: string, coverage: number, objective = "Objective") =>
+      asUser(userId, (tx) => tx`select public.save_thread_summary(${conversation}::uuid, ${objective}, ${fields[1]}, ${fields[2]}, ${fields[3]}, ${fields[4]}, ${fields[5]}, ${coverage}::integer) as saved`)
+        .then(([row]) => row.saved as boolean);
+    const stored = (conversation: string) => sql`select user_id, objective, covers_through_position from public.thread_summaries where conversation_id = ${conversation}`;
+
+    beforeAll(async () => {
+      await sql`insert into auth.users (id) values (${owner}), (${stranger})`;
+      await sql`insert into public.conversations (id, user_id, title) values (${thread}, ${owner}, 'Summarized'), (${strangerThread}, ${stranger}, 'Stranger')`;
+      for (const [conversation, userId] of [[thread, owner], [strangerThread, stranger]]) {
+        for (let position = 1; position <= 30; position++) {
+          await sql`insert into public.messages (conversation_id, user_id, role, content, position)
+            values (${conversation}, ${userId}, ${position % 2 === 1 ? "user" : "assistant"}, ${`turn ${position}`}, ${position})`;
+        }
+      }
+    });
+
+    it("has row-level security enabled and forced", async () => {
+      const [table] = await sql`select relrowsecurity, relforcerowsecurity from pg_class where oid = 'public.thread_summaries'::regclass`;
+      expect(table).toEqual({ relrowsecurity: true, relforcerowsecurity: true });
+    });
+
+    it("lets the owner write and read one summary per conversation without touching messages", async () => {
+      expect(await save(owner, thread, 13)).toBe(true);
+      expect(await asUser(owner, (tx) => tx`select objective, important_context, covers_through_position from public.thread_summaries`))
+        .toEqual([{ objective: "Objective", important_context: "Context", covers_through_position: 13 }]);
+      expect(await stored(thread)).toEqual([{ user_id: owner, objective: "Objective", covers_through_position: 13 }]);
+      expect(await sql`select count(*)::int as n from public.messages where conversation_id = ${thread}`).toEqual([{ n: 30 }]);
+    });
+
+    it("only moves coverage forward and discards an older candidate", async () => {
+      expect(await save(owner, thread, 21, "Newer")).toBe(true);
+      expect(await save(owner, thread, 13, "Older job")).toBe(false);
+      expect(await save(owner, thread, 21, "Same coverage")).toBe(false);
+      expect(await stored(thread)).toEqual([{ user_id: owner, objective: "Newer", covers_through_position: 21 }]);
+      await expect(asUser(owner, (tx) => tx`update public.thread_summaries set covers_through_position = 5 where conversation_id = ${thread}`)).rejects.toMatchObject({ code: "PT409" });
+      await expect(asUser(owner, (tx) => tx`update public.thread_summaries set user_id = ${stranger} where conversation_id = ${thread}`)).rejects.toThrow();
+      await expect(save(owner, thread, 0)).rejects.toThrow();
+      expect(await stored(thread)).toEqual([{ user_id: owner, objective: "Newer", covers_through_position: 21 }]);
+    });
+
+    it("keeps the newest coverage when first inserts race", async () => {
+      const raced = randomUUID();
+      await sql`insert into public.conversations (id, user_id, title) values (${raced}, ${owner}, 'Race')`;
+      const results = await Promise.all([save(owner, raced, 9, "Nine"), save(owner, raced, 17, "Seventeen"), save(owner, raced, 13, "Thirteen")]);
+      expect(results.filter(Boolean).length).toBeGreaterThanOrEqual(1);
+      expect(await stored(raced)).toEqual([{ user_id: owner, objective: "Seventeen", covers_through_position: 17 }]);
+    });
+
+    it("denies other users every read and write", async () => {
+      expect(await save(stranger, strangerThread, 9)).toBe(true);
+      expect(await asUser(owner, (tx) => tx`select conversation_id from public.thread_summaries where conversation_id = ${strangerThread}`)).toEqual([]);
+      expect(await asUser(stranger, (tx) => tx`select conversation_id from public.thread_summaries where conversation_id = ${thread}`)).toEqual([]);
+      // Writing into another owner's conversation fails the owner foreign key, whatever user_id is claimed.
+      await expect(save(stranger, thread, 29, "Hijack")).rejects.toMatchObject({ code: "PT404" });
+      await expect(asUser(stranger, (tx) => tx`insert into public.thread_summaries (conversation_id, user_id, objective, important_context, decisions, completed_work, current_state, open_questions, covers_through_position)
+        values (${randomUUID()}, ${owner}, 'x', 'x', 'x', 'x', 'x', 'x', 1)`)).rejects.toThrow();
+      expect(await asUser(stranger, (tx) => tx`update public.thread_summaries set covers_through_position = 29 where conversation_id = ${thread} returning conversation_id`)).toHaveLength(0);
+      expect(await asUser(stranger, (tx) => tx`delete from public.thread_summaries where conversation_id = ${thread} returning conversation_id`)).toHaveLength(0);
+      await expect(asUser(randomUUID(), (tx) => tx`select public.save_thread_summary(${thread}::uuid, 'a', 'b', 'c', 'd', 'e', 'f', 29)`)).rejects.toThrow();
+      expect(await stored(thread)).toEqual([{ user_id: owner, objective: "Newer", covers_through_position: 21 }]);
+    });
+
+    it("deletes the summary with its conversation", async () => {
+      await asUser(owner, (tx) => tx`delete from public.conversations where id = ${thread}`);
+      expect(await stored(thread)).toEqual([]);
+      expect(await stored(strangerThread)).toHaveLength(1);
     });
   });
 });

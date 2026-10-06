@@ -49,7 +49,7 @@ const sensitiveKeys = new Set([
 const secretText = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|bearer\s+\S+|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}|sk-[A-Za-z0-9]{8,}/i;
 const safeToken = /^[A-Za-z0-9_.:-]{1,64}$/;
 const safeKey = /^[A-Za-z][A-Za-z0-9]{0,40}$/;
-const safeEvent = /^[a-z][a-z0-9.]{0,80}$/;
+const safeEvent = /^[a-z][a-z0-9._]{0,80}$/;
 
 function normalizeKey(key: string) {
   return key.toLowerCase().replace(/[^a-z0-9]/g, "");
