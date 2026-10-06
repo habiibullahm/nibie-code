@@ -41,6 +41,7 @@ import { compareNames, compareText } from "@/lib/chat/order";
 import { readRoomFileSelection, rememberRoomFileSelection } from "@/lib/files/selection-memory";
 import { abortLiveChatStream, finishLiveChatStream, liveChatConversationId, shouldStopLiveChatOnLeave, startLiveChatStream } from "@/lib/chat/live-stream";
 import { stoppedContent, type StopRequest } from "@/lib/chat/stop";
+import { suppressSupersededPendingAssistants } from "@/lib/chat/optimistic";
 import { activeAssistantId, classifyStreamFailure, hasActiveGeneration, isRecoverySettled, isRegressiveSnapshot, latestReplyFailed, messagePersistenceConfirmed, needsServerCheck, recoveryPollAction, recoveryPollMs, unseenGenerationSettled } from "@/lib/chat/recovery";
 
 type Conversation = ConversationSummary & { messages: PersistedMessage[] };
@@ -206,7 +207,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const activeLocal = localMessages[activeId ?? ""];
   const messages = useMemo(() => preview
     ? [...((activeConversation as Conversation | undefined)?.messages ?? []), ...(activeLocal ?? [])]
-    : [...new Map([...(savedMessages ?? []), ...(activeLocal ?? [])].map((message) => [message.id, message])).values()].filter((message) => !removedIds.includes(message.id)).sort((left, right) => left.position - right.position),
+    : suppressSupersededPendingAssistants([...new Map([...(savedMessages ?? []), ...(activeLocal ?? [])].map((message) => [message.id, message])).values()]).filter((message) => !removedIds.includes(message.id)).sort((left, right) => left.position - right.position),
   [preview, activeConversation, activeLocal, savedMessages, removedIds]);
   const loadingConversation = !preview && pendingId != null && initialData?.activeId !== pendingId && !activeLocal?.length;
   const centeredComposer = !showRoom && !loadingConversation && messages.length === 0;
@@ -863,7 +864,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const startEdit = useStableCallback((id: string) => setEditingId(id));
 
   const history = activeId ? activeId : null;
-  const caption = preview ? "Mock workspace · Messages stay in this tab and are not saved." : drafting && activeRoom ? `New thread in ${activeRoom.name}.` : streaming ? "Nibie is responding · You can stop at any time." : null;
+  const caption = preview ? "Mock workspace · Messages stay in this tab and are not saved." : drafting && activeRoom ? `New thread in ${activeRoom.name}.` : null;
   const threadRoomId = activeId ? activeConversation?.room_id ?? null : drafting ? selectedRoomId : null;
   const threadRoom = rooms.find((room) => room.id === threadRoomId) ?? null;
   const roomItems = [{ value: "", label: "General" }, ...rooms.map((room) => ({ value: room.id, label: room.name }))];
