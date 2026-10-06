@@ -1,6 +1,6 @@
 export const preferredLanguages = ["auto", "en", "id"] as const;
 export const preferenceModels = ["fast", "balanced", "reasoning"] as const;
-// Persisted values. "balanced" is shown as Complete, the default depth; it keeps its stored name for compatibility.
+// Persisted values. "balanced" is shown as Default, the standard depth; it keeps its stored name for compatibility.
 export const responseLengths = ["concise", "balanced", "detailed"] as const;
 export const responseStyles = ["natural", "professional", "direct"] as const;
 

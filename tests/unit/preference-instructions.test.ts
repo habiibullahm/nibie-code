@@ -3,10 +3,10 @@ import { preferenceInstructions } from "../../lib/preferences/instructions";
 import { defaultUserPreferences, type UserPreferences } from "../../lib/preferences/types";
 
 describe("preference instructions", () => {
-  it("states language, depth, and style, including the auto default and Complete for the stored balanced value", () => {
+  it("states language and style, including the auto default, and omits the Default depth the core policy already states", () => {
     const text = preferenceInstructions(defaultUserPreferences());
     expect(text).toContain("Preferred language: Auto (follow the user's prompt and context)");
-    expect(text).toContain("Response depth: Complete");
+    expect(text).not.toContain("Response depth");
     expect(text).toContain("Response style: Natural");
     expect(text).toContain("instructions in the current message take precedence");
     expect(text).not.toContain("Preferred name:");

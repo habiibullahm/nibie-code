@@ -5,8 +5,9 @@ const languageLabel: Record<PreferredLanguage, string> = {
   en: "English",
   id: "Bahasa Indonesia",
 };
-// "balanced" is the stored value for Complete; the label is the product name.
-const depthLabel: Record<ResponseLength, string> = { concise: "Concise", balanced: "Complete", detailed: "Detailed" };
+// Default (stored as "balanced") is stated by the core policy on every request, so like profilePieces this only records a
+// non-default depth; repeating Default here would send it twice.
+const depthLabel: Partial<Record<ResponseLength, string>> = { concise: "Concise", detailed: "Detailed" };
 const styleLabel: Record<ResponseStyle, string> = { natural: "Natural", professional: "Professional", direct: "Direct" };
 
 // Collapses control characters and line breaks so a preference cannot add extra instruction lines.
@@ -36,9 +37,10 @@ export function preferenceInstructions(preferences: UserPreferences = defaultUse
   const lines = [
     "These are soft defaults. They do not override safety or product rules, and instructions in the current message take precedence.",
     `Preferred language: ${languageLabel[preferences.preferredLanguage]}`,
-    `Response depth: ${depthLabel[preferences.responseLength]}`,
     `Response style: ${styleLabel[preferences.responseStyle]}`,
   ];
+  const depth = depthLabel[preferences.responseLength];
+  if (depth) lines.splice(2, 0, `Response depth: ${depth}`);
   if (name) lines.push(`Preferred name: ${quoteUserText(name)}`);
   if (about) lines.push(`User-provided context: ${quoteUserText(about)}`);
   return lines.join("\n");

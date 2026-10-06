@@ -53,7 +53,7 @@ export default function PrivacyPage() {
       <p>Conversations are saved to your account. A conversation belongs to the account that created it.</p>
 
       <h2>Preferences</h2>
-      <p>You choose what Nibie knows about you. Saved account preferences can include a preferred name, preferred language, default model, response length, response style, and an About you note. Personalization uses those choices. This is not hidden memory. You can clear the preferred name and the About you note.</p>
+      <p>You choose what Nibie knows about you. Saved account preferences can include a preferred name, preferred language, default model, response depth, response style, and an About you note. Personalization uses those choices. This is not hidden memory. You can clear the preferred name and the About you note.</p>
       <p>English and Bahasa Indonesia are saved on your account. Auto follows the language you are using.</p>
       <p>Theme, and the choices for how composing and reading a conversation behaves, stay on this device.</p>
 
