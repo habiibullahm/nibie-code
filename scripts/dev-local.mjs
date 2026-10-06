@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import nextEnv from "@next/env";
 
+// @next/env is CommonJS: Node's ESM loader cannot see its named exports, so read loadEnvConfig from the default export.
 const { loadEnvConfig } = nextEnv;
 
 const isWindows = process.platform === "win32";
