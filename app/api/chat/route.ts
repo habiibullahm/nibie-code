@@ -27,6 +27,11 @@ import { operationalCodes } from "@/lib/observability/codes";
 import { logError, logInfo, logWarn } from "@/lib/observability/logger";
 import { requestIdFrom } from "@/lib/observability/request-id";
 import { weeklyCreditCost, WEEKLY_FREE_CREDIT_LIMIT } from "@/lib/usage/policy";
+import { getWebSearchConfig } from "@/lib/web/config";
+import { getWebSearchProvider } from "@/lib/web/provider";
+import { runWebSearchPipeline } from "@/lib/web/pipeline";
+import { decideWebSearch } from "@/lib/web/routing";
+import type { WebContextInput } from "@/lib/web/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -158,6 +163,68 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   const durationMs = () => Date.now() - responseStartedAt;
   logInfo("chat.response.started", { requestId, regenerate, mode });
 
+  // Web search runs after Room hybrid retrieval and only for a fresh generation (replay already returned).
+  // Failures never block the reply: empty web context continues as normal chat.
+  let web: WebContextInput[] | undefined;
+  const webDecision = decideWebSearch(userMessage.content, { hasRoomFileContext: Boolean(files?.length) });
+  logInfo("web.route.decided", { requestId, search: webDecision.search, reason: webDecision.reason });
+  if (webDecision.search) {
+    const webConfig = getWebSearchConfig();
+    const webProvider = getWebSearchProvider();
+    if (webConfig && webProvider) {
+      const webStartedAt = Date.now();
+      logInfo("web.search.started", { requestId, maxResults: webConfig.maxResults });
+      try {
+        const pipeline = await runWebSearchPipeline(userMessage.content, {
+          signal: request.signal,
+          provider: webProvider,
+          config: webConfig,
+        });
+        const webDurationMs = Date.now() - webStartedAt;
+        if (pipeline.sources.length) {
+          web = pipeline.sources;
+          const snippetOnlyCount = pipeline.sources.filter((source) => source.retrieval === "web_snippet_only").length;
+          logInfo("web.search.succeeded", {
+            requestId,
+            resultCount: pipeline.searchResultCount,
+            durationMs: webDurationMs,
+          });
+          logInfo("web.fetch.completed", {
+            requestId,
+            fetchedCount: pipeline.pagesFetched,
+            failedCount: snippetOnlyCount,
+            durationMs: webDurationMs,
+          });
+          logInfo("web.context.included", {
+            requestId,
+            sourceCount: pipeline.sources.length,
+            snippetOnlyCount,
+          });
+        } else if (pipeline.degraded) {
+          logWarn("web.search.failed", {
+            requestId,
+            category: pipeline.failureCategory ?? "empty",
+            durationMs: webDurationMs,
+            code: operationalCodes.webSearchFailed,
+          });
+        } else {
+          logInfo("web.search.succeeded", {
+            requestId,
+            resultCount: pipeline.searchResultCount,
+            durationMs: webDurationMs,
+          });
+        }
+      } catch {
+        logWarn("web.search.failed", {
+          requestId,
+          category: "provider_error",
+          durationMs: Date.now() - webStartedAt,
+          code: operationalCodes.webSearchFailed,
+        });
+      }
+    }
+  }
+
   // Every save of this generation only applies while its row is still streaming. An explicit Stop has already written the
   // text the user saw and marked the row interrupted, so a late finish, error or disconnect save can never replace it.
   const replyStopped = async () => {
@@ -186,6 +253,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       room,
       files,
       attachments,
+      web,
       messages: rows.map((row) => ({ role: row.role as "user" | "assistant", content: row.content, position: row.position })),
       currentPosition: userMessage.position,
     });
@@ -195,6 +263,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
     const roomIncluded = plan.blocks.some((block) => block.id === "room" && block.included);
     const pinsIncluded = plan.blocks.some((block) => block.id === "pins" && block.included);
     const fileIncluded = plan.blocks.some((block) => block.id === "file" && block.included);
+    const webIncluded = plan.blocks.some((block) => block.id === "web" && block.included);
     const summaryIncluded = plan.blocks.some((block) => block.id === "thread_summary" && block.included);
     logInfo("context.built", {
       requestId,
@@ -205,6 +274,8 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       fileIncluded,
       fileCount: files?.length ?? 0,
       attachmentCount: attachments.length,
+      webIncluded,
+      webCount: web?.length ?? 0,
       summaryIncluded,
       sourceCount: plan.blocks.filter((block) => block.included).length,
       recentMessageCount: plan.diagnostics.recentMessageCount,

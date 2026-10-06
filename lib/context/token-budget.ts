@@ -9,6 +9,8 @@ export const PIN_TOKEN_CAP = 800;
 export const FILE_TOKEN_CAP = 1_500;
 // Shared by every chat attachment in one request.
 export const ATTACHMENT_TOKEN_CAP = 6_000;
+// Shared by every web source in one request (under the file cap).
+export const WEB_TOKEN_CAP = 1_200;
 
 export function estimateTokens(text: string) {
   return Math.ceil(text.length / 4);

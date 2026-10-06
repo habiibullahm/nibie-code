@@ -6,7 +6,8 @@ import { pinPieces, type PinPiece } from "@/lib/context/pin-context";
 import { profilePieces, profileReason, type ProfilePiece } from "@/lib/context/profile-context";
 import { roomPieces, roomReason, type RoomPiece } from "@/lib/context/room-context";
 import { renderThreadSummary, resolveThreadSummary, selectThreadMessages } from "@/lib/context/thread-context";
-import { ATTACHMENT_TOKEN_CAP, budgetLimits, estimateTokens, FILE_TOKEN_CAP, PIN_TOKEN_CAP, PROTECTED_RECENT_COUNT, ROOM_TOKEN_CAP, SUMMARY_TOKEN_CAP } from "@/lib/context/token-budget";
+import { renderWebContext } from "@/lib/context/web-context";
+import { ATTACHMENT_TOKEN_CAP, budgetLimits, estimateTokens, FILE_TOKEN_CAP, PIN_TOKEN_CAP, PROTECTED_RECENT_COUNT, ROOM_TOKEN_CAP, SUMMARY_TOKEN_CAP, WEB_TOKEN_CAP } from "@/lib/context/token-budget";
 
 function block(partial: ContextBlock): ContextBlock {
   return partial;
@@ -91,10 +92,15 @@ export function buildContext(input: BuildContextInput): ContextPlan {
   const renderedFiles = requestedFiles ? renderFileContext(requestedFiles, Math.min(FILE_TOKEN_CAP, remaining.value)) : null;
   if (renderedFiles?.text) remaining.value -= estimateTokens(renderedFiles.text);
 
-  // Chat attachments of this conversation: after room context and room files, before the summary and older history.
+  // Chat attachments of this conversation: after room context and room files, before web and the summary.
   const requestedAttachments = input.attachments?.length ? input.attachments : null;
   const renderedAttachments = requestedAttachments ? renderAttachmentContext(requestedAttachments, Math.min(ATTACHMENT_TOKEN_CAP, remaining.value)) : null;
   if (renderedAttachments?.text) remaining.value -= estimateTokens(renderedAttachments.text);
+
+  // Public web sources: after files/attachments, before summary and older history. Never invented here.
+  const requestedWeb = input.web?.length ? input.web : null;
+  const renderedWeb = requestedWeb ? renderWebContext(requestedWeb, Math.min(WEB_TOKEN_CAP, remaining.value)) : null;
+  if (renderedWeb?.text) remaining.value -= estimateTokens(renderedWeb.text);
 
   let summaryText = "";
   let summaryIncluded = false;
@@ -115,13 +121,14 @@ export function buildContext(input: BuildContextInput): ContextPlan {
   const olderFit = takeNewest(olderMessages.filter((message) => message.position > coveredThrough), remaining);
   const dialogue = [...olderFit.included, ...protectedFit.included, current];
   const droppedMessages = [...olderFit.dropped, ...protectedFit.dropped];
-  const truncated = droppedMessages.length > 0 || droppedPieces.length > 0 || droppedRoom.length > 0 || droppedPins.length > 0 || Boolean(renderedFiles?.truncated) || Boolean(renderedAttachments?.truncated) || summaryDroppedForBudget;
+  const truncated = droppedMessages.length > 0 || droppedPieces.length > 0 || droppedRoom.length > 0 || droppedPins.length > 0 || Boolean(renderedFiles?.truncated) || Boolean(renderedAttachments?.truncated) || Boolean(renderedWeb?.truncated) || summaryDroppedForBudget;
 
   const profileText = includedPieces.map((piece) => piece.text).join("\n");
   const roomText = includedRoom.map((piece) => piece.text).join("\n\n");
   const pinText = includedPins.map((piece) => piece.text).join("\n\n");
   const fileText = renderedFiles?.text ?? "";
   const attachmentText = renderedAttachments?.text ?? "";
+  const webText = renderedWeb?.text ?? "";
   const blocks: ContextBlock[] = [
     block({ id: "core", authority: "policy", priority: 1, required: true, text: corePolicyText, tokenEstimate: coreTokens, included: true, exclusionReason: null }),
     block({ id: "profile", authority: "untrusted_data", priority: 4, required: false, text: profileText, tokenEstimate: profileText ? estimateTokens(profileText) : 0, included: Boolean(profileText), exclusionReason: profileText ? null : input.preferenceReadFailed ? "read_failed" : droppedPieces.length && !includedPieces.length ? "budget" : "defaults_only" }),
@@ -135,6 +142,9 @@ export function buildContext(input: BuildContextInput): ContextPlan {
   }
   if (requestedAttachments) {
     blocks.push(block({ id: "attachment", authority: "untrusted_data", priority: 6, required: false, text: attachmentText, tokenEstimate: attachmentText ? estimateTokens(attachmentText) : 0, included: Boolean(attachmentText), exclusionReason: attachmentText ? null : "budget" }));
+  }
+  if (requestedWeb) {
+    blocks.push(block({ id: "web", authority: "untrusted_data", priority: 6, required: false, text: webText, tokenEstimate: webText ? estimateTokens(webText) : 0, included: Boolean(webText), exclusionReason: webText ? null : "budget" }));
   }
   blocks.push(block({ id: "thread_summary", authority: "untrusted_data", priority: 6, required: false, text: summaryText, tokenEstimate: summaryText ? estimateTokens(summaryText) : 0, included: summaryIncluded, exclusionReason: summaryIncluded ? null : summaryDroppedForBudget ? "budget" : resolved.exclusionReason }));
   for (const message of dialogue) {
@@ -184,6 +194,12 @@ export function buildContext(input: BuildContextInput): ContextPlan {
       : { type: "attachment", label: "Attachments", state: "not_used", reason: "Not used for this reply." }
     : null;
 
+  const webDiagnostic: ContextSourceDiagnostic | null = requestedWeb
+    ? renderedWeb?.includedCount
+      ? { type: "web", label: "Web sources", state: "included", reason: renderedWeb.truncated ? "Partly included: some web text did not fit this reply." : renderedWeb.includedCount === 1 ? "A public web source" : "Public web sources" }
+      : { type: "web", label: "Web sources", state: "not_used", reason: "Not used for this reply." }
+    : null;
+
   let diagnostics: ContextDiagnostics;
   try {
     const sources = [profileDiagnostic, recentDiagnostic, summaryDiagnostic];
@@ -196,6 +212,7 @@ export function buildContext(input: BuildContextInput): ContextPlan {
       sources.splice(insertAt, 0, fileDiagnostic);
     }
     if (attachmentDiagnostic) sources.splice(sources.findIndex((source) => source.type === "recent_messages"), 0, attachmentDiagnostic);
+    if (webDiagnostic) sources.splice(sources.findIndex((source) => source.type === "recent_messages"), 0, webDiagnostic);
     diagnostics = { sources, recentMessageCount: dialogue.length };
   } catch {
     diagnostics = { sources: [], recentMessageCount: dialogue.length };
