@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/auth/get-user";
+import { acquireBackfillSlot, releaseBackfillSlot } from "@/lib/files/backfill-guard";
 import { backfillRoomFileEmbeddings } from "@/lib/files/search";
 import { validateConversationId } from "@/lib/chat/validation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -9,6 +10,8 @@ export const dynamic = "force-dynamic";
 const BATCH_LIMIT = 20;
 
 export async function POST(request: Request, context: { params: Promise<{ roomId: string }> }) {
+  let slotUserId: string | undefined;
+  let consumed = false;
   try {
     const url = new URL(request.url);
     const origin = request.headers.get("origin");
@@ -26,6 +29,16 @@ export async function POST(request: Request, context: { params: Promise<{ roomId
     if (roomError) return NextResponse.json({ error: "Embeddings are unavailable. Please try again." }, { status: 503 });
     if (!room) return NextResponse.json({ error: "That room is no longer available." }, { status: 404 });
 
+    const slot = acquireBackfillSlot(user.id);
+    if (!slot.ok) {
+      return NextResponse.json(
+        { error: slot.reason === "busy" ? "A backfill is already running. Please wait." : "Backfill is rate limited. Please try again shortly." },
+        { status: 429, headers: { "cache-control": "private, no-store" } },
+      );
+    }
+    slotUserId = user.id;
+    consumed = true;
+
     const processed = await backfillRoomFileEmbeddings(supabase, parsedRoom.data, BATCH_LIMIT);
     if (!Number.isInteger(processed) || processed < 0 || processed > BATCH_LIMIT) {
       return NextResponse.json({ error: "Embeddings are unavailable. Please try again." }, { status: 503 });
@@ -33,5 +46,7 @@ export async function POST(request: Request, context: { params: Promise<{ roomId
     return NextResponse.json({ processed, limit: BATCH_LIMIT }, { headers: { "cache-control": "private, no-store" } });
   } catch {
     return NextResponse.json({ error: "Embeddings are unavailable. Please try again." }, { status: 503 });
+  } finally {
+    if (slotUserId) releaseBackfillSlot(slotUserId, consumed);
   }
 }

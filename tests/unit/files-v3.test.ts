@@ -28,8 +28,24 @@ it.each(["missing-key", "network", "http", "semantic-sql"])("degrades to lexical
   vi.stubGlobal("fetch", failure === "network" ? vi.fn().mockRejectedValue(new Error("network")) : vi.fn().mockResolvedValue(failure === "http" ? new Response("", { status: 429 }) : embeddingResponse()));
   const lexical = fixturePools(fixtureCases[0]).lexical.slice(0, 1);
   const rpc = vi.fn(async (name: string) => name === "search_room_file_chunks" ? { data: lexical, error: null } : { data: null, error: {} });
-  expect(await searchRoomFiles({ rpc }, "current-room", fixtureCases[0].query)).toEqual(lexical);
+  const onSemanticFailure = vi.fn();
+  expect(await searchRoomFiles({ rpc }, "current-room", fixtureCases[0].query, [], () => {}, onSemanticFailure)).toEqual(lexical);
   expect(rpc.mock.calls[0][0]).toBe("search_room_file_chunks");
+  if (failure === "missing-key") expect(onSemanticFailure).not.toHaveBeenCalled();
+  else expect(onSemanticFailure).toHaveBeenCalledOnce();
+});
+it("uses a tighter query embedding timeout and skips semantic without a key", async () => {
+  vi.stubEnv("OPENAI_API_KEY", "mock-key");
+  const fetcher = vi.fn().mockResolvedValue(embeddingResponse());
+  vi.stubGlobal("fetch", fetcher);
+  const rpc = vi.fn().mockResolvedValue({ data: [], error: null });
+  await searchRoomFiles({ rpc }, "room", "deployment");
+  expect(fetcher.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  vi.stubEnv("OPENAI_API_KEY", "");
+  const idle = vi.fn();
+  vi.stubGlobal("fetch", idle);
+  await searchRoomFiles({ rpc }, "room", "deployment");
+  expect(idle).not.toHaveBeenCalled();
 });
 it("keeps selected files out before final five and removes duplicate chunks", () => {
   const { lexical, semantic } = fixturePools(fixtureCases[0]);

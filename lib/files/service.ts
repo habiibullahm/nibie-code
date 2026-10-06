@@ -2,10 +2,11 @@ import { randomUUID } from "node:crypto";
 import { buildRoomFilePath, fileDeletionOutcome, inspectRoomFile, type StorageDeleteResult } from "@/lib/files/inspect";
 import { MAX_ROOM_FILES, ROOM_FILES_BUCKET } from "@/lib/files/limits";
 import type { RoomFileSummary } from "@/lib/files/types";
-import { embedFileTexts } from "@/lib/files/embeddings";
+import { embedFileTexts, embeddingKeyConfigured, UPLOAD_EMBEDDING_TIMEOUT_MS } from "@/lib/files/embeddings";
 import { chunkRoomFileText } from "@/lib/files/chunks";
 
 type QueryError = { message?: string; code?: string } | null;
+type RpcResult = { data: unknown; error: QueryError };
 
 type RowQuery = {
   select: (columns: string, options?: { count?: "exact"; head?: boolean }) => RowQuery;
@@ -27,6 +28,8 @@ export type RoomFileClient = {
       remove: (paths: string[]) => Promise<{ error: QueryError }>;
     };
   };
+  /** Optional; when present, upload fills embeddings after lexical indexing. */
+  rpc?: (name: string, args: Record<string, unknown>) => PromiseLike<RpcResult>;
 };
 
 const unavailable = "That room is no longer available.";
@@ -91,15 +94,31 @@ export async function saveRoomFile(client: RoomFileClient, ownerId: string, room
     await client.storage.from(ROOM_FILES_BUCKET).remove([stored.path]);
     return { error: saveFailed };
   }
-  const chunks = chunkRoomFileText(inspected.text).map((chunk) => ({ file_id: fileId, user_id: ownerId, room_id: roomId, chunk_index: chunk.index, content: chunk.text }));
-  let vectors: number[][] | undefined;
-  try { vectors = await embedFileTexts(chunks.map((chunk) => chunk.content)); } catch { /* Lexical indexing remains available; maintenance can fill missing vectors. */ }
-  const indexed = await client.from("room_file_chunks").insert(chunks.map((chunk, i) => vectors ? { ...chunk, embedding: JSON.stringify(vectors[i]) } : chunk));
+  // Lexical index first so save never depends on the embedding provider.
+  const chunks = chunkRoomFileText(inspected.text).map((chunk) => ({
+    id: randomUUID(),
+    file_id: fileId,
+    user_id: ownerId,
+    room_id: roomId,
+    chunk_index: chunk.index,
+    content: chunk.text,
+  }));
+  const indexed = await client.from("room_file_chunks").insert(chunks);
   const indexResult = await Promise.resolve(indexed).then((value) => value as { error: QueryError });
   if (indexResult.error) {
     await client.from("room_files").delete().eq("id", fileId).eq("room_id", roomId);
     await client.storage.from(ROOM_FILES_BUCKET).remove([stored.path]);
     return { error: saveFailed };
+  }
+  // Best-effort vector fill after lexical rows exist; timeout or failure leaves maintenance to backfill.
+  if (embeddingKeyConfigured() && client.rpc && chunks.length) {
+    try {
+      const vectors = await embedFileTexts(chunks.map((chunk) => chunk.content), { timeoutMs: UPLOAD_EMBEDDING_TIMEOUT_MS });
+      await Promise.resolve(client.rpc("fill_room_file_embeddings", {
+        p_room_id: roomId,
+        p_rows: chunks.map((chunk, i) => ({ id: chunk.id, embedding: vectors[i] })),
+      }));
+    } catch { /* Lexical search remains available. */ }
   }
   const row = inserted.data as RoomFileSummary;
   return {

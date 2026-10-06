@@ -117,7 +117,14 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   }
   if (conversation.room_id) {
     const currentText = String(userMessage?.content ?? "").trim();
-    const matches = await searchRoomFiles(supabase, conversation.room_id, currentText, (files ?? []).flatMap((file) => file.id ? [file.id] : []), () => logWarn("room_file.search.failed", { requestId, stage: "room_file_search" }));
+    const matches = await searchRoomFiles(
+      supabase,
+      conversation.room_id,
+      currentText,
+      (files ?? []).flatMap((file) => file.id ? [file.id] : []),
+      () => logWarn("room_file.search.failed", { requestId, stage: "room_file_search" }),
+      () => logWarn("room_file.search.failed", { requestId, stage: "room_file_search_semantic" }),
+    );
     if (matches.length) files = prioritizeRoomFileMatches(files ?? [], matches);
   }
   const mode = requestedModel?.data && requestedModel.data !== "Auto" ? requestedModel.data : resolveMode(normalizeSavedMode(conversation.selected_model), availableModes);

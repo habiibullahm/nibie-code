@@ -68,6 +68,8 @@ GRANT EXECUTE ON FUNCTION public.room_file_lexical_tsquery(text) TO authenticate
 REVOKE ALL ON FUNCTION public.search_room_file_chunks(uuid, text, integer) FROM PUBLIC;--> statement-breakpoint
 GRANT EXECUTE ON FUNCTION public.search_room_file_chunks(uuid, text, integer) TO authenticated;--> statement-breakpoint
 -- Respect installations where Supabase already placed vector in extensions.
+-- Create with search_path only; optional HNSW GUCs are applied via ALTER when supported
+-- so older pgvector builds cannot fail CREATE FUNCTION on unrecognized settings.
 DO $migration$
 DECLARE vector_schema text;
 BEGIN
@@ -76,10 +78,7 @@ BEGIN
 
 CREATE FUNCTION public.search_room_file_chunks_semantic(p_room_id uuid, p_embedding public.vector(512), p_limit integer DEFAULT 10)
 RETURNS TABLE(file_id uuid, original_name text, content text, extracted_truncated boolean, chunk_index integer, similarity double precision)
-LANGUAGE sql STABLE SECURITY INVOKER SET search_path = ''
-SET hnsw.ef_search = '100'
-SET hnsw.iterative_scan = 'strict_order'
-SET hnsw.max_scan_tuples = '1000' AS $$
+LANGUAGE sql STABLE SECURITY INVOKER SET search_path = '' AS $$
   SELECT c.file_id, f.original_name, c.content, f.extracted_truncated, c.chunk_index,
          1 - (c.embedding OPERATOR(public.<=>) p_embedding) AS similarity
   FROM public.room_file_chunks c
@@ -89,6 +88,18 @@ SET hnsw.max_scan_tuples = '1000' AS $$
   ORDER BY c.embedding OPERATOR(public.<=>) p_embedding
   LIMIT least(greatest(p_limit, 0), 10)
 $$;$ddl$, 'public.vector', quote_ident(vector_schema) || '.vector'), 'OPERATOR(public.<=>)', 'OPERATOR(' || quote_ident(vector_schema) || '.<=>)');
+  BEGIN
+    EXECUTE replace($alter$ALTER FUNCTION public.search_room_file_chunks_semantic(uuid, public.vector, integer) SET hnsw.ef_search = '100'$alter$, 'public.vector', quote_ident(vector_schema) || '.vector');
+  EXCEPTION WHEN OTHERS THEN NULL;
+  END;
+  BEGIN
+    EXECUTE replace($alter$ALTER FUNCTION public.search_room_file_chunks_semantic(uuid, public.vector, integer) SET hnsw.iterative_scan = 'strict_order'$alter$, 'public.vector', quote_ident(vector_schema) || '.vector');
+  EXCEPTION WHEN OTHERS THEN NULL;
+  END;
+  BEGIN
+    EXECUTE replace($alter$ALTER FUNCTION public.search_room_file_chunks_semantic(uuid, public.vector, integer) SET hnsw.max_scan_tuples = '1000'$alter$, 'public.vector', quote_ident(vector_schema) || '.vector');
+  EXCEPTION WHEN OTHERS THEN NULL;
+  END;
 END;
 $migration$;--> statement-breakpoint
 CREATE FUNCTION public.missing_room_file_embeddings(p_room_id uuid, p_limit integer DEFAULT 20)

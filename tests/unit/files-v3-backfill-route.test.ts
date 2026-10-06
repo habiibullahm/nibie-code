@@ -5,6 +5,7 @@ vi.mock("@/lib/supabase/server", () => ({ createSupabaseServerClient: createClie
 vi.mock("@/lib/files/search", () => ({ backfillRoomFileEmbeddings: backfill }));
 
 import { POST } from "../../app/api/rooms/[roomId]/files/backfill-embeddings/route";
+import { resetBackfillGuardForTests } from "../../lib/files/backfill-guard";
 
 const owner = "7c1f8a52-4f61-4d7e-9a3e-1b2c3d4e5f60";
 const room = "5e9bdcca-9205-4fea-a773-13952bb78c44";
@@ -20,7 +21,11 @@ function setup({ authenticated = true, roomExists = true } = {}) {
 }
 
 describe("POST /api/rooms/[roomId]/files/backfill-embeddings", () => {
-  beforeEach(() => { createClient.mockReset(); backfill.mockReset(); });
+  beforeEach(() => {
+    createClient.mockReset();
+    backfill.mockReset();
+    resetBackfillGuardForTests();
+  });
 
   it("requires a signed-in owner and rejects cross-origin requests", async () => {
     const { from } = setup({ authenticated: false });
@@ -54,5 +59,30 @@ describe("POST /api/rooms/[roomId]/files/backfill-embeddings", () => {
     const response = await POST(request(), { params: Promise.resolve({ roomId: room }) });
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toEqual({ error: "Embeddings are unavailable. Please try again." });
+  });
+
+  it("rejects a second concurrent backfill for the same user", async () => {
+    setup();
+    let release!: () => void;
+    backfill.mockImplementation(() => new Promise<number>((resolve) => { release = () => resolve(1); }));
+    const first = POST(request(), { params: Promise.resolve({ roomId: room }) });
+    await vi.waitFor(() => expect(backfill).toHaveBeenCalledTimes(1));
+    setup();
+    const second = await POST(request(), { params: Promise.resolve({ roomId: room }) });
+    expect(second.status).toBe(429);
+    release();
+    expect((await first).status).toBe(200);
+  });
+
+  it("rate-limits more than six started batches per minute per user", async () => {
+    backfill.mockResolvedValue(1);
+    for (let i = 0; i < 6; i++) {
+      setup();
+      expect((await POST(request(), { params: Promise.resolve({ roomId: room }) })).status).toBe(200);
+    }
+    setup();
+    const limited = await POST(request(), { params: Promise.resolve({ roomId: room }) });
+    expect(limited.status).toBe(429);
+    await expect(limited.json()).resolves.toMatchObject({ error: expect.stringMatching(/rate limited/i) });
   });
 });

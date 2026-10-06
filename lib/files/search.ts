@@ -1,5 +1,5 @@
 import "server-only";
-import { embedFileTexts } from "./embeddings";
+import { embedFileTexts, embeddingKeyConfigured, QUERY_EMBEDDING_TIMEOUT_MS } from "./embeddings";
 import { buildLexicalSearchQuery } from "./lexical-query";
 import { fuseRoomFileCandidates, type Candidate } from "./hybrid";
 type RpcResult = { data: unknown; error: unknown };
@@ -11,9 +11,23 @@ async function boundedRpc(client: FileSearchClient, name: string, args: Record<s
 }
 function candidates(data: unknown): Candidate[] {
   if (!Array.isArray(data)) return [];
-  return data.filter((c): c is Candidate => c && typeof c.file_id === "string" && Number.isInteger(c.chunk_index) && typeof c.content === "string" && typeof c.original_name === "string").slice(0, 10);
+  return data.filter((c): c is Candidate => {
+    if (!c || typeof c !== "object") return false;
+    const row = c as Candidate;
+    return typeof row.file_id === "string" && Number.isInteger(row.chunk_index) && typeof row.content === "string" && typeof row.original_name === "string";
+  }).map((c) => {
+    const similarity = typeof c.similarity === "number" && Number.isFinite(c.similarity) ? c.similarity : undefined;
+    return similarity === undefined ? c : { ...c, similarity };
+  }).slice(0, 10);
 }
-export async function searchRoomFiles(client: FileSearchClient, roomId: string, query: string, excludedFileIds: string[] = [], onLexicalFailure: () => void = () => {}) {
+export async function searchRoomFiles(
+  client: FileSearchClient,
+  roomId: string,
+  query: string,
+  excludedFileIds: string[] = [],
+  onLexicalFailure: () => void = () => {},
+  onSemanticFailure: () => void = () => {},
+) {
   if (!query.trim()) return [];
   const lexicalQuery = buildLexicalSearchQuery(query);
   const lexicalTask = (async () => {
@@ -25,11 +39,14 @@ export async function searchRoomFiles(client: FileSearchClient, roomId: string, 
     } catch { onLexicalFailure(); return []; }
   })();
   const semanticTask = (async () => {
+    // Absent key is an expected lexical-only mode, not a failure to log.
+    if (!embeddingKeyConfigured()) return [];
     try {
-      const [embedding] = await embedFileTexts([query.slice(0, 2000)]);
+      const [embedding] = await embedFileTexts([query.slice(0, 2000)], { timeoutMs: QUERY_EMBEDDING_TIMEOUT_MS });
       const result = await boundedRpc(client, "search_room_file_chunks_semantic", { p_room_id: roomId, p_embedding: JSON.stringify(embedding), p_limit: 10 });
-      return result.error ? [] : candidates(result.data);
-    } catch { return []; }
+      if (result.error) { onSemanticFailure(); return []; }
+      return candidates(result.data);
+    } catch { onSemanticFailure(); return []; }
   })();
   const [lexical, semantic] = await Promise.all([lexicalTask, semanticTask]);
   try { return fuseRoomFileCandidates(query, lexical, semantic, true, excludedFileIds); } catch { return lexical.slice(0, 5).filter((c) => !excludedFileIds.includes(c.file_id)); }

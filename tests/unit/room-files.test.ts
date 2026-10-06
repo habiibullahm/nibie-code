@@ -212,6 +212,7 @@ describe("room file ownership", () => {
     const remove = vi.fn(async () => ({ error: options.storage === "fail" ? { message: "storage failed" } : null }));
     const inserts: Record<string, unknown>[] = [];
     const deletes: string[] = [];
+    const rpc = vi.fn(async () => ({ data: 1, error: null }));
     const db = {
       from(table: string) {
         const state = { table, op: "select" as "select" | "insert" | "delete", head: false };
@@ -221,12 +222,17 @@ describe("room file ownership", () => {
           in() { return builder; },
           order() { return builder; },
           limit() { return builder; },
-          insert(row: Record<string, unknown>) { state.op = "insert"; inserts.push(row); return builder; },
+          insert(row: Record<string, unknown> | Record<string, unknown>[]) {
+            state.op = "insert";
+            if (Array.isArray(row)) inserts.push(...row);
+            else inserts.push(row);
+            return builder;
+          },
           delete() { state.op = "delete"; deletes.push(table); return builder; },
           maybeSingle: async () => {
             if (state.table === "rooms") return { data: options.room === false ? null : { id: room }, error: null };
             if (state.op === "insert") {
-              const row = inserts.at(-1);
+              const row = inserts.find((item) => item.original_name) ?? inserts.at(-1);
               return { data: { id: row?.id, original_name: row?.original_name, mime_type: row?.mime_type, size_bytes: row?.size_bytes, created_at: "2026-10-03T00:00:00.000Z" }, error: null };
             }
             if (state.op === "delete") return { data: { id: file }, error: null };
@@ -239,8 +245,9 @@ describe("room file ownership", () => {
         return builder;
       },
       storage: { from: () => ({ upload, remove }) },
+      rpc,
     } as unknown as RoomFileClient;
-    return { db, upload, remove, inserts, deletes };
+    return { db, upload, remove, inserts, deletes, rpc };
   }
 
   it("stores the file under the session owner and refuses another user's room", async () => {
@@ -254,7 +261,7 @@ describe("room file ownership", () => {
     expect(foreign.upload).not.toHaveBeenCalled();
   });
 
-  it.each([true, false])("indexes the existing chunks once with embedding success=%s", async (success) => {
+  it.each([true, false])("indexes chunks lexically first, then best-effort fills embeddings success=%s", async (success) => {
     vi.stubEnv("OPENAI_API_KEY", "mock-key");
     const text = "Deployment validates and ships the backend. ".repeat(100);
     const expected = chunkRoomFileText(text);
@@ -265,9 +272,17 @@ describe("room file ownership", () => {
     expect((await saveRoomFile(owned.db, owner, room, textFile("deploy.txt", "text/plain", text))).data).toBeDefined();
     expect(fetcher).toHaveBeenCalledOnce();
     expect(JSON.parse(fetcher.mock.calls[0][1].body).input).toEqual(expected.map(c => c.text));
-    const chunks = owned.inserts[1] as unknown as { content: string; chunk_index: number; embedding?: string }[];
-    expect(chunks.map(c => ({ index: c.chunk_index, text: c.content }))).toEqual(expected);
-    expect(chunks.every(c => success ? c.embedding === JSON.stringify(embedding) : c.embedding === undefined)).toBe(true);
+    const chunkRows = owned.inserts.filter((row) => typeof row.chunk_index === "number") as { id: string; content: string; chunk_index: number; embedding?: string }[];
+    expect(chunkRows.map(c => ({ index: c.chunk_index, text: c.content }))).toEqual(expected);
+    expect(chunkRows.every(c => c.embedding === undefined && typeof c.id === "string")).toBe(true);
+    if (success) {
+      expect(owned.rpc).toHaveBeenCalledWith("fill_room_file_embeddings", {
+        p_room_id: room,
+        p_rows: chunkRows.map((chunk) => ({ id: chunk.id, embedding })),
+      });
+    } else {
+      expect(owned.rpc).not.toHaveBeenCalled();
+    }
   });
 
   it("leaves the database row in place when storage deletion fails", async () => {
