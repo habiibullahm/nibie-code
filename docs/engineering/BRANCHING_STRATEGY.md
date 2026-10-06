@@ -196,6 +196,25 @@ npm run release:check
 
 The Vercel Preview is responsible for the application production build for the proposed commit.
 
+## Production database migrations
+
+Production migrations are owned by the `Production DB Migration` GitHub Actions workflow, not by the Vercel build:
+
+```text
+merge/push to main
+        ↓
+GitHub Actions: Production DB Migration (npm run db:migrate)
+        ↓
+migration PASS
+        ↓
+Vercel production deploy
+```
+
+- The workflow runs on every push to `main` and on manual dispatch. Runs queue; they never overlap or cancel.
+- It reads `POSTGRES_URL_NON_POOLING` from the GitHub `production` environment and passes it to Drizzle as `DATABASE_URL`.
+- Vercel runs the default `npm run build` only. Its Deployment Checks require the `Production DB migration` check before promoting to production.
+- Migrations must stay additive and backward compatible: Vercel may build while the migration runs, and the previous app version serves traffic until promotion.
+
 Run heavier suites when relevant:
 
 ```text

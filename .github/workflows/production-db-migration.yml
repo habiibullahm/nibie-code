@@ -1,0 +1,63 @@
+name: Production DB Migration
+
+# Owns production schema migrations. Vercel builds the app only; it must not run db:migrate.
+# Vercel Deployment Checks should require the "Production DB migration" check below before
+# promoting a main deployment to production (see docs/releases/V1_RELEASE_CHECKLIST.md).
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never cancel a running migration, and never run two at once. Later pushes queue behind it.
+concurrency:
+  group: production-db-migration
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: Production DB migration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Holds POSTGRES_URL_NON_POOLING. Add required reviewers on this environment for a manual gate.
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check migration connection
+        env:
+          POSTGRES_URL_NON_POOLING: ${{ secrets.POSTGRES_URL_NON_POOLING }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$POSTGRES_URL_NON_POOLING" ]]; then
+            echo "::error::Secret POSTGRES_URL_NON_POOLING is not set on the 'production' environment."
+            exit 1
+          fi
+
+          # Migrations need a session-level connection; a transaction pooler (port 6543) breaks them.
+          if [[ "$POSTGRES_URL_NON_POOLING" == *":6543"* ]]; then
+            echo "::error::POSTGRES_URL_NON_POOLING points at a pooled port (6543). Use the direct or session-mode connection."
+            exit 1
+          fi
+
+      - name: Apply migrations
+        env:
+          # drizzle.config.ts reads DATABASE_URL.
+          DATABASE_URL: ${{ secrets.POSTGRES_URL_NON_POOLING }}
+        run: npm run db:migrate
