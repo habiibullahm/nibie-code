@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -38,6 +39,13 @@ describe("dev:local script", () => {
 
   it("names every value the status output did not provide", () => {
     expect(localEnvFromStatus('API_URL="http://127.0.0.1:54321"').missing).toEqual(["NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "DATABASE_URL"]);
+  });
+
+  it("loads under plain Node ESM, where a named import from the CommonJS @next/env fails", () => {
+    // Vitest resolves CommonJS named imports leniently, so only a real Node process proves the script can start.
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e", 'await import("./scripts/dev-local.mjs")'], { cwd: process.cwd(), encoding: "utf8" });
+    expect(result.stderr).not.toMatch(/Named export 'loadEnvConfig' not found/);
+    expect(result.status).toBe(0);
   });
 
   it("runs Windows .cmd launchers through a shell and avoids the removed status flags", () => {
