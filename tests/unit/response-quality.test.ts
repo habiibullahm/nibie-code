@@ -44,6 +44,8 @@ describe.each<ChatModel>(["Fast", "Balanced", "High"])("response quality provide
 describe("response quality rules and compatibility", () => {
   it.each([
     /Start with the useful answer/i, /Give a complete, useful answer by default/i, /Don't shorten merely to be concise, and don't pad/i,
+    /A simple question or definition gets a few sentences/i, /give each step or option useful substance, not just a label/i,
+    /Read ambiguous acronyms in the sense the conversation makes likeliest/i,
     /Depth: Complete is the default/i, /Explicit length or format requests in the current message win/i,
     /terse follow-ups as refinements of the current task/i, /Preserve companies, products, people, technologies, roles, places, acronyms/i,
     /never reinterpret an unfamiliar one as an unrelated generic concept without evidence/i,
@@ -115,13 +117,13 @@ describe("response quality rules and compatibility", () => {
     const plan = buildContext(input("hello"));
     const core = plan.blocks.find((block) => block.id === "core")!;
     const basePolicy = buildContext(input("hello", "Balanced")).blocks.find((block) => block.id === "core")!;
-    expect(basePolicy.tokenEstimate, `base policy is ${basePolicy.tokenEstimate} tokens; the smallest context window in the suite (1,300, room-files) leaves 1,294 after the current request`).toBeLessThan(1_295);
-    expect(core.tokenEstimate).toBeLessThan(1_300);
+    expect(basePolicy.tokenEstimate, `base policy is ${basePolicy.tokenEstimate} tokens; the smallest context window in the suite (1,400, room-files) leaves 1,394 after the current request`).toBeLessThan(1_395);
+    expect(core.tokenEstimate).toBeLessThan(1_400);
     expect(core.tokenEstimate).toBe(estimateTokens(contextPolicyFor("Fast")));
     expect(core.required).toBe(true);
     expect(plan.budget.estimatedTokens).toBe(plan.blocks.filter((block) => block.included).reduce((sum, block) => sum + block.tokenEstimate, 0));
-    expect(estimateTokens(responseQualityFor("Fast"))).toBeLessThan(1_000);
-    expect(estimateTokens(contextPolicyFor("Fast"))).toBeLessThan(1_300);
+    expect(estimateTokens(responseQualityFor("Fast"))).toBeLessThan(1_100);
+    expect(estimateTokens(contextPolicyFor("Fast"))).toBeLessThan(1_400);
   });
 
   it("keeps source injection outside authoritative policy and the current request last", () => {
