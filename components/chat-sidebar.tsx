@@ -4,7 +4,7 @@ import { memo, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore
 import { Archive, ChevronDown, ChevronRight, DoorOpen, MessageSquare, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Plus, RotateCcw, Search, Settings, SquarePen, Trash2, X } from "lucide-react";
 import { SIGN_OUT_LABEL } from "@/lib/privacy/sign-out";
 import { AccountMenu } from "@/components/account-menu";
-import type { ChangelogReleasePreview } from "@/lib/changelog";
+import type { WhatsNewPreview } from "@/lib/changelog";
 import { Brand, BrandMark, type BrandActivity } from "@/components/brand";
 import { chatPath } from "@/lib/routes";
 import { groupFor, groupThreads, historyGroups, requestTime } from "@/lib/chat/groups";
@@ -23,7 +23,7 @@ type Props = {
   preview: boolean;
   email: string;
   name: string;
-  releasePreview?: ChangelogReleasePreview | null;
+  releasePreview?: WhatsNewPreview | null;
   // The server's clock when the page was rendered; used (with the UTC calendar) until hydration has finished.
   renderedAt?: number;
   mobile?: boolean;

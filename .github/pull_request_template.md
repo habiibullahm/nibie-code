@@ -35,7 +35,7 @@ Smoke-tested flows:
 
 - Database migration: none / describe
 - Environment variables: none / describe
-- User-facing changelog: not needed / updated
+- User-facing changelog: updated under `## Unreleased` / not needed (add the `no-changelog` label)
 - Rollback concern: none / describe
 
 ## Merge checklist
