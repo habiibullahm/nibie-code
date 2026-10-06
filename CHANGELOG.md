@@ -1,4 +1,4 @@
-<!-- Newest entry first. Use a version heading only for a release that actually shipped. Keep public entries concise and user-facing: visible capabilities, meaningful UX improvements, reliability fixes, and important limitations. Keep implementation and release-engineering details in the release checklist, release notes, or relevant feature and engineering docs. -->
+<!-- Newest entry first. Every pull request that changes what users can see or do adds a line under "## Unreleased" (CI enforces this; purely internal changes use the no-changelog label). Put the most notable lines first in each group: Help → What's new previews the first four Added, Changed, and Fixed lines. Groups: Added, Changed, Fixed, Removed, Deprecated, Security, Known issues. Use a version heading (for example "## v1.0.0" followed by a date line) only for a release that actually shipped. Keep public entries concise and user-facing: visible capabilities, meaningful UX improvements, reliability fixes, and important limitations. Keep implementation and release-engineering details in the release checklist, release notes, or relevant feature and engineering docs. -->
 
 # Changelog
 
@@ -18,6 +18,7 @@ What's new in Nibie.
 
 ### Fixed
 
+- Help → What's new now shows the latest updates instead of saying there's no release yet.
 - Stopping a reply now preserves the text already shown, stays marked Stopped after reload, and doesn't block your next message.
 
 ### Known issues

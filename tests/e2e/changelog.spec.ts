@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { getLatestShippedReleasePreview, parseChangelog } from "../../lib/changelog";
+import { getWhatsNewPreview, parseChangelog } from "../../lib/changelog";
 
 test("public changelog retains semantic release hierarchy and existing metadata", async ({ page }) => {
   await page.goto("/changelog");
@@ -44,9 +44,9 @@ test("changelog column widens on larger screens without horizontal scrolling", a
   }
 });
 
-test("account Help shows the latest shipped release preview or an honest empty state", async ({ page }) => {
+test("account Help shows the latest release, or Unreleased highlights until one ships", async ({ page }) => {
   const document = parseChangelog(readFileSync(join(process.cwd(), "CHANGELOG.md"), "utf8"));
-  const release = getLatestShippedReleasePreview(document);
+  const release = getWhatsNewPreview(document);
   await page.addInitScript(() => localStorage.removeItem("nibie:last-seen-release"));
   await page.goto("/preview");
 
@@ -59,18 +59,19 @@ test("account Help shows the latest shipped release preview or an honest empty s
   await expect(panel.getByText("What’s new", { exact: true })).toBeVisible();
   await expect(panel.getByRole("menuitem", { name: "View full changelog" })).toHaveAttribute("href", "/changelog");
   if (!release) {
-    await expect(panel.getByText("No shipped release yet.", { exact: true })).toBeVisible();
+    await expect(panel.getByText("No updates yet.", { exact: true })).toBeVisible();
     return;
   }
 
-  await expect(panel.getByText(`Nibie ${release.version}`, { exact: true })).toBeVisible();
-  await expect(panel.getByText(release.date, { exact: true })).toBeVisible();
+  await expect(panel.getByText(release.kind === "release" ? `Nibie ${release.version}` : "Latest updates", { exact: true })).toBeVisible();
+  await expect(panel.getByText(release.kind === "release" ? release.date : "In progress", { exact: true })).toBeVisible();
+  await expect(panel.getByText("No shipped release yet.")).toHaveCount(0);
   for (const highlight of release.highlights) await expect(panel.getByText(highlight, { exact: true })).toBeVisible();
   await expect(panel.locator(".account-help-new")).toHaveText("New");
 
   await page.keyboard.press("Escape");
   await expect(panel).toHaveCount(0);
-  await expect.poll(() => page.evaluate(() => localStorage.getItem("nibie:last-seen-release"))).toBe(release.version);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("nibie:last-seen-release"))).toBe(release.seenKey);
   await sidebar.getByRole("menuitem", { name: "Help" }).press("Enter");
   await expect(panel).toBeVisible();
   await expect(panel.locator(".account-help-new")).toHaveCount(0);
