@@ -1,15 +1,15 @@
 import "server-only";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseChangelog, getLatestShippedReleasePreview } from "@/lib/changelog";
+import { parseChangelog, getWhatsNewPreview } from "@/lib/changelog";
 
 export function loadChangelog() {
   return parseChangelog(readFileSync(join(process.cwd(), "CHANGELOG.md"), "utf8"));
 }
 
-export function loadLatestShippedReleasePreview() {
+export function loadWhatsNewPreview() {
   try {
-    return getLatestShippedReleasePreview(loadChangelog());
+    return getWhatsNewPreview(loadChangelog());
   } catch {
     return null;
   }

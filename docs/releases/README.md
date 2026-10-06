@@ -23,6 +23,16 @@ Git tag and deployment SHA are authoritative. Do not bump `package.json` only to
 - [V1 release template](V1_RELEASE_TEMPLATE.md) is copied to `docs/releases/vX.Y.Z.md` after production smoke passes and before the tag.
 - [Observability](../engineering/OBSERVABILITY.md) explains how to read runtime logs.
 
+## Changelog policy
+
+`CHANGELOG.md` is the single source for the public `/changelog` page and the in-app Help → What's new panel. Nothing else feeds them.
+
+- Every PR that changes what users can see or do adds a concise, user-facing line under `## Unreleased` in the same PR.
+- The Changelog Guard workflow fails a PR that touches `app/`, `components/`, `lib/` (except `lib/observability/`), or `public/` without changing `CHANGELOG.md`. Tests are ignored. For purely internal changes, add the `no-changelog` label; the check re-runs when the label changes.
+- Format is checked by `tests/unit/changelog-format.test.ts`: `## Unreleased` comes first, groups are Added, Changed, Fixed, Removed, Deprecated, Security, or Known issues, and a version heading (`## v1.0.0`) has a readable date line under it. `## Current development` is a free-form snapshot.
+- What's new shows the newest shipped release. Until one exists, it shows the first four Added, Changed, and Fixed lines from `## Unreleased`, marked In progress. Put the most notable lines first.
+- At release time, rename `## Unreleased` to the version, add the date line, and start a new empty `## Unreleased` above it.
+
 ## Local gate
 
 `npm run release:check` is read-only. It does not commit, push, tag, migrate, or deploy.

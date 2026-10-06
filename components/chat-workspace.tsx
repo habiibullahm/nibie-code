@@ -17,7 +17,7 @@ import type { SettingsSectionId } from "@/components/settings/registry";
 import { MessageRow } from "@/components/message-row";
 import { forgetLastConversationId, readChatFlag, readLastConversationId, subscribeChatPreferences, writeLastConversationId } from "@/components/use-chat-preferences";
 import { useStableCallback } from "@/components/use-stable-callback";
-import type { ChangelogReleasePreview } from "@/lib/changelog";
+import type { WhatsNewPreview } from "@/lib/changelog";
 import type { ConversationSummary, PersistedMessage, RoomSummary } from "@/lib/chat/read";
 import type { AttachmentSummary } from "@/lib/attachments/types";
 import type { ModelChoice, ModelOption } from "@/lib/chat/models";
@@ -71,7 +71,7 @@ const mockRooms: RoomSummary[] = [
 
 const noModels: ModelOption[] = [];
 
-export function ChatWorkspace({ email, metadataName = null, initialData, preview = false, models = noModels, renderedAt, preferences, preferencesError = null, releasePreview = null }: { email: string; metadataName?: string | null; initialData?: WorkspaceData; preview?: boolean; models?: ModelOption[]; renderedAt?: number; preferences?: UserPreferences; preferencesError?: string | null; releasePreview?: ChangelogReleasePreview | null }) {
+export function ChatWorkspace({ email, metadataName = null, initialData, preview = false, models = noModels, renderedAt, preferences, preferencesError = null, releasePreview = null }: { email: string; metadataName?: string | null; initialData?: WorkspaceData; preview?: boolean; models?: ModelOption[]; renderedAt?: number; preferences?: UserPreferences; preferencesError?: string | null; releasePreview?: WhatsNewPreview | null }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const conversationParam = searchParams.get("conversation");

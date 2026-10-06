@@ -23,8 +23,17 @@ export type ChangelogReleasePreview = {
   highlights: string[];
 };
 
+// Help → What's new. A shipped release wins; until one exists, the Unreleased highlights are shown as in progress.
+// seenKey changes whenever the shown content changes, so the New badge reappears.
+export type WhatsNewPreview =
+  | ({ kind: "release"; seenKey: string } & ChangelogReleasePreview)
+  | { kind: "unreleased"; seenKey: string; highlights: string[] };
+
 const nonReleaseHeadings = new Set(["unreleased", "current development"]);
 const highlightGroupHeadings = new Set(["added", "changed", "fixed", "removed", "deprecated"]);
+export const changelogGroupHeadings = ["Added", "Changed", "Fixed", "Removed", "Deprecated", "Security", "Known issues"];
+const releaseVersionPattern = /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
+const previewHighlightLimit = 4;
 
 function previewText(markdown: string) {
   return markdown
@@ -44,14 +53,74 @@ export function getLatestShippedReleasePreview(document: ChangelogDocument): Cha
   if (!entry || !date) return null;
 
   const version = entry.version.trim();
-  const highlights = entry.groups
+  const highlights = entryHighlights(entry).slice(0, previewHighlightLimit);
+
+  return { version: /^v/i.test(version) ? version : `v${version}`, date, highlights };
+}
+
+function entryHighlights(entry: ChangelogEntry) {
+  return entry.groups
     .filter((group) => highlightGroupHeadings.has(group.heading.trim().toLowerCase()))
     .flatMap((group) => group.items)
     .filter((item) => item.trim() && item.trim().toLowerCase() !== "none.")
-    .map(previewText)
-    .slice(0, 4);
+    .map(previewText);
+}
 
-  return { version: /^v/i.test(version) ? version : `v${version}`, date, highlights };
+// FNV-1a: a short, stable fingerprint that is identical on server and client.
+function fingerprint(text: string) {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index++) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+export function getWhatsNewPreview(document: ChangelogDocument): WhatsNewPreview | null {
+  const release = getLatestShippedReleasePreview(document);
+  if (release) return { kind: "release", seenKey: release.version, ...release };
+
+  const unreleased = document.entries.find((item) => item.version.trim().toLowerCase() === "unreleased");
+  const all = unreleased ? entryHighlights(unreleased) : [];
+  if (!all.length) return null;
+  return { kind: "unreleased", seenKey: `unreleased-${fingerprint(all.join("\n"))}`, highlights: all.slice(0, previewHighlightLimit) };
+}
+
+// Format rules for CHANGELOG.md. Unit tests run this against the real file so a malformed entry fails CI.
+export function changelogProblems(document: ChangelogDocument): string[] {
+  const problems: string[] = [];
+  const allowedGroups = new Set(changelogGroupHeadings.map((heading) => heading.toLowerCase()));
+  const seen = new Set<string>();
+
+  if (document.entries[0]?.version.trim().toLowerCase() !== "unreleased") problems.push("the first entry must be \"## Unreleased\"");
+
+  for (const entry of document.entries) {
+    const version = entry.version.trim();
+    const key = version.toLowerCase().replace(/^v/, "");
+    if (seen.has(key)) problems.push(`duplicate entry "${version}"`);
+    seen.add(key);
+
+    if (key === "current development") {
+      if (entry.date) problems.push(`"${version}" must not have a date line`);
+      continue;
+    }
+
+    for (const group of entry.groups) {
+      if (!allowedGroups.has(group.heading.trim().toLowerCase())) problems.push(`"${version}" has unsupported group "${group.heading}"; use ${changelogGroupHeadings.join(", ")}`);
+    }
+
+    if (key === "unreleased") {
+      if (entry.date) problems.push(`"${version}" must not have a date line`);
+      continue;
+    }
+
+    if (!releaseVersionPattern.test(version)) problems.push(`"${version}" is not a release version like 1.2.3 or v1.2.3`);
+    if (!entry.date) problems.push(`release "${version}" is missing its date line`);
+    else if (Number.isNaN(Date.parse(entry.date))) problems.push(`release "${version}" has an unreadable date "${entry.date}"`);
+    if (!entry.groups.length) problems.push(`release "${version}" has no items`);
+  }
+
+  return problems;
 }
 
 export function getCurrentDevelopmentPreview(document: ChangelogDocument): string[] {

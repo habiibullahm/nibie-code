@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { ArrowRight, CircleHelp, LogOut, Settings } from "lucide-react";
 import { signOutAction } from "@/app/actions/auth";
-import { changelogAnchorHref, changelogMenuLink, type ChangelogReleasePreview } from "@/lib/changelog";
+import { changelogAnchorHref, changelogMenuLink, type WhatsNewPreview } from "@/lib/changelog";
 
 type Props = {
   email: string;
@@ -12,7 +12,7 @@ type Props = {
   signOutLabel: string;
   onOpenSettings: () => void;
   compact?: boolean;
-  releasePreview?: ChangelogReleasePreview | null;
+  releasePreview?: WhatsNewPreview | null;
 };
 
 // Long enough to cross the gap between the account row and the panel, short enough that leaving feels immediate.
@@ -51,21 +51,21 @@ export function AccountMenu({ email, name, onOpenSettings, compact = false, rele
   const [helpOpen, setHelpOpen] = useState(false);
   const open = pinned || (hovering && !suppressHover);
   const updatesHref = changelogAnchorHref(process.env.NEXT_PUBLIC_APP_URL);
-  const releaseVersion = releasePreview?.version ?? null;
+  const releaseSeenKey = releasePreview?.seenKey ?? null;
   const lastSeenRelease = useSyncExternalStore(subscribeToReleaseSeen, readLastSeenRelease, () => null);
-  const releaseIsNew = Boolean(releaseVersion && lastSeenRelease !== releaseVersion);
+  const releaseIsNew = Boolean(releaseSeenKey && lastSeenRelease !== releaseSeenKey);
   const pendingFocus = useRef<"first" | "last" | null>(null);
   const initial = (name || email).slice(0, 1).toUpperCase();
 
   const markReleaseSeen = useCallback(() => {
-    if (!releaseVersion) return;
+    if (!releaseSeenKey) return;
     try {
-      window.localStorage.setItem(LAST_SEEN_RELEASE_KEY, releaseVersion);
+      window.localStorage.setItem(LAST_SEEN_RELEASE_KEY, releaseSeenKey);
       window.dispatchEvent(new Event(RELEASE_SEEN_EVENT));
     } catch {
       // The badge remains visible if this browser does not allow local storage.
     }
-  }, [releaseVersion]);
+  }, [releaseSeenKey]);
 
   function clearCloseTimer() {
     if (closeTimer.current == null) return;
@@ -223,15 +223,15 @@ export function AccountMenu({ email, name, onOpenSettings, compact = false, rele
           {releasePreview ? <div className="account-help-release">
             <div className="account-help-release-meta">
               <div>
-                <p className="account-help-release-version">Nibie {releasePreview.version}</p>
-                <p className="account-help-release-date">{releasePreview.date}</p>
+                <p className="account-help-release-version">{releasePreview.kind === "release" ? `Nibie ${releasePreview.version}` : "Latest updates"}</p>
+                <p className="account-help-release-date">{releasePreview.kind === "release" ? releasePreview.date : "In progress"}</p>
               </div>
               {releaseIsNew ? <span className="account-help-new">New</span> : null}
             </div>
             {releasePreview.highlights.length ? <ul className="account-help-preview">
               {releasePreview.highlights.map((line) => <li key={line}>{line}</li>)}
             </ul> : null}
-          </div> : <p className="account-help-empty">No shipped release yet.</p>}
+          </div> : <p className="account-help-empty">No updates yet.</p>}
           <a ref={helpLinkRef} className="account-menu-action" role="menuitem" href={updatesHref} aria-label="View full changelog" onClick={openUpdates}>
             View full changelog
             <ArrowRight size={13} aria-hidden="true" />
