@@ -1,3 +1,5 @@
+import { vector } from "../fixtures/files-v3";
+import { fuseRoomFileCandidates, type Candidate } from "../../lib/files/hybrid";
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import postgres, { type TransactionSql } from "postgres";
@@ -91,6 +93,9 @@ describe("Supabase row-level security", () => {
     await sql`grant usage on schema auth to authenticated`;
     await sql`insert into auth.users (id) values (${userA})`;
 
+    // Exercise a preinstalled Supabase-style extension without relocating it.
+    await sql`create schema if not exists extensions`;
+    await sql`create extension if not exists vector with schema extensions`;
     await migrate(db, { migrationsFolder: resolve(process.cwd(), "drizzle") });
 
     await sql`insert into auth.users (id) values (${userB})`;
@@ -319,6 +324,51 @@ describe("Supabase row-level security", () => {
     await asUser(userA, (tx) => tx`delete from public.workbench_documents where id = ${docGeneral}`);
     const gone = await asUser(userA, (tx) => tx`select id from public.workbench_documents where id = ${docGeneral}`);
     expect(gone).toHaveLength(0);
+  });
+
+  it("scopes vector search and missing-only backfill to owner and Room", async () => {
+    const room = randomUUID(), otherRoom = randomUUID(), foreignRoom = randomUUID();
+    const file = randomUUID(), otherFile = randomUUID(), foreignFile = randomUUID();
+    const chunk = randomUUID(), foreignChunk = randomUUID();
+    const doc = "The deployment pipeline releases the backend service after validation.";
+    for (const [roomId, owner, fileId] of [[room, userA, file], [otherRoom, userA, otherFile], [foreignRoom, userB, foreignFile]]) {
+      await sql`insert into public.rooms (id, user_id, name) values (${roomId}, ${owner}, 'Vector room')`;
+      await sql`insert into public.room_files (id, user_id, room_id, original_name, mime_type, size_bytes, storage_path, extracted_text)
+        values (${fileId}, ${owner}, ${roomId}, 'deploy.txt', 'text/plain', 80, ${`${owner}/${roomId}/${fileId}/${fileId}.txt`}, ${doc})`;
+    }
+    await asUser(userA, tx => tx`insert into public.room_file_chunks (id, file_id, user_id, room_id, chunk_index, content) values (${chunk}, ${file}, ${userA}, ${room}, 0, ${doc})`);
+    await sql`insert into public.room_file_chunks (id, file_id, user_id, room_id, chunk_index, content) values (${foreignChunk}, ${foreignFile}, ${userB}, ${foreignRoom}, 0, ${doc})`;
+    const rows = JSON.stringify([{ id: chunk, embedding: vector(0) }, { id: foreignChunk, embedding: vector(0) }]);
+    expect(await asUser(userA, tx => tx`select * from public.missing_room_file_embeddings(${foreignRoom}, 100)`)).toEqual([]);
+    expect(await asUser(userA, tx => tx`select public.fill_room_file_embeddings(${otherRoom}, ${rows}::jsonb) as n`)).toEqual([{ n: 0 }]);
+    expect(await asUser(userA, tx => tx`select public.fill_room_file_embeddings(${room}, ${rows}::jsonb) as n`)).toEqual([{ n: 1 }]);
+    expect(await asUser(userA, tx => tx`select public.fill_room_file_embeddings(${room}, ${rows}::jsonb) as n`)).toEqual([{ n: 0 }]);
+    expect(await asUser(userA, tx => tx`select * from public.missing_room_file_embeddings(${room}, 20)`)).toEqual([]);
+    const embedding = JSON.stringify(vector(0));
+    await sql`insert into public.room_file_chunks (file_id, user_id, room_id, chunk_index, content, embedding) values (${otherFile}, ${userA}, ${otherRoom}, 0, ${doc}, ${embedding})`;
+    const semantic = await asUser(userA, tx => tx`select * from public.search_room_file_chunks_semantic(${room}, ${embedding}, 100)`);
+    expect(semantic.map(c => c.file_id)).toEqual([file]);
+    expect(semantic[0].similarity).toBeCloseTo(1);
+    expect(await asUser(userB, tx => tx`select * from public.search_room_file_chunks_semantic(${room}, ${embedding}, 10)`)).toEqual([]);
+    expect(await asUser(userA, tx => tx`select * from public.search_room_file_chunks_semantic(${foreignRoom}, ${embedding}, 10)`)).toEqual([]);
+    const lexical = await asUser(userA, tx => tx`select * from public.search_room_file_chunks(${room}, 'backend OR shipped OR production', 10)`);
+    expect(fuseRoomFileCandidates("How is the backend shipped to production?", lexical as unknown as Candidate[], semantic as unknown as Candidate[])[0].file_id).toBe(file);
+    await asUser(userA, tx => tx`insert into public.room_file_chunks (file_id, user_id, room_id, chunk_index, content, embedding)
+      select ${file}, ${userA}, ${room}, n, ${doc}, ${embedding} from generate_series(1, 12) n`);
+    expect((await asUser(userA, tx => tx`select * from public.search_room_file_chunks_semantic(${room}, ${embedding}, 100)`)).length).toBe(10);
+    expect((await asUser(userA, tx => tx`select * from public.search_room_file_chunks(${room}, 'backend', 100)`)).length).toBe(10);
+    await expect(asUser(userA, tx => tx`insert into public.room_file_chunks (file_id, user_id, room_id, chunk_index, content, embedding)
+      values (${file}, ${userA}, ${room}, 20, ${doc}, ${JSON.stringify(Array(512).fill(0))})`)).rejects.toThrow(/room_file_chunks_embedding_nonzero/);
+    await expect(asUser(userA, tx => tx`insert into public.room_file_chunks (file_id, user_id, room_id, chunk_index, content, embedding)
+      values (${file}, ${userA}, ${room}, 20, ${doc}, '[1,2]')`)).rejects.toThrow(/512 dimensions/);
+    await expect(asUser(userA, tx => tx`update public.room_file_chunks set content = 'tampered' where id = ${chunk}`)).rejects.toThrow(/permission denied/);
+    expect(await asUser(userA, tx => tx`update public.room_file_chunks set embedding = ${JSON.stringify(vector(1))} where id = ${chunk} returning id`)).toEqual([]);
+    await expect(asUser(userA, tx => tx`select public.fill_room_file_embeddings(${room}, ${JSON.stringify(Array(21).fill({ id: chunk, embedding: vector(0) }))}::jsonb)`)).rejects.toThrow(/Invalid embedding batch/);
+    const indexes = await sql`select indexdef from pg_indexes where indexname = 'room_file_chunks_embedding_hnsw_idx'`;
+    expect(indexes[0].indexdef).toContain('USING hnsw');
+    await asUser(userA, tx => tx`delete from public.room_files where id = ${file}`);
+    expect(await sql`select id from public.room_file_chunks where id = ${chunk}`).toEqual([]);
+    await sql`delete from public.rooms where id in (${room}, ${otherRoom}, ${foreignRoom})`;
   });
 
   it("keeps room files owner-scoped, including extracted text", async () => {

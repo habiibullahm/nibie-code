@@ -3,8 +3,8 @@ import { spawnSync } from "node:child_process";
 const composeFile = "docker-compose.test.yml";
 const testEnv = {
   ...process.env,
-  TEST_DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/nibie_ai",
-  DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/nibie_ai",
+  TEST_DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:55433/nibie_ai",
+  DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:55433/nibie_ai",
   ALLOW_TEST_DATABASE_RESET: "1",
 };
 

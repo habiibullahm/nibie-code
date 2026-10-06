@@ -20,7 +20,8 @@
     "db:test:down": "docker compose -f docker-compose.test.yml down -v",
     "test:integration:local": "node scripts/test-integration-local.mjs",
     "dev:local": "node scripts/dev-local.mjs",
-    "local:down": "npx --yes supabase@latest stop"
+    "local:down": "npx --yes supabase@latest stop",
+    "test:files-v3:eval": "vitest run tests/unit/files-v3.test.ts -t \"fixture-based retrieval evaluation\" --reporter=dot"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
