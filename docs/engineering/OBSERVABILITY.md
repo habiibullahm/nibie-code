@@ -96,6 +96,8 @@ Open one `requestId` and read the earlier lines for that id.
 
 Thread summary events never include message, summary, or provider text.
 
+Event names may use `_` inside a segment (for example `thread_summary.*`, `weekly_usage.*`). Builds before the thread summary change silently dropped such events.
+
 ## Reserved names
 
 Documented so later work uses the same words. They are not emitted until that feature is on the running build.

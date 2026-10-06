@@ -1,4 +1,4 @@
-<!-- Newest entry first. Use a version heading only for a release that actually shipped. Each shipped entry includes the date, Added, Changed, Fixed, Removed or Deprecated when relevant, Known issues, and important user-visible behavior. -->
+<!-- Newest entry first. Use a version heading only for a release that actually shipped. Keep public entries concise and user-facing: visible capabilities, meaningful UX improvements, reliability fixes, and important limitations. Keep implementation and release-engineering details in the release checklist, release notes, or relevant feature and engineering docs. -->
 
 # Changelog
 
@@ -8,49 +8,41 @@ What's new in Nibie.
 
 ### Added
 
-- Expandable chat composer with a compact default for long prompts.
-- Weekly usage allowance of 100 credits per UTC week, weighted 1 / 3 / 6 for Fast / Balanced / High; these are product units, not provider prices.
-- Deployment identity from the Vercel git commit, exposed safely at `GET /api/health`.
-- Structured server logs for chat generation, with one request id across start, context build, and completion or failure.
-- Release checklist, version policy, migration inventory rules, hotfix steps, and rollback notes.
-- `npm run release:check`, which fails on duplicate migration numbers, a journal that does not match `drizzle/*.sql`, missing release docs, or unresolved merge markers.
-- A release stays incomplete until the changelog, release note, and current product docs match verified production. The version tag comes after that.
-- Chat attachments: attach up to three text, Markdown, CSV, JSON, source-code, or text-based PDF files to a message with **+** or by dropping them on the composer. Nibie answers from their text in that conversation, including follow-ups, and the sent message shows its files. Attachments stay with their message: they are not Room files and are not shared with other threads. See [Chat Attachments V1](docs/feature/attachments/v1.md). Needs migration `0009_chat_attachments.sql`.
-- Thread summaries for long conversations. After a reply completes in a thread with 18 or more complete messages, Nibie writes a structured summary in the background (Fast, not charged to the weekly allowance) and refreshes it incrementally once it falls 8 messages behind. Replies use the summary for older messages and keep every message after it raw, so nothing between the summary and the recent messages is lost. Original messages are never deleted. Needs migration `0011_thread_summaries.sql`.
+- Give long prompts a larger editing space while keeping short messages compact.
+- Track your 100-credit weekly AI allowance and next reset in Settings; each response mode uses a different amount.
+- Attach up to three text-based files—text, Markdown, CSV, JSON, source code, or text-based PDFs—to a conversation. Nibie can answer follow-up questions from their contents, and the files stay with that conversation.
+- Long conversations keep their thread: Nibie maintains a short summary of earlier messages in the background, so replies stay grounded in older context while recent messages are still used word for word.
 
 ### Changed
 
-- Assistant answers use adaptive formatting: plain prose for simple answers, `##`/`###` headings only when sections help, numbered steps, small tables for comparisons, and fenced code with its language. Answer text is slightly larger and calmer, headings stay compact, inline code is quieter, and tables scroll inside their frame on phones instead of breaking words.
-- Chat and room-draft failure logs now use stable event names and operational codes. User-facing errors are unchanged.
+- Nibie answers are easier to scan, with headings, steps, comparison tables, or code when they help.
 
 ### Fixed
 
-- Stop is now decided on the server. A stopped reply keeps exactly the text that was on screen and stays marked Stopped after a reload or the next message, even if the model finished in the meantime. The server stops the generation within about a second, even when the host does not pass the browser disconnect on. A reply stopped before any text shows "Response stopped." instead of "…". Repeating Stop changes nothing, and sending right after Stop still works ([#12](https://github.com/habiibullahm/nibie-code/issues/12)).
-- The integration test suite resolves the `@/` import alias again, so the row-level security tests can run.
-- Server log events whose names contain `_` (such as `weekly_usage.*`) are emitted instead of being silently dropped.
+- Stopping a reply now preserves the text already shown, stays marked Stopped after reload, and doesn't block your next message.
 
 ### Known issues
 
-- Chat attachments: images and scanned PDFs are not supported, a sent attachment cannot be downloaded, and account export does not include attachments yet.
+- Attachments can't yet include images or scanned PDFs. Sent files can't be downloaded, and account exports don't include them yet.
 
 ## Current development
 
 ### Workspace
 
-- Rooms keep a brief, instructions, and their own threads
-- Pins and selected files stay with the Room you are in
-- A context panel shows the profile, room, pins, selected files, and recent messages
-- Workbench documents you can create, edit, and save
-- Archive and restore for conversations
+- Organize conversations in Rooms with their own instructions and threads.
+- Pin important details and choose Room files to give a conversation relevant context.
+- See your profile, Room details, pins, selected files, and recent messages together in the context panel.
+- Create, edit, and save documents in Workbench.
+- Archive conversations and restore them later.
 
 ### Chat
 
-- Streaming replies, with stop, retry, regenerate, and edit-and-resend
-- Composer grows for multiline prompts; Expand composer opens more editing space, and Collapse returns to the compact view
-- Fast, Balanced, and Reasoning, plus reasoning effort where a mode supports it
+- Stop a reply while it's being written, retry or regenerate it, or edit and resend your latest message.
+- Write in a compact message box or switch to a larger editing space for long prompts.
+- Choose Fast, Balanced, or High response modes, with reasoning controls where available.
 
 ### Account
 
-- Settings cover language, the model, and how Nibie replies
-- Email sign-in, Google sign-in, and sign-out on every device
-- Public landing, docs, and privacy pages
+- Set your language, preferred model, and reply style in Settings.
+- Sign in with email or Google, and sign out on all devices.
+- Find Nibie's product guidance and privacy information.
