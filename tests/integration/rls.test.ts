@@ -324,18 +324,44 @@ describe("Supabase row-level security", () => {
   it("keeps room files owner-scoped, including extracted text", async () => {
     const roomA = randomUUID();
     const roomB = randomUUID();
+    const roomOther = randomUUID();
     const fileB = randomUUID();
     const pathB = `${userB}/${roomB}/${fileB}/${fileB}.txt`;
     const fileA = randomUUID();
     const pathA = `${userA}/${roomA}/${fileA}/${fileA}.txt`;
+    const fileOther = randomUUID();
+    const pathOther = `${userA}/${roomOther}/${fileOther}/${fileOther}.txt`;
     const crossId = randomUUID();
     const crossPath = `${userA}/${roomB}/${crossId}/${crossId}.txt`;
     await asUser(userA, (tx) => tx`insert into public.rooms (id, user_id, name) values (${roomA}, ${userA}, 'Files')`);
+    await asUser(userA, (tx) => tx`insert into public.rooms (id, user_id, name) values (${roomOther}, ${userA}, 'Other files')`);
     await sql`insert into public.rooms (id, user_id, name) values (${roomB}, ${userB}, 'Private files')`;
     await sql`insert into public.room_files (id, user_id, room_id, original_name, mime_type, size_bytes, storage_path, extracted_text) values (${fileB}, ${userB}, ${roomB}, 'secret.txt', 'text/plain', 12, ${pathB}, 'user b private note')`;
     await asUser(userA, (tx) => tx`insert into public.room_files (id, user_id, room_id, original_name, mime_type, size_bytes, storage_path, extracted_text) values (${fileA}, ${userA}, ${roomA}, 'notes.txt', 'text/plain', 5, ${pathA}, 'hello from a')`);
+    await asUser(userA, (tx) => tx`insert into public.room_files (id, user_id, room_id, original_name, mime_type, size_bytes, storage_path, extracted_text) values (${fileOther}, ${userA}, ${roomOther}, 'other.txt', 'text/plain', 5, ${pathOther}, 'cobalt kestrel other room')`);
+    await asUser(userA, (tx) => tx`insert into public.room_file_chunks (file_id, user_id, room_id, chunk_index, content) values (${fileA}, ${userA}, ${roomA}, 0, 'deployment uses the cobalt kestrel cluster')`);
+    await asUser(userA, (tx) => tx`insert into public.room_file_chunks (file_id, user_id, room_id, chunk_index, content) values (${fileA}, ${userA}, ${roomA}, 1, 'cobalt kestrel cobalt kestrel deployment cluster details')`);
+    await asUser(userA, (tx) => tx`insert into public.room_file_chunks (file_id, user_id, room_id, chunk_index, content) values (${fileA}, ${userA}, ${roomA}, 2, 'auth middleware validates bearer tokens')`);
+    await asUser(userA, (tx) => tx`insert into public.room_file_chunks (file_id, user_id, room_id, chunk_index, content) values (${fileA}, ${userA}, ${roomA}, 3, 'GIN index supports lexical query ranking')`);
+    await asUser(userA, (tx) => tx`insert into public.room_file_chunks (file_id, user_id, room_id, chunk_index, content) values (${fileA}, ${userA}, ${roomA}, 4, 'deploy pipeline releases backend service')`);
+    await sql`insert into public.room_file_chunks (file_id, user_id, room_id, chunk_index, content) values (${fileB}, ${userB}, ${roomB}, 0, 'private cobalt kestrel credentials')`;
+    await asUser(userA, (tx) => tx`insert into public.room_file_chunks (file_id, user_id, room_id, chunk_index, content) values (${fileOther}, ${userA}, ${roomOther}, 0, 'cobalt kestrel belongs to a different room')`);
+    const ranked = await asUser(userA, (tx) => tx`select file_id, original_name, chunk_index from public.search_room_file_chunks(${roomA}::uuid, 'cobalt kestrel', 5)`);
+    expect(ranked.map((row) => row.chunk_index)).toEqual([1, 0]);
+    const authRanked = await asUser(userA, (tx) => tx`select chunk_index from public.search_room_file_chunks(${roomA}::uuid, 'auth bearer', 5)`);
+    const indexRanked = await asUser(userA, (tx) => tx`select chunk_index from public.search_room_file_chunks(${roomA}::uuid, 'index lexical', 5)`);
+    const deployRanked = await asUser(userA, (tx) => tx`select chunk_index from public.search_room_file_chunks(${roomA}::uuid, 'deploy pipeline', 5)`);
+    expect(authRanked[0]?.chunk_index).toBe(2);
+    expect(indexRanked[0]?.chunk_index).toBe(3);
+    expect(deployRanked[0]?.chunk_index).toBe(4);
+    const crossRoom = await asUser(userA, (tx) => tx`select file_id from public.search_room_file_chunks(${roomB}::uuid, 'cobalt kestrel', 5)`);
+    expect(crossRoom).toEqual([]);
+    const hiddenSameOwnerRoom = await asUser(userA, (tx) => tx`select file_id from public.search_room_file_chunks(${roomA}::uuid, 'cobalt kestrel', 5)`);
+    expect(hiddenSameOwnerRoom.map((row) => row.file_id)).not.toContain(fileOther);
+    const visibleChunks = await asUser(userA, (tx) => tx`select file_id from public.room_file_chunks`);
+    expect(visibleChunks.map((row) => row.file_id).sort()).toEqual([fileA, fileA, fileA, fileA, fileA, fileOther].sort());
     const visible = await asUser(userA, (tx) => tx`select id, extracted_text from public.room_files`);
-    expect(visible).toEqual([{ id: fileA, extracted_text: "hello from a" }]);
+    expect(visible.map((row) => row.id).sort()).toEqual([fileA, fileOther].sort());
     await expect(asUser(userA, (tx) => tx`insert into public.room_files (user_id, room_id, original_name, mime_type, size_bytes, storage_path, extracted_text) values (${userB}, ${roomB}, 'stolen.txt', 'text/plain', 4, ${`${userB}/${roomB}/${randomUUID()}/x.txt`}, 'nope')`)).rejects.toThrow();
     await expect(asUser(userA, (tx) => tx`insert into public.room_files (id, user_id, room_id, original_name, mime_type, size_bytes, storage_path, extracted_text) values (${crossId}, ${userA}, ${roomB}, 'cross.txt', 'text/plain', 4, ${crossPath}, 'nope')`)).rejects.toThrow();
     await expect(asUser(userA, (tx) => tx`update public.room_files set extracted_text = 'hijacked' where id = ${fileB} returning id`)).rejects.toThrow();
@@ -343,6 +369,8 @@ describe("Supabase row-level security", () => {
     expect(deleted).toHaveLength(0);
     const [ownerRow] = await sql`select extracted_text from public.room_files where id = ${fileB}`;
     expect(ownerRow.extracted_text).toBe("user b private note");
+    await asUser(userA, (tx) => tx`delete from public.room_files where id = ${fileA}`);
+    expect(await sql`select id from public.room_file_chunks where file_id = ${fileA}`).toEqual([]);
   });
 
   it("keeps pins owner-scoped and deletes them with the room", async () => {

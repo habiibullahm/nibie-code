@@ -19,6 +19,7 @@ import { deferThreadSummaryMaintenance, loadThreadSummary } from "@/lib/context/
 import { parseSelectedFileIds } from "@/lib/files/inspect";
 import { contextAttachments, type AttachmentContextRow, type ContextMessageRow } from "@/lib/attachments/context";
 import { MAX_FILES_PER_MESSAGE } from "@/lib/files/limits";
+import { prioritizeRoomFileMatches } from "@/lib/files/retrieval";
 import { roomContextFromRows, type PinContextRow, type RoomBriefRow } from "@/lib/rooms/map";
 import { loadOwnerPreferences } from "@/lib/preferences/store";
 import { operationalCodes } from "@/lib/observability/codes";
@@ -104,14 +105,27 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   let files: FileContextInput[] | undefined;
   if (selectedFiles.ids.length) {
     if (!conversation.room_id) return NextResponse.json({ error: "Choose a file from this thread's room." }, { status: 400 });
-    const { data: fileRows, error: fileError } = await supabase.from("room_files").select("id,original_name,extracted_text").eq("room_id", conversation.room_id).in("id", selectedFiles.ids);
+    const { data: fileRows, error: fileError } = await supabase.from("room_files").select("id,original_name,extracted_text,extracted_truncated").eq("room_id", conversation.room_id).in("id", selectedFiles.ids);
     if (fileError) return NextResponse.json({ error: safeError }, { status: 503 });
     const byId = new Map((fileRows ?? []).map((row) => [row.id, row]));
     if (selectedFiles.ids.some((id) => !byId.has(id))) return NextResponse.json({ error: "That file isn't available in this room." }, { status: 400 });
     files = selectedFiles.ids.map((id) => {
       const row = byId.get(id)!;
-      return { name: row.original_name, text: row.extracted_text };
+      return { id: row.id, name: row.original_name, text: row.extracted_text, truncated: row.extracted_truncated };
     });
+  }
+  if (conversation.room_id) {
+    const currentText = String(userMessage?.content ?? "").trim();
+    if (currentText && currentText.length >= 3) {
+      try {
+        const { data: matches, error: searchError } = await supabase.rpc("search_room_file_chunks", { p_room_id: conversation.room_id, p_query: currentText, p_limit: 5 }) as { data: { file_id: string; original_name: string; content: string; extracted_truncated: boolean; chunk_index: number; rank: number }[] | null; error: { message: string } | null };
+        if (searchError) throw searchError;
+        if (matches?.length) files = prioritizeRoomFileMatches(files ?? [], matches);
+      } catch {
+        // Automatic lexical retrieval is best effort; explicit file selection above remains strict.
+        logWarn("room_file.search.failed", { requestId, stage: "room_file_search" });
+      }
+    }
   }
   const mode = requestedModel?.data && requestedModel.data !== "Auto" ? requestedModel.data : resolveMode(normalizeSavedMode(conversation.selected_model), availableModes);
   if (!mode) return NextResponse.json({ error: safeError }, { status: 503 });

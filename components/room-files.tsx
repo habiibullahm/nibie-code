@@ -12,9 +12,7 @@ type Props = {
 };
 
 function typeLabel(mime: string) {
-  if (mime === "text/markdown") return "MD";
-  if (mime === "text/csv") return "CSV";
-  return "TXT";
+  return ({ "text/markdown": "MD", "text/csv": "CSV", "application/json": "JSON", "application/pdf": "PDF", "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "DOCX", "text/typescript": "TS/TSX", "text/javascript": "JS/JSX", "text/x-python": "PY", "text/x-java-source": "JAVA", "text/x-go": "GO", "text/x-rust": "RS", "application/sql": "SQL", "text/html": "HTML", "text/css": "CSS", "application/yaml": "YAML", "application/xml": "XML" } as Record<string, string>)[mime] ?? "TXT";
 }
 
 function sizeLabel(bytes: number) {
@@ -79,13 +77,13 @@ export function RoomFiles({ roomId, disabled, preview = false }: Props) {
       <button type="button" className="privacy-button" disabled={locked} onClick={() => preview ? setError("This preview isn't connected.") : inputRef.current?.click()}>
         <Plus size={15} aria-hidden="true" /> Add file
       </button>
-      <input ref={inputRef} className="room-file-input" type="file" accept=".txt,.md,.csv,text/plain,text/markdown,text/csv" aria-label="Choose a text file" onChange={(event) => {
+      <input ref={inputRef} className="room-file-input" type="file" accept=".txt,.md,.csv,.json,.pdf,.docx,.ts,.tsx,.js,.jsx,.py,.java,.go,.rs,.sql,.html,.css,.yaml,.yml,.xml,text/plain,text/markdown,text/csv,application/json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" aria-label="Choose a text file" onChange={(event) => {
         const file = event.target.files?.[0];
         event.target.value = "";
         if (file) void upload(file);
       }} />
     </div>
-    <p>Text files Nibie can use when you attach them in a thread. Nothing here is added to every message.</p>
+    <p>Choose files for full context in a thread. Nibie can also find relevant excerpts when you ask about this room.</p>
     {status === "uploading" ? <p role="status">Uploading…</p> : null}
     {files.length ? <ul>{files.map((file) => <li className="room-file" key={file.id}>
       <span className="room-file-copy"><strong title={file.original_name}>{file.original_name}</strong><small>{typeLabel(file.mime_type)} · {sizeLabel(file.size_bytes)}</small></span>

@@ -40,6 +40,12 @@ describe("dev:local script", () => {
     expect(localEnvFromStatus('API_URL="http://127.0.0.1:54321"').missing).toEqual(["NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "DATABASE_URL"]);
   });
 
+  it("loads Next env through its CommonJS default export under Node ESM", () => {
+    const source = readFileSync(join(process.cwd(), "scripts", "dev-local.mjs"), "utf8");
+    expect(source).toContain('import nextEnv from "@next/env";');
+    expect(source).toContain("const { loadEnvConfig } = nextEnv;");
+  });
+
   it("runs Windows .cmd launchers through a shell and avoids the removed status flags", () => {
     const source = readFileSync(join(process.cwd(), "scripts", "dev-local.mjs"), "utf8");
     expect(source).toContain("const shell = isWindows;");

@@ -840,9 +840,9 @@ At minimum:
 
 A browser-provided `Content-Type` is metadata, not proof of file type.
 
-### 24.1 Files V1
+### 24.1 Files V2
 
-Files V1 stores owner-scoped room text in the private `room-files` Supabase bucket and in `room_files`. The design is in [Files V1](../feature/files/v1.md).
+Files V2 stores owner-scoped room text in the private `room-files` Supabase bucket and in `room_files`. The design is in [Files V2](../feature/files/v2.md).
 
 - The owner is `auth.uid()` from the session. Body, query, and filename user ids are ignored.
 - Storage keys are `<user-id>/<room-id>/<file-id>/<file-id>.<ext>`.

@@ -85,6 +85,13 @@
       "when": 1791258975390,
       "tag": "0011_thread_summaries",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791430000000,
+      "tag": "0012_files_v2_lexical",
+      "breakpoints": true
     }
   ]
 }

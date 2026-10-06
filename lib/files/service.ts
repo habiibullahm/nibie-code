@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { buildRoomFilePath, fileDeletionOutcome, inspectRoomFile, type StorageDeleteResult } from "@/lib/files/inspect";
 import { MAX_ROOM_FILES, ROOM_FILES_BUCKET } from "@/lib/files/limits";
 import type { RoomFileSummary } from "@/lib/files/types";
+import { chunkRoomFileText } from "@/lib/files/chunks";
 
 type QueryError = { message?: string; code?: string } | null;
 
@@ -11,7 +12,7 @@ type RowQuery = {
   in: (column: string, values: string[]) => RowQuery;
   order: (column: string, options: { ascending: boolean }) => RowQuery;
   limit: (count: number) => RowQuery;
-  insert: (row: Record<string, unknown>) => RowQuery;
+  insert: (row: Record<string, unknown> | Record<string, unknown>[]) => RowQuery;
   delete: () => RowQuery;
   maybeSingle: () => Promise<{ data: Record<string, unknown> | null; error: QueryError }>;
   then: (resolve: (value: { data: unknown; error: QueryError; count?: number | null }) => unknown) => Promise<unknown>;
@@ -58,7 +59,7 @@ export async function listRoomFiles(client: RoomFileClient, roomId: string): Pro
 }
 
 export async function saveRoomFile(client: RoomFileClient, ownerId: string, roomId: string, file: { filename: string; mimeType: string; bytes: Uint8Array }) {
-  const inspected = inspectRoomFile(file);
+  const inspected = await inspectRoomFile(file);
   if ("error" in inspected) return { error: inspected.error };
   const { data: room, error: roomError } = await client.from("rooms").select("id").eq("id", roomId).maybeSingle();
   if (roomError) return { error: saveFailed };
@@ -83,8 +84,17 @@ export async function saveRoomFile(client: RoomFileClient, ownerId: string, room
     size_bytes: inspected.sizeBytes,
     storage_path: stored.path,
     extracted_text: inspected.text,
+    extracted_truncated: inspected.truncated,
   }).select("id,original_name,mime_type,size_bytes,created_at").maybeSingle();
   if (inserted.error || !inserted.data) {
+    await client.storage.from(ROOM_FILES_BUCKET).remove([stored.path]);
+    return { error: saveFailed };
+  }
+  const chunks = chunkRoomFileText(inspected.text).map((chunk) => ({ file_id: fileId, user_id: ownerId, room_id: roomId, chunk_index: chunk.index, content: chunk.text }));
+  const indexed = await client.from("room_file_chunks").insert(chunks);
+  const indexResult = await Promise.resolve(indexed).then((value) => value as { error: QueryError });
+  if (indexResult.error) {
+    await client.from("room_files").delete().eq("id", fileId).eq("room_id", roomId);
     await client.storage.from(ROOM_FILES_BUCKET).remove([stored.path]);
     return { error: saveFailed };
   }

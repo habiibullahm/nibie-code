@@ -33,8 +33,11 @@ export type ContextSourceDiagnostic = {
 
 // Explicitly selected room-file text. Omitted means this request did not ask for file context.
 export type FileContextInput = {
+  id?: string;
   name: string;
   text: string;
+  truncated?: boolean;
+  excerpt?: boolean;
 };
 
 // Text of a file the user attached to one of their messages in this conversation, already authorized for this owner
