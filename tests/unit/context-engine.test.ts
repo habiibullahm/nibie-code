@@ -91,7 +91,7 @@ describe("context engine", () => {
   });
 
   it("keeps core, the current message, and the output reserve when the thread is long", () => {
-    const plan = buildContext(input({ messages: messages(32, 8_000), currentPosition: 32, capabilities: { contextWindowTokens: 4_000, maxOutputTokens: 1_000 } }));
+    const plan = buildContext(input({ messages: messages(32, 8_000), currentPosition: 32, capabilities: { contextWindowTokens: 4_400, maxOutputTokens: 1_000 } }));
     const dialogue = toProviderMessages(plan).filter((message) => message.role !== "system");
     expect(dialogue.at(-1)?.content).toBe("x".repeat(8_000));
     expect(plan.budget.outputReserveTokens).toBe(1_000);

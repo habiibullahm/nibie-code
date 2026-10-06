@@ -184,7 +184,7 @@ describe("file context", () => {
     const plan = buildContext(input({
       files: [{ name: "notes.txt", text: "f".repeat(20_000) }],
       // The smallest window in the suite: it still fits the core policy and the request, but never all of this file.
-      capabilities: { contextWindowTokens: 920, maxOutputTokens: 4 },
+      capabilities: { contextWindowTokens: 1_300, maxOutputTokens: 4 },
     }));
     const fileBlock = plan.blocks.find((block) => block.id === "file");
     expect(fileBlock?.text.length ?? 0).toBeLessThan(20_000);

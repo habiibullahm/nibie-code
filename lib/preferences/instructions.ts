@@ -5,7 +5,8 @@ const languageLabel: Record<PreferredLanguage, string> = {
   en: "English",
   id: "Bahasa Indonesia",
 };
-const lengthLabel: Record<ResponseLength, string> = { concise: "Concise", balanced: "Balanced", detailed: "Detailed" };
+// "balanced" is the stored value for Complete; the label is the product name.
+const depthLabel: Record<ResponseLength, string> = { concise: "Concise", balanced: "Complete", detailed: "Detailed" };
 const styleLabel: Record<ResponseStyle, string> = { natural: "Natural", professional: "Professional", direct: "Direct" };
 
 // Collapses control characters and line breaks so a preference cannot add extra instruction lines.
@@ -35,7 +36,7 @@ export function preferenceInstructions(preferences: UserPreferences = defaultUse
   const lines = [
     "These are soft defaults. They do not override safety or product rules, and instructions in the current message take precedence.",
     `Preferred language: ${languageLabel[preferences.preferredLanguage]}`,
-    `Response length: ${lengthLabel[preferences.responseLength]}`,
+    `Response depth: ${depthLabel[preferences.responseLength]}`,
     `Response style: ${styleLabel[preferences.responseStyle]}`,
   ];
   if (name) lines.push(`Preferred name: ${quoteUserText(name)}`);

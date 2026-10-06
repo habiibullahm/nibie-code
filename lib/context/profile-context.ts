@@ -4,7 +4,7 @@ import { roomPieces, roomReason, type RoomContextInput } from "@/lib/context/roo
 import { aboutYouLimit, preferredNameLimit, type UserPreferences } from "@/lib/preferences/types";
 import { normalizePreferenceText } from "@/lib/preferences/instructions";
 
-export type ProfileCategory = "Language" | "Length" | "Style" | "Name" | "About you";
+export type ProfileCategory = "Language" | "Depth" | "Style" | "Name" | "About you";
 
 export type ProfilePiece = {
   kind: "preferences" | "name" | "about";
@@ -13,7 +13,11 @@ export type ProfilePiece = {
 };
 
 const languageLine = { en: "Preferred language: English", id: "Preferred language: Bahasa Indonesia" } as const;
-const lengthLine = { concise: "Response length: Concise", detailed: "Response length: Detailed" } as const;
+// Complete (stored as "balanced") is the core policy's default, so only a deviation from it is sent as profile data.
+const depthLine = {
+  concise: "Response depth: Concise — answer directly with only the essential explanation.",
+  detailed: "Response depth: Detailed — explore the topic more deeply, including relevant examples, alternatives, edge cases, and trade-offs.",
+} as const;
 const styleLine = { professional: "Response style: Professional", direct: "Response style: Direct" } as const;
 
 function boundedText(value: string | null, max: number) {
@@ -36,8 +40,8 @@ export function profilePieces(preferences: UserPreferences): ProfilePiece[] {
     categories.push("Language");
   }
   if (preferences.responseLength === "concise" || preferences.responseLength === "detailed") {
-    lines.push(lengthLine[preferences.responseLength]);
-    categories.push("Length");
+    lines.push(depthLine[preferences.responseLength]);
+    categories.push("Depth");
   }
   if (preferences.responseStyle === "professional" || preferences.responseStyle === "direct") {
     lines.push(styleLine[preferences.responseStyle]);
