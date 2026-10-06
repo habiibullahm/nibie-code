@@ -354,6 +354,9 @@ describe("Supabase row-level security", () => {
     expect(authRanked[0]?.chunk_index).toBe(2);
     expect(indexRanked[0]?.chunk_index).toBe(3);
     expect(deployRanked[0]?.chunk_index).toBe(4);
+    const natural = await asUser(userA, (tx) => tx`select chunk_index, content from public.search_room_file_chunks(${roomA}::uuid, 'What does our deployment pipeline do?', 5)`);
+    expect(natural.map((row) => row.chunk_index)).toEqual(expect.arrayContaining([0, 1, 4]));
+    expect(natural.every((row) => /deployment|pipeline|deploy/i.test(String(row.content)))).toBe(true);
     const crossRoom = await asUser(userA, (tx) => tx`select file_id from public.search_room_file_chunks(${roomB}::uuid, 'cobalt kestrel', 5)`);
     expect(crossRoom).toEqual([]);
     const hiddenSameOwnerRoom = await asUser(userA, (tx) => tx`select file_id from public.search_room_file_chunks(${roomA}::uuid, 'cobalt kestrel', 5)`);
@@ -362,6 +365,26 @@ describe("Supabase row-level security", () => {
     expect(visibleChunks.map((row) => row.file_id).sort()).toEqual([fileA, fileA, fileA, fileA, fileA, fileOther].sort());
     const visible = await asUser(userA, (tx) => tx`select id, extracted_text from public.room_files`);
     expect(visible.map((row) => row.id).sort()).toEqual([fileA, fileOther].sort());
+    const legacyFile = randomUUID();
+    const legacyPath = `${userA}/${roomA}/${legacyFile}/${legacyFile}.txt`;
+    await asUser(userA, (tx) => tx`insert into public.room_files (id, user_id, room_id, original_name, mime_type, size_bytes, storage_path, extracted_text) values (${legacyFile}, ${userA}, ${roomA}, 'legacy.txt', 'text/plain', 40, ${legacyPath}, 'legacy deployment pipeline notes for ops')`);
+    expect(await asUser(userA, (tx) => tx`select id from public.room_file_chunks where file_id = ${legacyFile}`)).toEqual([]);
+    // Migration-time backfill runs as the migrator (not authenticated); mirror that here.
+    await sql`
+      insert into public.room_file_chunks (file_id, user_id, room_id, chunk_index, content)
+      select f.id, f.user_id, f.room_id, c.chunk_index, c.content
+      from public.room_files f
+      cross join lateral public.chunk_room_file_text(f.extracted_text) as c
+      where f.id = ${legacyFile}
+        and coalesce(btrim(f.extracted_text), '') <> ''
+        and not exists (select 1 from public.room_file_chunks existing where existing.file_id = f.id)
+      on conflict (file_id, chunk_index) do nothing
+    `;
+    const backfilled = await asUser(userA, (tx) => tx`select chunk_index, content from public.room_file_chunks where file_id = ${legacyFile}`);
+    expect(backfilled).toHaveLength(1);
+    expect(backfilled[0]?.content).toContain("legacy deployment pipeline");
+    const legacyHits = await asUser(userA, (tx) => tx`select file_id from public.search_room_file_chunks(${roomA}::uuid, 'What does our deployment pipeline do?', 5)`);
+    expect(legacyHits.map((row) => row.file_id)).toContain(legacyFile);
     await expect(asUser(userA, (tx) => tx`insert into public.room_files (user_id, room_id, original_name, mime_type, size_bytes, storage_path, extracted_text) values (${userB}, ${roomB}, 'stolen.txt', 'text/plain', 4, ${`${userB}/${roomB}/${randomUUID()}/x.txt`}, 'nope')`)).rejects.toThrow();
     await expect(asUser(userA, (tx) => tx`insert into public.room_files (id, user_id, room_id, original_name, mime_type, size_bytes, storage_path, extracted_text) values (${crossId}, ${userA}, ${roomB}, 'cross.txt', 'text/plain', 4, ${crossPath}, 'nope')`)).rejects.toThrow();
     await expect(asUser(userA, (tx) => tx`update public.room_files set extracted_text = 'hijacked' where id = ${fileB} returning id`)).rejects.toThrow();

@@ -9,6 +9,7 @@ import { deleteRoomFile, saveRoomFile, type RoomFileClient } from "../../lib/fil
 import { defaultUserPreferences } from "../../lib/preferences/types";
 import { chunkRoomFileText } from "../../lib/files/chunks";
 import { buildPdf } from "../fixtures/attachments/pdf";
+import { buildLexicalSearchQuery } from "../../lib/files/lexical-query";
 import { prioritizeRoomFileMatches } from "../../lib/files/retrieval";
 
 function storedDocx(xml: string) {
@@ -138,6 +139,20 @@ describe("room file inspection", () => {
     expect(parseSelectedFileIds({ user_id: other, fileIds: [file] }, MAX_FILES_PER_MESSAGE)).toEqual({ ok: false });
     expect(parseSelectedFileIds([file, file], MAX_FILES_PER_MESSAGE)).toEqual({ ok: false });
     expect(parseSelectedFileIds([file, room, owner, other], MAX_FILES_PER_MESSAGE)).toEqual({ ok: false });
+  });
+});
+
+describe("room file lexical query", () => {
+  it("turns natural-language questions into OR content terms", () => {
+    expect(buildLexicalSearchQuery("What does our deployment pipeline do?")).toBe("deployment OR pipeline");
+    expect(buildLexicalSearchQuery("Please explain how auth middleware validates bearer tokens")).toBe("auth OR middleware OR validates OR bearer OR tokens");
+    expect(buildLexicalSearchQuery("   ")).toBeNull();
+    expect(buildLexicalSearchQuery("what does it do?")).toBeNull();
+    expect(buildLexicalSearchQuery("cobalt kestrel")).toBe("cobalt OR kestrel");
+  });
+
+  it("keeps underscore and hyphen terms for websearch OR clauses", () => {
+    expect(buildLexicalSearchQuery("deploy_pipeline stage-two")).toBe("deploy_pipeline OR stage-two");
   });
 });
 
