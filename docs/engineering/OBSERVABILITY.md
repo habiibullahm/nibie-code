@@ -88,6 +88,13 @@ Open one `requestId` and read the earlier lines for that id.
 | `chat.persistence.failed` | Saving the assistant state failed. This replaces `assistant_state_persist_failed` |
 | `preferences.read.failed` | Preferences could not be read. Generation continues with defaults. This replaces `preference_read_failed` |
 | `room.draft.failed` | Room overview drafting failed. The log includes an error name, not the draft text. This replaces `room_draft_failed` |
+| `thread_summary.read.failed` | The stored thread summary could not be read for a reply. The reply continues without it. `reason` is `read_failed` or `invalid_row` |
+| `thread_summary.refresh.started` | After a complete reply, background summary maintenance began. `kind` is `initial` or `refresh`; includes `inputMessageCount` and `coversThroughPosition` |
+| `thread_summary.refresh.completed` | A new summary was saved. Includes `kind`, `coversThroughPosition`, `durationMs` |
+| `thread_summary.refresh.skipped` | Maintenance did not run or was discarded. `reason` is a lifecycle code such as `below_threshold`, `gap_below_threshold`, `superseded`, or `after_unavailable` |
+| `thread_summary.refresh.failed` | Maintenance failed; the completed reply and any stored summary are unchanged. `stage` and `reason` (for example `timeout`, `provider_failed`, `malformed_output`, `invalid_shape`, `oversize`, `persist_failed`) |
+
+Thread summary events never include message, summary, or provider text.
 
 ## Reserved names
 

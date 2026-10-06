@@ -78,6 +78,13 @@
       "when": 1791172181585,
       "tag": "0010_weekly_ai_usage",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791258975390,
+      "tag": "0011_thread_summaries",
+      "breakpoints": true
     }
   ]
 }

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GET } from "../../app/api/health/route";
 import { operationalCodes } from "../../lib/observability/codes";
-import { buildLogRecord, logError, sanitizeLogFields } from "../../lib/observability/logger";
+import { buildLogRecord, logError, logInfo, sanitizeLogFields } from "../../lib/observability/logger";
 import { publicHealthRelease, readReleaseIdentity } from "../../lib/observability/release";
 import { resolveRequestId } from "../../lib/observability/request-id";
 
@@ -110,6 +110,18 @@ describe("structured logger", () => {
       expect(record.time).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     } finally {
       error.mockRestore();
+    }
+  });
+
+  it("emits snake_case event segments and drops malformed event names", () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    try {
+      logInfo("thread_summary.refresh.completed", { requestId: "req-12345678" });
+      logInfo("Thread Summary!", { requestId: "req-12345678" });
+      expect(info).toHaveBeenCalledOnce();
+      expect(JSON.parse(String(info.mock.calls[0]?.[0])).event).toBe("thread_summary.refresh.completed");
+    } finally {
+      info.mockRestore();
     }
   });
 });

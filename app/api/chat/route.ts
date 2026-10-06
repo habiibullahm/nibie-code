@@ -15,6 +15,7 @@ import { buildContext } from "@/lib/context/build-context";
 import { CONTEXT_POLICY_VERSION } from "@/lib/context/context-policy";
 import type { FileContextInput } from "@/lib/context/context-types";
 import type { RoomContextInput } from "@/lib/context/room-context";
+import { deferThreadSummaryMaintenance, loadThreadSummary } from "@/lib/context/thread-summary-store";
 import { parseSelectedFileIds } from "@/lib/files/inspect";
 import { contextAttachments, type AttachmentContextRow, type ContextMessageRow } from "@/lib/attachments/context";
 import { MAX_FILES_PER_MESSAGE } from "@/lib/files/limits";
@@ -71,12 +72,14 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   // (RLS hides other owners' rows from all three); the message context is trimmed to this message below.
   // Preferences are soft personalization. A failed read uses safe defaults and does not block this authenticated request.
   // Chat attachments of this conversation only (RLS also limits them to the owner); trimmed to the messages in context below.
-  const [{ data: loadedConversation, error: loadedConversationError }, { data: userMessage, error: messageError }, { data: recent, error: readError }, preferenceState, attachmentResult] = await Promise.all([
+  // The thread summary is optional context: a failed read is logged and the reply continues without it.
+  const [{ data: loadedConversation, error: loadedConversationError }, { data: userMessage, error: messageError }, { data: recent, error: readError }, preferenceState, attachmentResult, summary] = await Promise.all([
     supabase.from("conversations").select("id,selected_model,room_id").eq("id", parsedId.data).maybeSingle(),
     supabase.from("messages").select("id,position,content").eq("id", parsedMessageId.data).eq("conversation_id", parsedId.data).eq("role", "user").eq("status", "complete").maybeSingle(),
     supabase.from("messages").select("id,role,content,status,position").eq("conversation_id", parsedId.data).eq("status", "complete").order("position", { ascending: false }).limit(34),
     loadOwnerPreferences(supabase),
     supabase.from("message_attachments").select("message_id,original_name,mime_type,extracted_text,truncated,page_count,created_at").eq("conversation_id", parsedId.data).order("created_at", { ascending: false }).limit(60),
+    loadThreadSummary(supabase, parsedId.data, requestId),
   ]);
   if (preferenceState.error) logError("preferences.read.failed", { requestId, code: operationalCodes.preferenceReadFailed });
   let conversation = loadedConversation;
@@ -165,7 +168,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       capabilities: contextCapabilitiesFor(mode),
       preferences: preferenceState.preferences,
       preferenceReadFailed: Boolean(preferenceState.error),
-      summary: null,
+      summary,
       room,
       files,
       attachments,
@@ -329,6 +332,9 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
     return NextResponse.json({ error: safeError }, { status: 503 });
   }
 
+  // Summary maintenance runs after the response finishes, and only for a reply saved as complete. It is best effort:
+  // whatever happens to it, the saved reply stays as it is.
+  const summaryMaintenance = deferThreadSummaryMaintenance({ supabase, conversationId: conversation.id, requestId });
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const filter = createReasoningStreamFilter();
@@ -380,6 +386,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
           const saved = await save("complete");
           if (saved === "saved") {
             logInfo("chat.response.completed", { requestId, status: "complete", durationMs: durationMs() });
+            try { summaryMaintenance.complete(assistant.position); } catch { /* best effort; never affects the reply */ }
             controller.enqueue(encoder.encode(event("status", { status: "complete" })));
           } else if (saved === "stopped") {
             // Stop landed after the provider finished but before this save: the stopped reply stands.
@@ -415,6 +422,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
         clearInterval(stopWatch);
         aborter.abort();
         request.signal.removeEventListener("abort", onRequestAbort);
+        try { summaryMaintenance.finish(); } catch { /* best effort */ }
         if (!clientCancelled) { controller.enqueue(encoder.encode(event("done", {}))); controller.close(); }
       }
     },

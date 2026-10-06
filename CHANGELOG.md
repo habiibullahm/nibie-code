@@ -16,6 +16,7 @@ What's new in Nibie.
 - `npm run release:check`, which fails on duplicate migration numbers, a journal that does not match `drizzle/*.sql`, missing release docs, or unresolved merge markers.
 - A release stays incomplete until the changelog, release note, and current product docs match verified production. The version tag comes after that.
 - Chat attachments: attach up to three text, Markdown, CSV, JSON, source-code, or text-based PDF files to a message with **+** or by dropping them on the composer. Nibie answers from their text in that conversation, including follow-ups, and the sent message shows its files. Attachments stay with their message: they are not Room files and are not shared with other threads. See [Chat Attachments V1](docs/feature/attachments/v1.md). Needs migration `0009_chat_attachments.sql`.
+- Thread summaries for long conversations. After a reply completes in a thread with 18 or more complete messages, Nibie writes a structured summary in the background (Fast, not charged to the weekly allowance) and refreshes it incrementally once it falls 8 messages behind. Replies use the summary for older messages and keep every message after it raw, so nothing between the summary and the recent messages is lost. Original messages are never deleted. Needs migration `0011_thread_summaries.sql`.
 
 ### Changed
 
@@ -26,6 +27,7 @@ What's new in Nibie.
 
 - Stop is now decided on the server. A stopped reply keeps exactly the text that was on screen and stays marked Stopped after a reload or the next message, even if the model finished in the meantime. The server stops the generation within about a second, even when the host does not pass the browser disconnect on. A reply stopped before any text shows "Response stopped." instead of "…". Repeating Stop changes nothing, and sending right after Stop still works ([#12](https://github.com/habiibullahm/nibie-code/issues/12)).
 - The integration test suite resolves the `@/` import alias again, so the row-level security tests can run.
+- Server log events whose names contain `_` (such as `weekly_usage.*`) are emitted instead of being silently dropped.
 
 ### Known issues
 

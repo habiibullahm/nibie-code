@@ -108,9 +108,12 @@ export function buildContext(input: BuildContextInput): ContextPlan {
       remaining.value -= tokens;
     } else summaryDroppedForBudget = true;
   }
-  const olderFit = summaryIncluded ? { included: [] as ThreadMessage[], dropped: olderMessages } : takeNewest(olderMessages, remaining);
+  // The summary stands in only for positions it covers. Older messages after its coverage (the bridge between the summary and
+  // the protected recent window) stay eligible as raw history, so an older summary never leaves a gap.
+  const coveredThrough = summaryIncluded && summary ? summary.coversThroughPosition : 0;
+  const olderFit = takeNewest(olderMessages.filter((message) => message.position > coveredThrough), remaining);
   const dialogue = [...olderFit.included, ...protectedFit.included, current];
-  const droppedMessages = summaryIncluded ? protectedFit.dropped : [...olderFit.dropped, ...protectedFit.dropped];
+  const droppedMessages = [...olderFit.dropped, ...protectedFit.dropped];
   const truncated = droppedMessages.length > 0 || droppedPieces.length > 0 || droppedRoom.length > 0 || droppedPins.length > 0 || Boolean(renderedFiles?.truncated) || Boolean(renderedAttachments?.truncated) || summaryDroppedForBudget;
 
   const profileText = includedPieces.map((piece) => piece.text).join("\n");
