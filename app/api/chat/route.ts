@@ -19,7 +19,7 @@ import { deferThreadSummaryMaintenance, loadThreadSummary } from "@/lib/context/
 import { parseSelectedFileIds } from "@/lib/files/inspect";
 import { contextAttachments, type AttachmentContextRow, type ContextMessageRow } from "@/lib/attachments/context";
 import { MAX_FILES_PER_MESSAGE } from "@/lib/files/limits";
-import { buildLexicalSearchQuery } from "@/lib/files/lexical-query";
+import { searchRoomFiles } from "@/lib/files/search";
 import { prioritizeRoomFileMatches } from "@/lib/files/retrieval";
 import { roomContextFromRows, type PinContextRow, type RoomBriefRow } from "@/lib/rooms/map";
 import { loadOwnerPreferences } from "@/lib/preferences/store";
@@ -117,17 +117,8 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   }
   if (conversation.room_id) {
     const currentText = String(userMessage?.content ?? "").trim();
-    const lexicalQuery = buildLexicalSearchQuery(currentText);
-    if (lexicalQuery) {
-      try {
-        const { data: matches, error: searchError } = await supabase.rpc("search_room_file_chunks", { p_room_id: conversation.room_id, p_query: lexicalQuery, p_limit: 5 }) as { data: { file_id: string; original_name: string; content: string; extracted_truncated: boolean; chunk_index: number; rank: number }[] | null; error: { message: string } | null };
-        if (searchError) throw searchError;
-        if (matches?.length) files = prioritizeRoomFileMatches(files ?? [], matches);
-      } catch {
-        // Automatic lexical retrieval is best effort; explicit file selection above remains strict.
-        logWarn("room_file.search.failed", { requestId, stage: "room_file_search" });
-      }
-    }
+    const matches = await searchRoomFiles(supabase, conversation.room_id, currentText, (files ?? []).flatMap((file) => file.id ? [file.id] : []), () => logWarn("room_file.search.failed", { requestId, stage: "room_file_search" }));
+    if (matches.length) files = prioritizeRoomFileMatches(files ?? [], matches);
   }
   const mode = requestedModel?.data && requestedModel.data !== "Auto" ? requestedModel.data : resolveMode(normalizeSavedMode(conversation.selected_model), availableModes);
   if (!mode) return NextResponse.json({ error: safeError }, { status: 503 });

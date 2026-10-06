@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildContext } from "../../lib/context/build-context";
 import { CONTEXT_POLICY_TEXT } from "../../lib/context/context-policy";
 import type { BuildContextInput } from "../../lib/context/context-types";
@@ -11,6 +11,8 @@ import { chunkRoomFileText } from "../../lib/files/chunks";
 import { buildPdf } from "../fixtures/attachments/pdf";
 import { buildLexicalSearchQuery } from "../../lib/files/lexical-query";
 import { prioritizeRoomFileMatches } from "../../lib/files/retrieval";
+
+afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 function storedDocx(xml: string) {
   const name = Buffer.from("word/document.xml");
@@ -250,6 +252,22 @@ describe("room file ownership", () => {
     const foreign = client({ room: false });
     await expect(saveRoomFile(foreign.db, owner, room, textFile("notes.txt", "text/plain", "hello"))).resolves.toEqual({ error: "That room is no longer available." });
     expect(foreign.upload).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])("indexes the existing chunks once with embedding success=%s", async (success) => {
+    vi.stubEnv("OPENAI_API_KEY", "mock-key");
+    const text = "Deployment validates and ships the backend. ".repeat(100);
+    const expected = chunkRoomFileText(text);
+    const embedding = Array<number>(512).fill(0); embedding[0] = 1;
+    const fetcher = success ? vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: expected.map((_, index) => ({ index, embedding })) }))) : vi.fn().mockRejectedValue(new Error("network"));
+    vi.stubGlobal("fetch", fetcher);
+    const owned = client({});
+    expect((await saveRoomFile(owned.db, owner, room, textFile("deploy.txt", "text/plain", text))).data).toBeDefined();
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(JSON.parse(fetcher.mock.calls[0][1].body).input).toEqual(expected.map(c => c.text));
+    const chunks = owned.inserts[1] as unknown as { content: string; chunk_index: number; embedding?: string }[];
+    expect(chunks.map(c => ({ index: c.chunk_index, text: c.content }))).toEqual(expected);
+    expect(chunks.every(c => success ? c.embedding === JSON.stringify(embedding) : c.embedding === undefined)).toBe(true);
   });
 
   it("leaves the database row in place when storage deletion fails", async () => {

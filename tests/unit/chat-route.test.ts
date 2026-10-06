@@ -892,7 +892,7 @@ describe("POST /api/chat", () => {
       roomClient(question);
       rpc.mockImplementation((name: string, args: unknown) => {
         if (name === "search_room_file_chunks") {
-          expect(args).toEqual({ p_room_id: "room", p_query: "deployment OR pipeline", p_limit: 5 });
+          expect(args).toEqual({ p_room_id: "room", p_query: "deployment OR pipeline", p_limit: 10 });
           return Promise.resolve({
             data: [{ file_id: fileId, original_name: "runbook.md", content: "deploy pipeline releases backend service", extracted_truncated: false, chunk_index: 4, rank: 0.9 }],
             error: null,

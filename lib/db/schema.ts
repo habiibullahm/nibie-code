@@ -13,6 +13,7 @@ import {
   unique,
   uniqueIndex,
   uuid,
+  vector,
 } from "drizzle-orm/pg-core";
 import { type AnyColumn, sql } from "drizzle-orm";
 
@@ -149,6 +150,7 @@ export const roomFileChunks = pgTable("room_file_chunks", {
   roomId: uuid("room_id").notNull(),
   chunkIndex: integer("chunk_index").notNull(),
   content: text("content").notNull(),
+  embedding: vector("embedding", { dimensions: 512 }),
   searchVector: customType<{ data: string }>({ dataType: () => "tsvector" })("search_vector").generatedAlwaysAs(sql`to_tsvector('simple', content)`),
 }, (table) => [
   unique("room_file_chunks_file_index_key").on(table.fileId, table.chunkIndex),
@@ -156,6 +158,8 @@ export const roomFileChunks = pgTable("room_file_chunks", {
   foreignKey({ name: "room_file_chunks_room_owner_fk", columns: [table.roomId, table.userId], foreignColumns: [rooms.id, rooms.userId] }).onDelete("cascade"),
   index("room_file_chunks_scope_idx").on(table.userId, table.roomId, table.fileId),
   index("room_file_chunks_search_idx").using("gin", table.searchVector),
+  index("room_file_chunks_embedding_hnsw_idx").using("hnsw", table.embedding.op("vector_cosine_ops")),
+  check("room_file_chunks_embedding_nonzero", sql`${table.embedding} IS NULL OR vector_norm(${table.embedding}) > 0`),
   check("room_file_chunks_index_check", sql`${table.chunkIndex} >= 0`),
   check("room_file_chunks_content_bounds", sql`char_length(${table.content}) between 1 and 3000`),
 ]);

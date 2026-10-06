@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { buildRoomFilePath, fileDeletionOutcome, inspectRoomFile, type StorageDeleteResult } from "@/lib/files/inspect";
 import { MAX_ROOM_FILES, ROOM_FILES_BUCKET } from "@/lib/files/limits";
 import type { RoomFileSummary } from "@/lib/files/types";
+import { embedFileTexts } from "@/lib/files/embeddings";
 import { chunkRoomFileText } from "@/lib/files/chunks";
 
 type QueryError = { message?: string; code?: string } | null;
@@ -91,7 +92,9 @@ export async function saveRoomFile(client: RoomFileClient, ownerId: string, room
     return { error: saveFailed };
   }
   const chunks = chunkRoomFileText(inspected.text).map((chunk) => ({ file_id: fileId, user_id: ownerId, room_id: roomId, chunk_index: chunk.index, content: chunk.text }));
-  const indexed = await client.from("room_file_chunks").insert(chunks);
+  let vectors: number[][] | undefined;
+  try { vectors = await embedFileTexts(chunks.map((chunk) => chunk.content)); } catch { /* Lexical indexing remains available; maintenance can fill missing vectors. */ }
+  const indexed = await client.from("room_file_chunks").insert(chunks.map((chunk, i) => vectors ? { ...chunk, embedding: JSON.stringify(vectors[i]) } : chunk));
   const indexResult = await Promise.resolve(indexed).then((value) => value as { error: QueryError });
   if (indexResult.error) {
     await client.from("room_files").delete().eq("id", fileId).eq("room_id", roomId);
