@@ -20,6 +20,8 @@ What's new in Nibie.
 
 ### Fixed
 
+- Replies now show a single thinking indicator, without repeating the response status below the message box.
+- Once a conversation has started, the message box now says "Reply to Nibie…" instead of "Ask Nibie anything…".
 - Help → What's new now shows the latest updates instead of saying there's no release yet.
 - Stopping a reply now preserves the text already shown, stays marked Stopped after reload, and doesn't block your next message.
 

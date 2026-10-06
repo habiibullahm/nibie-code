@@ -18,6 +18,7 @@ test("new chat starts in General; initial selection survives typing and becomes 
   await expect(roomSelector(page)).toHaveAccessibleName("Room: General");
   await expect(page.getByRole("textbox", { name: "Message Nibie" })).toHaveAttribute("placeholder", "Ask Nibie anything...");
   await send(page, "General hello");
+  await expect(page.getByRole("textbox", { name: "Message Nibie" })).toHaveAttribute("placeholder", "Reply to Nibie...");
   await expect(roomSelector(page)).toHaveAccessibleName("Room: General");
   await newChat(page);
   await chooseRoom(page, roomName);
