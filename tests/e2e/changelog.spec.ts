@@ -15,11 +15,13 @@ test("public changelog retains semantic release hierarchy and existing metadata"
   await expect(page.getByText("Development snapshot", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { level: 2, name: "Current development" })).toBeVisible();
   await expect(page.getByRole("heading", { level: 3, name: "Added" })).toBeVisible();
-  const attachmentNote = page.locator(".changelog-entry--unreleased li").filter({ hasText: "attach up to three text" });
-  await expect(attachmentNote).toContainText("Chat Attachments V1");
+  const attachmentNote = page.locator(".changelog-entry--unreleased li").filter({ hasText: "Attach up to three text-based files" });
+  await expect(attachmentNote).toContainText("conversation");
+  await expect(attachmentNote).not.toContainText("migration");
+  await expect(attachmentNote).not.toContainText("0009");
   await expect(attachmentNote).not.toContainText("**");
   await expect(attachmentNote).not.toContainText("](");
-  await expect(attachmentNote.locator("strong")).toHaveText("+");
+  await expect(page.locator(".changelog-column")).not.toContainText(/GET \/api\/health|Vercel|release:check|request id|integration test suite/i);
   await expect(page).toHaveTitle("Nibie Changelog");
   await expect(page.locator("meta[name='description']")).toHaveAttribute("content", "Product updates, improvements, and fixes for Nibie.");
   await expect(page.getByRole("link", { name: "Changelog", exact: true }).last()).toHaveAttribute("aria-current", "page");

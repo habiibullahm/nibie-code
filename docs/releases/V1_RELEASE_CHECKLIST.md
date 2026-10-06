@@ -81,8 +81,8 @@ If `main` cannot fast-forward to `RC_SHA`, stop. Do not merge the staging branch
 
 Use merged `main` and the verified production deployment as the source of truth. Document only what that SHA shipped. Do not write API keys, credentials, secret values, or private tokens. Environment variables may be named only.
 
-15. Update `CHANGELOG.md` with the version, release date, Added, Changed, Fixed, Removed or Deprecated when relevant, Known issues, and important user-visible behavior.
-16. Copy [V1_RELEASE_TEMPLATE.md](V1_RELEASE_TEMPLATE.md) to `docs/releases/vX.Y.Z.md`. Record the production SHA, production URL, what shipped, user-visible changes, technical changes, migrations, verification, known issues, deferred work, and the next milestone.
+15. Update the public `CHANGELOG.md` with the version and date, concise user-facing Added, Changed, Fixed, Removed, or Deprecated highlights when relevant, and important user-visible limitations. Keep implementation details, migration names, release commands/process, observability/logging, and implementation-only test details out of the public changelog.
+16. Copy [V1_RELEASE_TEMPLATE.md](V1_RELEASE_TEMPLATE.md) to `docs/releases/vX.Y.Z.md`. Record the production SHA, production URL, what shipped, user-visible and technical changes, migrations, verification, known issues, deferred work, and the next milestone. Use the release note for engineering and release-process details omitted from the public changelog.
 17. Review the product docs this release touches. Correct or remove outdated behavior, architecture, UX, Room and Thread behavior, model modes, provider config, context rules, safety, persistence, navigation, limitations, known issues, and deferred work.
 18. Confirm known issues in the changelog and the release note still happen in production. Remove issues this release fixed.
 
