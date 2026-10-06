@@ -550,7 +550,7 @@ The server owns final prompt/context assembly.
 
 The client cannot directly construct the system message.
 
-Account preferences such as preferred language, response length, response style, preferred name, and About You are user-controlled data.
+Account preferences such as preferred language, response depth, response style, preferred name, and About You are user-controlled data.
 
 They may influence response behavior but must not change authorization, secret access, tool permissions, or security policy.
 

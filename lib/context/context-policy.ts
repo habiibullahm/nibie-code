@@ -1,5 +1,6 @@
 import type { ChatModel } from "@/lib/chat/validation";
-import { responseQualityFor } from "@/lib/ai/response-quality";
+import { responseDepthInstruction, responseQualityFor } from "@/lib/ai/response-quality";
+import type { ResponseLength } from "@/lib/preferences/types";
 
 export const CONTEXT_POLICY_VERSION = "context-policy-v1" as const;
 
@@ -12,8 +13,9 @@ const PRODUCT_POLICY_TEXT = [
   "In clinic work, patient triage, symptom collection, diagnosis, medication, insurance, 24/7, multilingual support, WhatsApp/EMR integration, compliance, timeline or pricing are unconfirmed unless explicitly supported; otherwise proposed or open questions.",
 ].join("\n\n");
 
-export function contextPolicyFor(mode?: ChatModel) {
-  return `${PRODUCT_POLICY_TEXT}\n\n${responseQualityFor(mode)}`;
+// The depth line comes last so the saved depth (Default unless the user chose otherwise) is the closing instruction.
+export function contextPolicyFor(mode?: ChatModel, depth: ResponseLength = "balanced") {
+  return `${PRODUCT_POLICY_TEXT}\n\n${responseQualityFor(mode)}\n\n${responseDepthInstruction(depth)}`;
 }
 
 export const CONTEXT_POLICY_TEXT = contextPolicyFor();

@@ -1,6 +1,10 @@
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import nextEnv from "@next/env";
+
+// @next/env is CommonJS: Node's ESM loader cannot see its named exports, so read loadEnvConfig from the default export.
+const { loadEnvConfig } = nextEnv;
 
 const isWindows = process.platform === "win32";
 const npx = isWindows ? "npx.cmd" : "npx";
@@ -75,6 +79,14 @@ export function localEnvFromStatus(text) {
 }
 
 function main() {
+  // Load .env.local before spawning child processes so provider secrets are available to the local app. The local Supabase
+  // connection values below still override any hosted ones it contains.
+  loadEnvConfig(process.cwd());
+  console.log("\n[Nibie] Local env loaded:", {
+    fast: Boolean(process.env.SUMOPOD_API_KEY && process.env.SUMOPOD_BASE_URL),
+    openai: Boolean(process.env.OPENAI_API_KEY),
+  });
+
   console.log("\n[Nibie] Starting local Supabase...");
   run(npx, ["--yes", SUPABASE_CLI, "start"]);
 

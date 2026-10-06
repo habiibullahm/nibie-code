@@ -185,7 +185,7 @@ export function LandingPage() {
           <div className="landing-settings">
             <SettingChoice label="Preferred language" options={["Auto", "English", "Bahasa Indonesia"]} selected="Auto" />
             <SettingChoice label="Default model" options={["Fast", "Balanced", "High"]} selected="Balanced" />
-            <SettingChoice label="Response length" options={["Concise", "Balanced", "Detailed"]} selected="Balanced" />
+            <SettingChoice label="Response depth" options={["Concise", "Default", "Detailed"]} selected="Default" />
             <SettingChoice label="Response style" options={["Natural", "Professional", "Direct"]} selected="Natural" />
             <div className="landing-setting">
               <p className="landing-setting-label">Preferred name</p>

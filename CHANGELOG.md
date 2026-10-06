@@ -11,9 +11,11 @@ What's new in Nibie.
 - Give long prompts a larger editing space while keeping short messages compact.
 - Track your 100-credit weekly AI allowance and next reset in Settings; each response mode uses a different amount.
 - Attach up to three text-based files—text, Markdown, CSV, JSON, source code, or text-based PDFs—to a conversation. Nibie can answer follow-up questions from their contents, and the files stay with that conversation.
+- Long conversations keep their thread: Nibie maintains a short summary of earlier messages in the background, so replies stay grounded in older context while recent messages are still used word for word.
 
 ### Changed
 
+- Nibie's answers are now substantive by default, with enough explanation, steps, examples, or trade-offs to understand or act without asking again, and no padding. Short follow-ups like a company name or tech stack refine your current question, and Nibie won't start a quiz or mock interview unless you ask for one. Settings → Response depth offers Concise, Default, and Detailed, and a request in your message always wins.
 - Nibie answers are easier to scan, with headings, steps, comparison tables, or code when they help.
 
 ### Fixed
