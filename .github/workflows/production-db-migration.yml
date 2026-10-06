@@ -56,6 +56,29 @@ jobs:
             exit 1
           fi
 
+      # drizzle-kit swallows connection errors ("exit code 1" with no reason), so probe first.
+      # Prints only the host kind and the error code, never the connection string or hostname.
+      - name: Probe database connection
+        env:
+          DATABASE_URL: ${{ secrets.POSTGRES_URL_NON_POOLING }}
+        run: |
+          node --input-type=module -e '
+            import postgres from "postgres";
+            const url = new URL(process.env.DATABASE_URL);
+            const kind = url.hostname.startsWith("db.") ? "direct" : url.hostname.includes("pooler.") ? "pooler" : "other";
+            console.log(`host kind=${kind} port=${url.port || 5432}`);
+            const sql = postgres(process.env.DATABASE_URL, { max: 1, connect_timeout: 15, onnotice: () => {} });
+            try {
+              await sql`select 1`;
+              console.log("connection ok");
+            } catch (error) {
+              console.error(`::error::Database connection failed: code=${error.code ?? "none"} name=${error.name} syscall=${error.syscall ?? "none"}`);
+              process.exitCode = 1;
+            } finally {
+              await sql.end({ timeout: 5 });
+            }
+          '
+
       - name: Apply migrations
         env:
           # drizzle.config.ts reads DATABASE_URL.
