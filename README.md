@@ -25,7 +25,7 @@ See [`docs/engineering/BRANCHING_STRATEGY.md`](docs/engineering/BRANCHING_STRATE
 2. Set `NEXT_PUBLIC_APP_URL` to the app's canonical origin, and set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` from the Nibie Supabase project API settings. Do not use a secret/service-role key in the app.
 3. Add `${NEXT_PUBLIC_APP_URL}/auth/callback` to the Supabase Auth redirect URL allowlist so email confirmation can return to the server callback.
 4. Set `DATABASE_URL` to the project's PostgreSQL connection string. It is used only by Drizzle migrations; keep it server-side.
-5. Apply schema changes with `npm run db:migrate`.
+5. Apply schema changes locally with `npm run db:migrate`. Production migrations run in the Production DB Migration GitHub Actions workflow on every push to `main`; the Vercel build does not migrate.
 
 The initial migration creates the user, conversation, and message tables, creates user rows from Supabase Auth sign-ups, and enables owner-scoped RLS. Normal application data access must use the cookie-bound Supabase client and publishable key so Postgres evaluates RLS as the signed-in user. Do not use service-role or privileged direct database connections for user-data requests.
 

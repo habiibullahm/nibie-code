@@ -30,8 +30,8 @@ The frozen SHA wins. Inventory the journal in that SHA. Do not copy filenames fr
 
 ## DATABASE
 
-6. Confirm the migration target is production. `DATABASE_URL` for this step is the production migration connection, used only for `npm run db:migrate`. Do not point `TEST_DATABASE_URL` at production. Do not use the migration connection for user-data requests.
-7. Apply the unapplied migrations in journal order. Stop on the first failure. Do not skip a number.
+6. Production migrations run in the **Production DB Migration** GitHub Actions workflow (`.github/workflows/production-db-migration.yml`), not in the Vercel build. It runs `npm run db:migrate` on every push to `main` (and on manual dispatch) using the `POSTGRES_URL_NON_POOLING` secret of the GitHub `production` environment, exposed to Drizzle as `DATABASE_URL`. Do not point `TEST_DATABASE_URL` at production. Do not use the migration connection for user-data requests.
+7. Wait for the workflow to PASS for the release commit. Migrations apply in journal order and stop on the first failure. Vercel Deployment Checks must require the `Production DB migration` check so a failed migration never reaches production. Re-run the workflow after fixing a failure; do not run `db:migrate` by hand against production.
 8. Verify RLS and constraints for every new or changed table: owner policies enabled, unexpected cross-owner reads fail, and the journal version matches the applied files. Record PASS or FAIL per filename.
 
 Example record, filled from the real inventory, not from memory of a future feature:

@@ -75,3 +75,45 @@ jobs:
 
       - name: Release consistency check
         run: npm run release:check
+
+  preview-db:
+    name: Preview DB migration + integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: branch-policy
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: nibie_ai
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d nibie_ai"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/nibie_ai
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/nibie_ai
+      ALLOW_TEST_DATABASE_RESET: '1'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run migration and DB integration tests
+        run: npm run test:integration
