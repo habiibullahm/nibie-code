@@ -27,6 +27,7 @@ export function ComposerMenu<T extends string>({ name, value, items, onChange, d
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const menuId = useId();
   const current = items.find((item) => item.value === value) ?? items[0];
+  const currentLabel = current?.label ?? (value || "Unavailable");
 
   useEffect(() => {
     if (!open) return;
@@ -55,9 +56,9 @@ export function ComposerMenu<T extends string>({ name, value, items, onChange, d
   return <div className="composer-menu" ref={rootRef}>
     <button ref={buttonRef} type="button" className="composer-menu-button" disabled={disabled} title={disabled ? disabledReason : description ? `Select ${name.toLowerCase()}` : undefined}
       aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined}
-      aria-label={disabled && disabledReason ? `${name}: ${current.label} (${disabledReason})` : `${name}: ${current.label}`}
+      aria-label={disabled && disabledReason ? `${name}: ${currentLabel} (${disabledReason})` : `${name}: ${currentLabel}`}
       onClick={() => setOpen((state) => !state)} onKeyDown={openFromKey}>
-      <span>{current.label}</span><ChevronDown size={13} aria-hidden="true" />
+      <span>{currentLabel}</span><ChevronDown size={13} aria-hidden="true" />
     </button>
     {open && <div id={menuId} className="composer-menu-list" role="menu" aria-label={description ? `Select ${name.toLowerCase()}` : name} onKeyDown={moveFocus}>
       {description ? <div className="composer-menu-heading" role="presentation"><strong>Select {name.toLowerCase()}</strong><small>{description}</small></div> : null}
