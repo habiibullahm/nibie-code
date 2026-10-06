@@ -1,7 +1,10 @@
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadEnvConfig } from "@next/env";
+import nextEnv from "@next/env";
+
+// @next/env is CommonJS: Node's ESM loader cannot see its named exports, so read loadEnvConfig from the default export.
+const { loadEnvConfig } = nextEnv;
 
 const isWindows = process.platform === "win32";
 const npx = isWindows ? "npx.cmd" : "npx";
