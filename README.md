@@ -13,6 +13,12 @@ npm run dev
 
 Available checks: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, and `npm run test:e2e`.
 
+## Development workflow
+
+Nibie uses lightweight trunk-based development: `main` stays production-ready, normal work uses short-lived `feat/*`, `fix/*`, `refactor/*`, `chore/*`, and similar branches, and pull requests use Vercel Preview instead of a permanent staging branch. Large coordinated releases may temporarily use `release/vX.Y.Z` and delete it after release.
+
+See [`docs/engineering/BRANCHING_STRATEGY.md`](docs/engineering/BRANCHING_STRATEGY.md) for the full workflow, branch naming rules, agent/worktree guidance, release flow, and merge policy.
+
 ## Supabase and database setup
 
 1. Create or select a Supabase project and copy `.env.example` to `.env.local`.
