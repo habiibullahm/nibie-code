@@ -40,7 +40,8 @@ export function buildContext(input: BuildContextInput): ContextPlan {
   const olderMessages = earlier.slice(0, earlier.length - protectedMessages.length);
   const resolved = resolveThreadSummary(input.summary, input.currentPosition);
   const pieces = profilePieces(input.preferences);
-  const corePolicyText = contextPolicyFor(input.responseMode);
+  // Unreadable preferences fall back to the Default depth, like every other preference.
+  const corePolicyText = contextPolicyFor(input.responseMode, input.preferenceReadFailed ? "balanced" : input.preferences.responseLength);
   const coreTokens = estimateTokens(corePolicyText);
   const currentTokens = estimateTokens(current.content);
   if (coreTokens + currentTokens > inputBudgetTokens) throw new ContextBuildError();

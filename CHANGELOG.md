@@ -15,6 +15,7 @@ What's new in Nibie.
 
 ### Changed
 
+- Nibie's answers are now substantive by default, with enough explanation, steps, examples, or trade-offs to understand or act without asking again, and no padding. Short follow-ups like a company name or tech stack refine your current question, and Nibie won't start a quiz or mock interview unless you ask for one. Settings → Response depth offers Concise, Default, and Detailed, and a request in your message always wins.
 - Nibie answers are easier to scan, with headings, steps, comparison tables, or code when they help.
 
 ### Fixed

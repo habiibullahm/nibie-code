@@ -43,4 +43,16 @@ test.describe("settings shell", () => {
     await expect(page.getByTestId("welcome-greeting")).toBeVisible();
     await expect(page.getByRole("button", { name: "Model: Fast", exact: true })).toBeVisible();
   });
+
+  test("offers Concise, Default, and Detailed response depth, with Default selected", async ({ page }) => {
+    await page.goto("/preview");
+    await openSettings(page);
+    await dialog(page).getByRole("tab", { name: "Nibie", exact: true }).click();
+    const depth = dialog(page).getByRole("radiogroup", { name: "Response depth" });
+    await expect(depth.getByRole("radio")).toHaveText(["Concise", "Default", "Detailed"]);
+    await expect(depth.getByRole("radio", { name: "Default", exact: true })).toBeChecked();
+    // Balanced stays the model capability name only.
+    await expect(dialog(page).getByRole("radiogroup", { name: "Default model" }).getByRole("radio", { name: "Balanced", exact: true })).toBeVisible();
+    await expect(dialog(page).getByRole("radio", { name: "Balanced", exact: true })).toHaveCount(1);
+  });
 });
