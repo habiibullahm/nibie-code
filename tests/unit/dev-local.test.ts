@@ -41,6 +41,12 @@ describe("dev:local script", () => {
     expect(localEnvFromStatus('API_URL="http://127.0.0.1:54321"').missing).toEqual(["NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "DATABASE_URL"]);
   });
 
+  it("loads Next env through its CommonJS default export under Node ESM", () => {
+    const source = readFileSync(join(process.cwd(), "scripts", "dev-local.mjs"), "utf8");
+    expect(source).toContain('import nextEnv from "@next/env";');
+    expect(source).toContain("const { loadEnvConfig } = nextEnv;");
+  });
+
   it("loads under plain Node ESM, where a named import from the CommonJS @next/env fails", () => {
     // Vitest resolves CommonJS named imports leniently, so only a real Node process proves the script can start.
     const result = spawnSync(process.execPath, ["--input-type=module", "-e", 'await import("./scripts/dev-local.mjs")'], { cwd: process.cwd(), encoding: "utf8" });

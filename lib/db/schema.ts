@@ -1,6 +1,7 @@
 import {
   boolean,
   check,
+  customType,
   date,
   foreignKey,
   index,
@@ -117,6 +118,7 @@ export const roomFiles = pgTable(
     sizeBytes: integer("size_bytes").notNull(),
     storagePath: text("storage_path").notNull(),
     extractedText: text("extracted_text").notNull(),
+    extractedTruncated: boolean("extracted_truncated").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
   },
@@ -130,7 +132,7 @@ export const roomFiles = pgTable(
     }).onDelete("cascade"),
     index("room_files_user_room_idx").on(table.userId, table.roomId, table.createdAt),
     check("room_files_name_length", sql`char_length(${table.originalName}) between 1 and 120 and ${table.originalName} = btrim(${table.originalName})`),
-    check("room_files_mime_allowlist", sql`${table.mimeType} in ('text/plain', 'text/markdown', 'text/csv')`),
+    check("room_files_mime_allowlist", sql`${table.mimeType} in ('text/plain','text/markdown','text/csv','application/json','application/pdf','application/vnd.openxmlformats-officedocument.wordprocessingml.document','text/typescript','text/javascript','text/x-python','text/x-java-source','text/x-go','text/x-rust','application/sql','text/html','text/css','application/yaml','application/xml')`),
     check("room_files_size_bounds", sql`${table.sizeBytes} between 1 and 5242880`),
     check("room_files_text_bounds", sql`char_length(${table.extractedText}) between 1 and 24000`),
     check(
@@ -139,6 +141,24 @@ export const roomFiles = pgTable(
     ),
   ],
 );
+
+export const roomFileChunks = pgTable("room_file_chunks", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  fileId: uuid("file_id").notNull(),
+  userId: uuid("user_id").notNull(),
+  roomId: uuid("room_id").notNull(),
+  chunkIndex: integer("chunk_index").notNull(),
+  content: text("content").notNull(),
+  searchVector: customType<{ data: string }>({ dataType: () => "tsvector" })("search_vector").generatedAlwaysAs(sql`to_tsvector('simple', content)`),
+}, (table) => [
+  unique("room_file_chunks_file_index_key").on(table.fileId, table.chunkIndex),
+  foreignKey({ name: "room_file_chunks_file_fk", columns: [table.fileId, table.userId], foreignColumns: [roomFiles.id, roomFiles.userId] }).onDelete("cascade"),
+  foreignKey({ name: "room_file_chunks_room_owner_fk", columns: [table.roomId, table.userId], foreignColumns: [rooms.id, rooms.userId] }).onDelete("cascade"),
+  index("room_file_chunks_scope_idx").on(table.userId, table.roomId, table.fileId),
+  index("room_file_chunks_search_idx").using("gin", table.searchVector),
+  check("room_file_chunks_index_check", sql`${table.chunkIndex} >= 0`),
+  check("room_file_chunks_content_bounds", sql`char_length(${table.content}) between 1 and 3000`),
+]);
 
 export const conversations = pgTable(
   "conversations",

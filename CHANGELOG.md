@@ -11,6 +11,7 @@ What's new in Nibie.
 - Give long prompts a larger editing space while keeping short messages compact.
 - Track your 100-credit weekly AI allowance and next reset in Settings; each response mode uses a different amount.
 - Attach up to three text-based files—text, Markdown, CSV, JSON, source code, or text-based PDFs—to a conversation. Nibie can answer follow-up questions from their contents, and the files stay with that conversation.
+- Add private Room files including DOCX and source formats; Nibie can find relevant text excerpts in the current Room when answering a question.
 - Long conversations keep their thread: Nibie maintains a short summary of earlier messages in the background, so replies stay grounded in older context while recent messages are still used word for word.
 
 ### Changed

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc, modelOptions, contextCapabilities, withoutAttachments, attachmentState, stopState } = vi.hoisted(() => {
   const createClient = vi.fn(); const stream = vi.fn(); const claim = vi.fn(); const usageReserve = vi.fn(); const usageStart = vi.fn(); const usageRelease = vi.fn();
-  const rpc = vi.fn((name: string, args: unknown) => name === "reserve_weekly_ai_usage" ? usageReserve(args) : name === "start_weekly_ai_usage" ? usageStart(args) : name === "release_weekly_ai_usage" ? usageRelease(args) : claim(name, args));
+  const rpc = vi.fn((name: string, args: unknown) => name === "search_room_file_chunks" ? Promise.resolve({ data: [], error: null }) : name === "reserve_weekly_ai_usage" ? usageReserve(args) : name === "start_weekly_ai_usage" ? usageStart(args) : name === "release_weekly_ai_usage" ? usageRelease(args) : claim(name, args));
   const attachmentState: { result: { data: unknown; error: unknown }; reads: unknown[][] } = { result: { data: [], error: null }, reads: [] };
   const stopState = { status: "streaming" as string | null, reads: 0 };
   const statusRead = () => {
@@ -858,6 +858,115 @@ describe("POST /api/chat", () => {
       expect(denied.status).toBe(400);
       expect(stream).toHaveBeenCalledTimes(1);
       expect(claim).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("automatic room file lexical retrieval", () => {
+    const fileId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const question = "What does our deployment pipeline do?";
+
+    afterEach(() => {
+      rpc.mockImplementation((name: string, args: unknown) => name === "search_room_file_chunks" ? Promise.resolve({ data: [], error: null }) : name === "reserve_weekly_ai_usage" ? usageReserve(args) : name === "start_weekly_ai_usage" ? usageStart(args) : name === "release_weekly_ai_usage" ? usageRelease(args) : claim(name, args));
+    });
+
+    function roomClient(userContent: string, writes: unknown[] = []) {
+      const outcomes = [
+        { data: { id: "user-message", position: 1, content: userContent }, error: null },
+        { data: [{ id: "user-message", role: "user", content: userContent, status: "complete", position: 1 }], error: null },
+        { data: { id: assistantId }, error: null },
+      ];
+      const from = vi.fn((table: string) => {
+        if (table === "user_preferences") return query(preferenceResult);
+        if (table === "conversations") return query({ data: { id: "conversation", selected_model: "Balanced", room_id: "room" }, error: null });
+        if (table === "rooms") return query({ data: { name: "Ops", instructions: null }, error: null });
+        if (table === "room_briefs") return query({ data: null, error: null });
+        if (table === "pins") return query({ data: [], error: null });
+        if (table === "room_files") return query({ data: [{ id: fileId, original_name: "selected.txt", extracted_text: "Explicit full file text." }], error: null });
+        return query(outcomes.shift(), (write) => writes.push(write));
+      });
+      createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc });
+      return from;
+    }
+
+    it("searches with OR content terms and grounds the reply in retrieved excerpts", async () => {
+      roomClient(question);
+      rpc.mockImplementation((name: string, args: unknown) => {
+        if (name === "search_room_file_chunks") {
+          expect(args).toEqual({ p_room_id: "room", p_query: "deployment OR pipeline", p_limit: 5 });
+          return Promise.resolve({
+            data: [{ file_id: fileId, original_name: "runbook.md", content: "deploy pipeline releases backend service", extracted_truncated: false, chunk_index: 4, rank: 0.9 }],
+            error: null,
+          });
+        }
+        if (name === "reserve_weekly_ai_usage") return usageReserve(args);
+        if (name === "start_weekly_ai_usage") return usageStart(args);
+        if (name === "release_weekly_ai_usage") return usageRelease(args);
+        return claim(name, args);
+      });
+      stream.mockResolvedValue(providerChunks(["Pipeline ships the backend."], "stop"));
+      const response = await POST(validRequest());
+      expect(response.status).toBe(200);
+      const events = await Array.fromAsync(readChatSse(response.body!));
+      expect(events[0]).toMatchObject({ type: "start", context: { sources: expect.arrayContaining([{ type: "file", label: "File context", state: "included", reason: "Selected room file" }]) } });
+      // Without an explicit fileIds selection the diagnostic still reports file context when retrieval fills it.
+      const prompt = stream.mock.calls[0][1] as { role: string; content: string }[];
+      expect(prompt[0].content).not.toContain("deploy pipeline");
+      expect(prompt[1].content).toContain('filename: "runbook.md"');
+      expect(prompt[1].content).toContain("deploy pipeline releases backend service");
+      expect(prompt[1].content).toContain("relevant excerpt");
+      expect(prompt.at(-1)?.content).toBe(question);
+      expect(rpc.mock.calls.some(([name]) => name === "search_room_file_chunks")).toBe(true);
+    });
+
+    it("keeps an explicit selection ahead of automatic matches and skips duplicate file text", async () => {
+      roomClient(question);
+      rpc.mockImplementation((name: string, args: unknown) => {
+        if (name === "search_room_file_chunks") {
+          return Promise.resolve({
+            data: [
+              { file_id: fileId, original_name: "selected.txt", content: "duplicate excerpt", extracted_truncated: false, chunk_index: 0, rank: 1 },
+              { file_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", original_name: "other.md", content: "pipeline stage two", extracted_truncated: true, chunk_index: 0, rank: 0.5 },
+            ],
+            error: null,
+          });
+        }
+        if (name === "reserve_weekly_ai_usage") return usageReserve(args);
+        if (name === "start_weekly_ai_usage") return usageStart(args);
+        if (name === "release_weekly_ai_usage") return usageRelease(args);
+        return claim(name, args);
+      });
+      stream.mockResolvedValue(providerChunks(["Ok."], "stop"));
+      const request = validRequest();
+      const response = await POST(new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify({ ...await request.json(), fileIds: [fileId] }) }));
+      expect(response.status).toBe(200);
+      await response.text();
+      const prompt = stream.mock.calls[0][1] as { role: string; content: string }[];
+      expect(prompt[1].content).toContain("Explicit full file text.");
+      expect(prompt[1].content).toContain("pipeline stage two");
+      expect(prompt[1].content).not.toContain("duplicate excerpt");
+    });
+
+    it("still completes the reply when lexical search fails", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      try {
+        roomClient(question);
+        rpc.mockImplementation((name: string, args: unknown) => {
+          if (name === "search_room_file_chunks") return Promise.resolve({ data: null, error: { message: "search unavailable" } });
+          if (name === "reserve_weekly_ai_usage") return usageReserve(args);
+          if (name === "start_weekly_ai_usage") return usageStart(args);
+          if (name === "release_weekly_ai_usage") return usageRelease(args);
+          return claim(name, args);
+        });
+        stream.mockResolvedValue(providerChunks(["Done."], "stop"));
+        const response = await POST(validRequest());
+        expect(response.status).toBe(200);
+        const events = await Array.fromAsync(readChatSse(response.body!));
+        expect(events.slice(-2)).toEqual([{ type: "status", status: "complete" }, { type: "done" }]);
+        expect(stream).toHaveBeenCalledOnce();
+        expect(warn.mock.calls.some(([line]) => String(line).includes("room_file.search.failed"))).toBe(true);
+      } finally {
+        warn.mockRestore();
+      }
     });
   });
 

@@ -4,6 +4,7 @@ import { getAuthenticatedUser } from "@/lib/auth/get-user";
 import { validateConversationId } from "@/lib/chat/validation";
 import { saveRoomFile, type RoomFileClient } from "@/lib/files/service";
 import { MAX_FILE_BYTES } from "@/lib/files/limits";
+import { readRoomFileForm } from "@/lib/files/request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,8 +26,10 @@ export async function POST(request: Request, context: { params: Promise<{ roomId
     const parsedRoom = validateConversationId(roomId);
     if (!parsedRoom.success) return NextResponse.json({ error: "Choose a valid room." }, { status: 400 });
 
-    let form: FormData;
-    try { form = await request.formData(); } catch { return NextResponse.json({ error: "Choose a file to add." }, { status: 400 }); }
+    const formResult = await readRoomFileForm(request, MAX_FILE_BYTES + 64 * 1024);
+    if ("tooLarge" in formResult) return NextResponse.json({ error: "That upload request is larger than the allowed limit." }, { status: 413 });
+    if ("invalid" in formResult) return NextResponse.json({ error: "Choose a file to add." }, { status: 400 });
+    const form = formResult.form;
     if (forbiddenFields.some((name) => form.has(name))) return NextResponse.json({ error: "File access uses your session." }, { status: 400 });
     const file = form.get("file");
     if (!(file instanceof File)) return NextResponse.json({ error: "Choose a file to add." }, { status: 400 });
@@ -38,7 +41,7 @@ export async function POST(request: Request, context: { params: Promise<{ roomId
       bytes,
     });
     if (saved.error || !saved.data) {
-      const status = saved.error === "That room is no longer available." ? 404 : saved.error === "This room already has 20 files." || saved.error?.startsWith("That file") || saved.error?.startsWith("Use a") || saved.error?.startsWith("Choose a") ? 400 : 503;
+      const status = saved.error === "That room is no longer available." ? 404 : saved.error === "This room already has 20 files." || saved.error?.startsWith("That file") || saved.error?.startsWith("That PDF") || saved.error?.startsWith("That DOCX") || saved.error?.startsWith("Use a") || saved.error?.startsWith("Choose a") ? 400 : 503;
       return NextResponse.json({ error: saved.error ?? "We couldn't save that file. Please try again." }, { status });
     }
     return NextResponse.json({ file: saved.data }, { status: 201 });

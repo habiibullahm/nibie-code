@@ -181,7 +181,8 @@ export default function DocsPage() {
         <section id="common-questions" className="docs-section" aria-labelledby="common-questions-title">
           <p className="docs-section-number" aria-hidden="true">09 / A few useful answers</p>
           <h2 id="common-questions-title">Common questions</h2>
-          <details><summary>Can I attach files?</summary><p>Attachments are not available yet. You can paste relevant text into a message.</p></details>
+          <details><summary>Can I attach files?</summary><p>You can attach up to three supported text, Markdown, CSV, JSON, source-code, or PDF files to a message. Attachments stay with that conversation. Images and scanned PDFs are not supported.</p></details>
+          <details><summary>Can I add files to a Room?</summary><p>Rooms accept text, Markdown, CSV, JSON, source code, text-based PDFs, and DOCX files up to 5 MB. Select files for full context, or ask a question and Nibie can retrieve relevant text excerpts from that Room. Scanned PDFs and image or spreadsheet files are not supported.</p></details>
           <details><summary>Why is a model missing?</summary><p>Only configured modes appear in the model picker. If your saved default is unavailable, Nibie uses an available mode for new chats.</p></details>
           <details><summary>What should I do if a response fails?</summary><p>Use Retry on the latest turn. If your session has expired, sign in again and reopen the conversation. Avoid sending the same message repeatedly while a response is still running.</p></details>
           <details><summary>Do I need an account?</summary><p>The documentation is public. <Link href="/signup">Create an account</Link> or <Link href="/login">sign in</Link> to use the workspace and save your conversations.</p></details>
