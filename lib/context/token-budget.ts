@@ -11,6 +11,8 @@ export const FILE_TOKEN_CAP = 1_500;
 export const ATTACHMENT_TOKEN_CAP = 6_000;
 // Shared by every web source in one request (under the file cap).
 export const WEB_TOKEN_CAP = 1_200;
+// Deep Research multi-source evidence budget (still bounded; evidence is chunked).
+export const RESEARCH_WEB_TOKEN_CAP = 3_200;
 // Shared by recalled user memories in one request (small, after web, before summary).
 export const MEMORY_TOKEN_CAP = 700;
 

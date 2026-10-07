@@ -13,6 +13,7 @@ export const operationalCodes = {
   webSearchFailed: "WEB_SEARCH_FAILED",
   recallWriteFailed: "RECALL_WRITE_FAILED",
   recallRetrieveFailed: "RECALL_RETRIEVE_FAILED",
+  deepResearchFailed: "DEEP_RESEARCH_FAILED",
 } as const;
 
 export type OperationalCode = (typeof operationalCodes)[keyof typeof operationalCodes];

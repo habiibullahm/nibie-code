@@ -41,7 +41,7 @@ export function ChatCoreComposerFixture() {
     <output aria-label="Requests">{requests}</output><output aria-label="Stops">{stops}</output>
     <ChatComposer sending={false} streaming={streaming} mode={model}
       models={(["Fast", "Balanced", "High"] as const).map((id) => ({ id, ...modelPickerCopy[id] }))}
-      onModelChange={setModel} savingMode={false}
+      onModelChange={setModel} researchMode="normal" onResearchModeChange={() => {}} savingMode={false}
       diagnostics={{ sources: [], recentMessageCount: 0 }} onEditProfile={() => {}} caption="Composer test fixture"
       onSubmit={send} onStop={() => { setStops((count) => count + 1); current.current?.abort(); }} onAttach={() => {}}
       roomItems={[{ value: "", label: "General" }]} roomId="" roomLabel="General" roomSelectionNotice={null} roomsLoading={false} onRoomChange={() => {}} />

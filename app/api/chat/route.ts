@@ -36,6 +36,7 @@ import { operationalCodes } from "@/lib/observability/codes";
 import { logError, logInfo, logWarn } from "@/lib/observability/logger";
 import { requestIdFrom } from "@/lib/observability/request-id";
 import { weeklyCreditCost, WEEKLY_FREE_CREDIT_LIMIT } from "@/lib/usage/policy";
+import { createDeepResearchChatResponse } from "@/lib/research/chat-stream";
 import { getWebSearchConfig } from "@/lib/web/config";
 import { getWebSearchProvider } from "@/lib/web/provider";
 import { runWebSearchPipeline } from "@/lib/web/pipeline";
@@ -71,15 +72,17 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
 
   let body: unknown;
   try { body = await request.json(); } catch { return NextResponse.json({ error: "Invalid request." }, { status: 400 }); }
-  const value = body as { conversationId?: unknown; userMessageId?: unknown; regenerate?: unknown; model?: unknown; fileIds?: unknown };
+  const value = body as { conversationId?: unknown; userMessageId?: unknown; regenerate?: unknown; model?: unknown; fileIds?: unknown; deepResearch?: unknown };
   const parsedId = validateConversationId(value?.conversationId);
   const parsedMessageId = validateConversationId(value?.userMessageId);
   const selectedFiles = parseSelectedFileIds(value?.fileIds, MAX_FILES_PER_MESSAGE);
   // The client may name a mode from a fixed vocabulary; it is never a provider model id. Reasoning is server-side routing config,
   // so a stale client's `reasoning` field is simply ignored.
   const requestedModel = value?.model === undefined ? undefined : modelChoiceInputSchema.safeParse(value.model);
-  if (!selectedFiles.ok || !parsedId.success || !parsedMessageId.success || (value.regenerate !== undefined && typeof value.regenerate !== "boolean") || requestedModel?.success === false) return NextResponse.json({ error: "Invalid request." }, { status: 400 });
+  if (!selectedFiles.ok || !parsedId.success || !parsedMessageId.success || (value.regenerate !== undefined && typeof value.regenerate !== "boolean") || (value.deepResearch !== undefined && typeof value.deepResearch !== "boolean") || requestedModel?.success === false) return NextResponse.json({ error: "Invalid request." }, { status: 400 });
   const regenerate = value.regenerate === true;
+  // Explicit Deep Research only — never auto-triggered from question phrasing or Fast/Balanced/High.
+  const deepResearch = value.deepResearch === true;
   // Only modes that are configured on the server can be used, whether the client asked for one or the conversation has one saved.
   const { models: availableModels } = getModelOptions();
   const availableModes = availableModels.map((option) => option.id);
@@ -171,7 +174,8 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
 
   const responseStartedAt = Date.now();
   const durationMs = () => Date.now() - responseStartedAt;
-  logInfo("chat.response.started", { requestId, regenerate, mode });
+  // Deep Research logs chat.response.started inside its own stream path.
+  if (!deepResearch) logInfo("chat.response.started", { requestId, regenerate, mode });
 
   // Explicit recall: save/forget intent and retrieval never block the reply.
   // Fail closed when preferences could not be read so a disabled user is not briefly re-enabled.
@@ -227,6 +231,33 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
         code: operationalCodes.recallRetrieveFailed,
       });
     }
+  }
+
+  // Deep Research is an explicit alternate path: bounded multi-source orchestrator + cited synthesis.
+  // It does not use auto web routing and must not overload Fast/Balanced/High.
+  if (deepResearch) {
+    const planMode = (availableModes.includes("Fast") ? "Fast" : mode) as typeof mode;
+    return createDeepResearchChatResponse({
+      request,
+      requestId,
+      requestStartedAt,
+      supabase,
+      userId: user.id,
+      conversationId: conversation.id,
+      assistant: { id: assistant.id, position: assistant.position },
+      userMessage: { id: userMessage.id, content: userMessage.content, position: userMessage.position },
+      mode,
+      availablePlanMode: planMode,
+      preferences: preferenceState.preferences,
+      preferenceReadFailed: Boolean(preferenceState.error),
+      summary,
+      room,
+      files,
+      attachments,
+      memories,
+      recallOperation,
+      rows,
+    });
   }
 
   // Web search runs after Room hybrid retrieval and only for a fresh generation (replay already returned).

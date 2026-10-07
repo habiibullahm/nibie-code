@@ -1,4 +1,4 @@
-import { prepareWebSourceReferences } from "@/lib/citations/prepare";
+import { MAX_PREPARED_SOURCES, prepareWebSourceReferences } from "@/lib/citations/prepare";
 import type { SourceReference } from "@/lib/citations/types";
 import type { WebContextInput } from "@/lib/web/types";
 
@@ -10,8 +10,9 @@ import type { WebContextInput } from "@/lib/web/types";
 export function attachWebCitationHandles(
   inputs: readonly WebContextInput[],
   retrievedAt?: Date,
+  maxSources: number = MAX_PREPARED_SOURCES,
 ): { sources: SourceReference[]; web: WebContextInput[] } {
-  const sources = prepareWebSourceReferences(inputs, retrievedAt);
+  const sources = prepareWebSourceReferences(inputs, retrievedAt, maxSources);
   if (!sources.length) return { sources: [], web: [] };
 
   const web: WebContextInput[] = [];

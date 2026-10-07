@@ -152,6 +152,28 @@ describe("chat SSE diagnostic contract", () => {
   ])("rejects malformed events and ordering: %j", async (text) => {
     await expect(Array.fromAsync(readChatSse(bodyOf(text)))).rejects.toThrow();
   });
+
+  it("accepts Deep Research progress and sources events", async () => {
+    const sources = [{ ordinal: 1, kind: "web", title: "Docs", url: "https://example.com", domain: "example.com" }];
+    const text =
+      eventOf("start", { id, position: 2, research: true }) +
+      eventOf("progress", { stage: "planning" }) +
+      eventOf("progress", { stage: "searching" }) +
+      eventOf("sources", { sources }) +
+      eventOf("delta", { text: "Findings" }) +
+      eventOf("status", { status: "complete" }) +
+      eventOf("done", {});
+    const events = await Array.fromAsync(readChatSse(bodyOf(text)));
+    expect(events.map((e) => e.type)).toEqual([
+      "start",
+      "progress",
+      "progress",
+      "sources",
+      "delta",
+      "status",
+      "done",
+    ]);
+  });
 });
 
 function bodyOf(source: string, cancel?: () => void) {

@@ -116,12 +116,16 @@ export type BuildContextInput = {
   attachments?: AttachmentContextInput[] | null;
   // Public web sources already retrieved and SSRF-checked for this request. Omitted when routing skipped web or retrieval failed.
   web?: WebContextInput[] | null;
+  // Optional override for web token budget (Deep Research uses a higher cap). Defaults to WEB_TOKEN_CAP.
+  webTokenCap?: number;
   // True when capability routing wanted web but sources were empty (unconfigured, provider fail, empty pipeline).
   webVerificationUnavailable?: boolean;
   // Explicit user-owned memories already retrieved for this request. Omitted when recall is off or none matched.
   memories?: MemoryRecord[] | null;
   // Outcome of an explicit remember/forget on this turn. Authoritative; not untrusted memory content.
   recallOperation?: RecallOperationStatus | null;
+  // Optional authoritative product instruction (e.g. Deep Research synthesis guidance). Not untrusted web text.
+  extraPolicyInstruction?: string | null;
 };
 
 export class ContextBuildError extends Error {

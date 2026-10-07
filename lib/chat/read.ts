@@ -5,6 +5,8 @@ import { sanitizeModelOutput } from "@/lib/ai/sanitize-model-output";
 import { attachmentSummaryColumns, toAttachmentSummary, type AttachmentRow, type AttachmentSummary } from "@/lib/attachments/types";
 import { loadMessageSourcesByConversation } from "@/lib/citations/persist";
 import type { CitationSourceView } from "@/lib/citations/types";
+import { loadMessageResearchByConversation } from "@/lib/research/persist";
+import type { MessageResearchView } from "@/lib/research/types";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { schemaUnavailable } from "@/lib/chat/schema-error";
 import { validateConversationId } from "@/lib/chat/validation";
@@ -56,6 +58,10 @@ export type PersistedMessage = {
   terminationReason?: "user_stopped";
   attachments?: AttachmentSummary[];
   sources?: CitationSourceView[];
+  /** Present when this assistant reply used Deep Research. */
+  research?: MessageResearchView;
+  /** Live progress stage while Deep Research is running (client-only). */
+  researchStage?: "planning" | "searching" | "reading" | "synthesizing";
 };
 
 export async function getChatWorkspaceData(conversationId: unknown) {
@@ -74,10 +80,10 @@ export async function getChatWorkspaceData(conversationId: unknown) {
 
   // The history list and the selected conversation's messages are independent reads, so they run together.
   // RLS scopes both to the signed-in owner; messages are only used when the conversation is in the owner's list.
-  const [conversationResult, { data: roomRows, error: roomsError }, { data: briefRows, error: briefsError }, { data: pinRows, error: pinsError }, messagesResult, attachmentsResult, sourcesResult] = await Promise.all([
+  const [conversationResult, { data: roomRows, error: roomsError }, { data: briefRows, error: briefsError }, { data: pinRows, error: pinsError }, messagesResult, attachmentsResult, sourcesResult, researchResult] = await Promise.all([
     orderedConversations("id,title,selected_model,room_id,archived_at,created_at,updated_at"),
     supabase
-      .from("rooms")
+    .from("rooms")
       .select("id,name,description,instructions,created_at,updated_at")
       .order("name", { ascending: true })
       .order("id", { ascending: true }),
@@ -97,6 +103,9 @@ export async function getChatWorkspaceData(conversationId: unknown) {
     parsedId.success
       ? loadMessageSourcesByConversation(supabase, parsedId.data)
       : Promise.resolve({ byMessage: new Map<string, CitationSourceView[]>(), error: false, unavailable: true }),
+    parsedId.success
+      ? loadMessageResearchByConversation(supabase, parsedId.data)
+      : Promise.resolve({ byMessage: new Map<string, MessageResearchView>(), error: false, unavailable: true }),
   ]);
   const withoutArchive = schemaUnavailable(conversationResult.error)
     ? await orderedConversations("id,title,selected_model,room_id,created_at,updated_at")
@@ -154,6 +163,8 @@ export async function getChatWorkspaceData(conversationId: unknown) {
   // A database without the attachments table yet has none; any other failed read keeps the thread from showing without them.
   if (attachmentsResult?.error && !schemaUnavailable(attachmentsResult.error)) return loadError;
   if (sourcesResult.error) return loadError;
+  // Research metadata is optional; a missing table must not block the thread.
+  if (researchResult.error && !researchResult.unavailable) return loadError;
   const byMessage = new Map<string, AttachmentSummary[]>();
   for (const row of (attachmentsResult?.error ? [] : attachmentsResult?.data ?? []) as unknown as (AttachmentRow & { message_id: string | null })[]) {
     if (!row.message_id) continue;
@@ -164,7 +175,7 @@ export async function getChatWorkspaceData(conversationId: unknown) {
     archivedConversations,
     rooms,
     roomsError: roomError,
-    messages: messages.map((message) => withSources(withAttachments(visibleMessage(message), byMessage), sourcesResult.byMessage)),
+    messages: messages.map((message) => withResearch(withSources(withAttachments(visibleMessage(message), byMessage), sourcesResult.byMessage), researchResult.byMessage)),
     activeId: active.id,
     error: roomError,
   };
@@ -178,6 +189,11 @@ function withAttachments<T extends { id: string }>(message: T, byMessage: Map<st
 function withSources<T extends { id: string }>(message: T, byMessage: Map<string, CitationSourceView[]>): T & { sources?: CitationSourceView[] } {
   const sources = byMessage.get(message.id);
   return sources?.length ? { ...message, sources } : message;
+}
+
+function withResearch<T extends { id: string }>(message: T, byMessage: Map<string, MessageResearchView>): T & { research?: MessageResearchView } {
+  const research = byMessage.get(message.id);
+  return research ? { ...message, research } : message;
 }
 
 function visibleMessage<T extends { role: string; content: string }>(message: T): T {
