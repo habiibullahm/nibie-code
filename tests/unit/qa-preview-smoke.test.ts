@@ -385,7 +385,7 @@ describe("runQaSmoke", () => {
     expect(status).toBe(0);
     expect(calls).toHaveLength(1);
     expect(calls[0].execPath).toBe("/usr/bin/node");
-    expect(calls[0].args[0]).toMatch(/scripts\/qa-smoke\.mjs$/);
+    expect(calls[0].args[0]).toMatch(/scripts[\\/]qa-smoke\.mjs$/);
     expect(calls[0].args.slice(1)).toEqual(["--reporter=line"]);
     expect(calls[0].options.env.E2E_BASE_URL).toBe("https://preview.example.vercel.app");
     expect(calls[0].options.env.E2E_USER_EMAIL).toBe("qa@example.com");

@@ -39,6 +39,8 @@ jobs:
 
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
+        # apt mirrors occasionally hang; fail fast instead of using up the 15-minute job limit.
+        timeout-minutes: 5
 
       - name: Verify checkout SHA matches expected HEAD
         shell: bash
