@@ -1,0 +1,66 @@
+# Manual pre-merge acceptance only — keep development fast.
+# Intended merge process:
+#   feature done → normal CI green → review →
+#   Actions → Preview Smoke → Run workflow (PR branch) →
+#   SHA == HEAD → PASS → merge
+# If commits land after the last PASS, re-run on the newest HEAD before merge.
+# Do not add as a required status check (intentional cost control).
+name: Preview Smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  preview-smoke:
+    name: Preview signed-in smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Verify checkout SHA matches expected HEAD
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          HEAD_SHA="$(git rev-parse HEAD)"
+          if [[ "${HEAD_SHA}" != "${EXPECTED_SHA}" ]]; then
+            echo "Exact SHA invariant failed: git HEAD=${HEAD_SHA} expected=${EXPECTED_SHA}"
+            exit 1
+          fi
+          echo "Checkout SHA matches expected HEAD: ${HEAD_SHA}"
+
+      - name: Run signed-in Preview smoke
+        env:
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          E2E_USER_EMAIL: ${{ secrets.E2E_USER_EMAIL }}
+          E2E_USER_PASSWORD: ${{ secrets.E2E_USER_PASSWORD }}
+        # Resolves exact-HEAD Preview → READY → SHA match → Deployment Protection
+        # → QA login → Fast chat → SSE → persistence/reload → cleanup.
+        # Never set E2E_BASE_URL here; the harness sets it for the child only.
+        run: npm run test:qa:preview
