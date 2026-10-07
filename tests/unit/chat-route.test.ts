@@ -323,6 +323,30 @@ describe("POST /api/chat", () => {
     expect(writes).toContainEqual(expect.objectContaining({ content: "Response unavailable.", status: "error" }));
   });
 
+  it("fails closed with 503 when DB remaining exceeds the app weekly credit ceiling", async () => {
+    // Regression for Preview SHA 1f75b9a: app WEEKLY_FREE_CREDIT_LIMIT was still 100 while the
+    // shared DB (already on 500) returned credits_remaining=426 → generic chat 503, no provider call.
+    const writes: unknown[] = [];
+    readyClient(writes);
+    usageReserve.mockReturnValue(
+      query({
+        data: {
+          accepted: true,
+          credits_charged: 3,
+          credits_used: 0,
+          credits_remaining: 501,
+          reset_at: "2026-10-12T00:00:00.000Z",
+        },
+        error: null,
+      }),
+    );
+    const response = await POST(validRequest());
+    expect(response.status).toBe(503);
+    expect(stream).not.toHaveBeenCalled();
+    expect(usageRelease).toHaveBeenCalledOnce();
+    expect(writes).toContainEqual(expect.objectContaining({ content: "Response unavailable.", status: "error" }));
+  });
+
   it("does not reserve usage for an idempotent completed replay", async () => {
     readyClient([]);
     claim.mockReturnValue(query({ data: { ...assistant, content: "Already saved", status: "complete", replayed: true }, error: null }));
