@@ -29,7 +29,7 @@
   content: "";
   width: 17px;
   height: 2px;
-  background: var(--logo-fold);
+  background: var(--text-4);
 }
 
 .changelog-page .landing-document h1 {
