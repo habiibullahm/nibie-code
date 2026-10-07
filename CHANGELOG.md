@@ -8,6 +8,7 @@ What's new in Nibie.
 
 ### Added
 
+- When a reply uses web sources, Nibie shows clickable citation markers and a Sources list with title and domain, kept with the message so they survive reload.
 - Ask Nibie to remember a preference or project fact across conversations, and manage or turn off Memory in Settings. Your current request always wins over what was saved.
 - When a question needs current public information, Nibie can search the web and ground the reply in labelled sources while keeping Room files and your request in charge.
 - Give long prompts a larger editing space while keeping short messages compact.

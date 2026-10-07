@@ -6,6 +6,7 @@ import { attachmentTypeLabel, formatBytes } from "@/lib/attachments/limits";
 import type { AttachmentSummary } from "@/lib/attachments/types";
 import { CopyButton } from "@/components/copy-button";
 import { MessageMarkdown } from "@/components/message-markdown";
+import { MessageSources } from "@/components/message-sources";
 import { useChatFlag } from "@/components/use-chat-preferences";
 import type { PersistedMessage } from "@/lib/chat/read";
 import { formatMessageTimestamp } from "@/lib/chat/timestamps";
@@ -70,7 +71,8 @@ export const MessageRow = memo(function MessageRow({ message, initial, isLast, i
     return <article className="message-row assistant">
       <div className="message-content assistant">
         <div className="message-author">Nibie{message.status === "interrupted" ? <span className="message-status"> · Stopped</span> : message.status === "error" ? <span className="message-status is-danger">{" · Couldn't respond"}</span> : null}<MessageTime value={message.created_at} /></div>
-        {waiting ? <span className="thinking-dots" role="status" aria-label="Nibie is responding"><i /><i /><i /></span> : <><MessageMarkdown content={message.content} />{message.status === "streaming" && <span className="thinking-dots is-inline" role="status" aria-label="Nibie is responding"><i /><i /><i /></span>}</>}
+        {waiting ? <span className="thinking-dots" role="status" aria-label="Nibie is responding"><i /><i /><i /></span> : <><MessageMarkdown content={message.content} sources={message.sources} />{message.status === "streaming" && <span className="thinking-dots is-inline" role="status" aria-label="Nibie is responding"><i /><i /><i /></span>}</>}
+        {message.sources?.length && !waiting ? <MessageSources sources={message.sources} /> : null}
         {(canCopy || canRegenerate || canRetry) && <div className="message-actions">
           {canCopy && <CopyButton text={message.content} label="Copy response" />}
           {canRegenerate && <button type="button" className="message-action" disabled={disabled} onClick={onRegenerate}><RefreshCw size={13} aria-hidden="true" /><span>Regenerate</span></button>}

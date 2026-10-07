@@ -509,7 +509,15 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
           if (data.context) setContextDiagnostics(data.context);
           // The server has replaced the previous reply once it announces the new one, so hide the old row only now.
           if (options.replaceIds?.length) setRemovedIds((ids) => [...ids, ...options.replaceIds!]);
-          const reply: PersistedMessage = { id: data.id, role: "assistant", content: "", position: data.position, status: "streaming", created_at: new Date().toISOString() };
+          const reply: PersistedMessage = {
+            id: data.id,
+            role: "assistant",
+            content: "",
+            position: data.position,
+            status: "streaming",
+            created_at: new Date().toISOString(),
+            ...(data.sources?.length ? { sources: data.sources } : {}),
+          };
           setLocalMessages((items) => { const rows = items[id] ?? []; return { ...items, [id]: options.placeholderId && rows.some((row) => row.id === options.placeholderId) ? rows.map((row) => row.id === options.placeholderId ? reply : row) : [...rows, reply] }; });
         }
         if (data.type === "delta") { setAssistantActivity("streaming"); buffer += data.text; received += data.text; if (!shown) flush(); else if (!flushTimer) flushTimer = setTimeout(flush, streamFlushMs); }

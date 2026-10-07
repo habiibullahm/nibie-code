@@ -73,6 +73,8 @@ export type ContextPlan = {
   blocks: ContextBlock[];
   diagnostics: ContextDiagnostics;
   budget: BudgetReport;
+  /** citationHandle ids written into the web block for this reply (empty when web omitted). */
+  includedCitationHandles: string[];
 };
 
 export type ModelContextCapabilities = {

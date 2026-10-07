@@ -58,4 +58,16 @@ describe("MessageMarkdown", () => {
     expect(html).toContain("code-block");
     expect(html).toContain("print(&#x27;partial&#x27;)");
   });
+
+  it("renders known citation markers as in-page links and leaves unknown numbers plain", () => {
+    const html = renderToStaticMarkup(createElement(MessageMarkdown, {
+      content: "Node 22 is current [1] and not [2].",
+      sources: [{ ordinal: 1, kind: "web", title: "Node.js", url: "https://nodejs.org/en", domain: "nodejs.org" }],
+    }));
+    expect(html).toContain('href="#citation-source-1"');
+    expect(html).toContain("citation-marker");
+    expect(html).toContain("[1]");
+    expect(html).toContain("[2]");
+    expect(html).not.toContain("#citation-source-2");
+  });
 });
