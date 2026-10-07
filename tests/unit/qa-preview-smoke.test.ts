@@ -11,6 +11,7 @@ import {
   readVercelProject,
   resolvePreviewDeployment,
   runQaSmoke,
+  verifyVercelAccess,
 } from "../../scripts/qa-preview-smoke.mjs";
 
 const SHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -128,6 +129,79 @@ describe("readVercelProject", () => {
     delete env.VERCEL_ORG_ID;
     delete env.VERCEL_PROJECT_ID;
     expect(() => readVercelProject(cwd, env)).toThrow(/VERCEL_ORG_ID and VERCEL_PROJECT_ID/);
+  });
+});
+
+describe("verifyVercelAccess", () => {
+  it("succeeds with username when /v2/user and project lookup work", async () => {
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (String(url).includes("/v2/user")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ user: { username: "qa-bot" } }),
+          text: async () => "",
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ name: "nibie" }),
+        text: async () => "",
+      };
+    });
+    const identity = await verifyVercelAccess({
+      token: "tok",
+      orgId: "team_x",
+      projectId: "prj_x",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(identity).toMatchObject({ username: "qa-bot", projectName: "nibie" });
+  });
+
+  it("allows project tokens that get 404 on /v2/user when project lookup succeeds", async () => {
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (String(url).includes("/v2/user")) {
+        return {
+          ok: false,
+          status: 404,
+          statusText: "Not Found",
+          json: async () => ({}),
+          text: async () => '{"error":{"code":"not_found"}}',
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ name: "nibie" }),
+        text: async () => "",
+      };
+    });
+    const identity = await verifyVercelAccess({
+      token: "vcp_x",
+      orgId: "team_x",
+      projectId: "prj_x",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(identity).toMatchObject({ username: "token", projectName: "nibie" });
+  });
+
+  it("fails on unauthorized tokens", async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: false,
+      status: 401,
+      statusText: "Unauthorized",
+      json: async () => ({}),
+      text: async () => "unauthorized",
+    }));
+    await expect(
+      verifyVercelAccess({
+        token: "bad",
+        orgId: "team_x",
+        projectId: "prj_x",
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      }),
+    ).rejects.toThrow(/Vercel auth failed \(401\)/);
   });
 });
 

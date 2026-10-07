@@ -165,15 +165,20 @@ export async function verifyVercelAccess({
 } = {}) {
   if (!token) throw new Error("verifyVercelAccess requires token");
 
+  // Project / cloud tokens (e.g. vcp_*) can list deployments but often have no
+  // /v2/user identity. Prefer project access as the authoritative check; treat
+  // user lookup as best-effort.
+  let username = "token";
   const userRes = await fetchImpl("https://api.vercel.com/v2/user", {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
   });
-  if (!userRes.ok) {
+  if (userRes.ok) {
+    const userPayload = await userRes.json();
+    username = userPayload?.user?.username || userPayload?.user?.email || "ok";
+  } else if (userRes.status === 401 || userRes.status === 403) {
     const body = await userRes.text().catch(() => "");
     throw new Error(`Vercel auth failed (${userRes.status}): ${body.slice(0, 160) || userRes.statusText}`);
   }
-  const userPayload = await userRes.json();
-  const username = userPayload?.user?.username || userPayload?.user?.email || "ok";
 
   const params = new URLSearchParams();
   if (orgId) params.set("teamId", orgId);
