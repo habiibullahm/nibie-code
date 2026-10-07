@@ -119,7 +119,31 @@ describe("citations parse", () => {
     expect(filter.citationCount).toBe(1);
   });
 
-  it("finish never leaves stuck [SOURCE: prefixes in output", () => {
+  it("holds a lone '[' so a split [SOURCE:web:n] marker cannot leak", () => {
+    // Preview Fast (DeepSeek) reproduced this chunking: '[' | 'SOURCE:web' | ':1]…'
+    const filter = createCitationStreamFilter(sources);
+    expect(filter.push("wan koreksi. [")).toBe("wan koreksi. ");
+    expect(filter.push("SOURCE:web")).toBe("");
+    expect(filter.push(":1]\n\n- P")).toBe("[1]\n\n- P");
+    expect(filter.finish()).toBe("");
+    expect(filter.citationCount).toBe(1);
+  });
+
+  it("holds short [S… prefixes of SOURCE before the full open marker arrives", () => {
+    const filter = createCitationStreamFilter(sources);
+    expect(filter.push("See [")).toBe("See ");
+    expect(filter.push("S")).toBe("");
+    expect(filter.push("OURCE:web:1].")).toBe("[1].");
+    expect(filter.finish()).toBe("");
+    expect(filter.citationCount).toBe(1);
+  });
+
+  it("finish emits an ambiguous trailing '[' but drops stuck [SOURCE prefixes", () => {
+    const bare = createCitationStreamFilter(sources);
+    expect(bare.push("List [")).toBe("List ");
+    expect(bare.finish()).toBe("[");
+    expect(bare.invalidCitationCount).toBe(0);
+
     const filter = createCitationStreamFilter(sources);
     expect(filter.push("Lead [SOURCE:web:1")).toBe("Lead ");
     const rest = filter.finish();
