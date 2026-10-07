@@ -145,14 +145,16 @@ button:focus-visible, a:focus-visible, select:focus-visible, textarea:focus-visi
 .brand-mark img, .brand-mark svg { display: block; width: 100%; height: 100%; }
 .brand-mark.has-asset { background: transparent; padding: 0; border-radius: 0; }
 .brand-mark .logo-body, .brand-mark .logo-fold { transform-box: fill-box; transform-origin: center; }
-.brand-mark[data-activity="thinking"] { animation: brand-thinking 1.8s ease-in-out infinite; transform-origin: center; }
-.brand-mark[data-activity="thinking"] .logo-fold { animation: brand-fold-thinking 1.8s ease-in-out infinite; }
-.brand-mark[data-activity="streaming"] { animation: brand-streaming 1.55s ease-in-out infinite; transform-origin: center; }
-.brand-mark[data-activity="streaming"] .logo-fold { animation: brand-fold-streaming 1.55s ease-in-out infinite; }
-@keyframes brand-thinking { 0%, 100% { opacity: .9; transform: translateY(0) scale(1); } 50% { opacity: 1; transform: translateY(-.4px) scale(1.025); } }
-@keyframes brand-streaming { 0%, 100% { opacity: .94; transform: scale(1); } 50% { opacity: 1; transform: scale(1.018); } }
-@keyframes brand-fold-thinking { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(.5px, -.35px); } }
-@keyframes brand-fold-streaming { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(1px); } }
+/* The mark is ~18px in replies, so amplitudes are sized to be visible there. Inside the SVG, px are viewBox units
+   (93 wide), so a fold shift of 6 is roughly 1px on screen. Thinking breathes; streaming lets the fold flow. */
+.brand-mark[data-activity="thinking"] { animation: brand-thinking 1.6s ease-in-out infinite; transform-origin: center; }
+.brand-mark[data-activity="thinking"] .logo-fold { animation: brand-fold-thinking 1.6s ease-in-out infinite; }
+.brand-mark[data-activity="streaming"] { animation: brand-streaming 1.2s ease-in-out infinite; transform-origin: center; }
+.brand-mark[data-activity="streaming"] .logo-fold { animation: brand-fold-streaming 1.2s ease-in-out infinite; }
+@keyframes brand-thinking { 0%, 100% { opacity: .5; transform: translateY(.5px) scale(.9); } 50% { opacity: 1; transform: translateY(-.5px) scale(1); } }
+@keyframes brand-streaming { 0%, 100% { opacity: .82; transform: scale(.96); } 50% { opacity: 1; transform: scale(1.02); } }
+@keyframes brand-fold-thinking { 0%, 100% { transform: translate(-3px, 2px); } 50% { transform: translate(2px, -2px); } }
+@keyframes brand-fold-streaming { 0%, 100% { transform: translate(-5px, 1.5px) rotate(2deg); } 50% { transform: translate(5px, -1.5px) rotate(-3deg); } }
 @media (prefers-reduced-motion: reduce) {
   .brand-mark[data-activity="thinking"], .brand-mark[data-activity="streaming"],
   .brand-mark[data-activity="thinking"] .logo-fold, .brand-mark[data-activity="streaming"] .logo-fold { animation: none !important; opacity: 1; transform: none; }
