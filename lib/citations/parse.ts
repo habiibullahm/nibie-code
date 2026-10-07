@@ -98,7 +98,7 @@ export function createCitationStreamFilter(sources: readonly SourceReference[]) 
     return `[${ordinal}]`;
   };
 
-  const flushBuffer = (allowPartial: boolean): string => {
+  const flushBuffer = (mode: "stream" | "finish"): string => {
     let out = "";
     let index = 0;
     while (index < pending.length) {
@@ -116,12 +116,18 @@ export function createCitationStreamFilter(sources: readonly SourceReference[]) 
         index = start + complete[0]!.length;
         continue;
       }
-      if (!allowPartial && isSourceHandlePrefix(rest)) {
-        // Incomplete marker at end — keep it.
-        pending = rest;
+      if (isSourceHandlePrefix(rest)) {
+        if (mode === "stream") {
+          // Incomplete marker at end — keep waiting for more chunks.
+          pending = rest;
+          return out;
+        }
+        // Finish: never emit raw internal SOURCE syntax. Drop the stuck prefix.
+        invalidCitationCount += 1;
+        pending = "";
         return out;
       }
-      // Not a real marker (or finishing with a stuck prefix): emit the '[' and continue.
+      // Not a source-handle prefix: emit the '[' and continue scanning.
       out += "[";
       index = start + 1;
     }
@@ -133,12 +139,12 @@ export function createCitationStreamFilter(sources: readonly SourceReference[]) 
     push(chunk: string) {
       if (finished || !chunk) return "";
       pending += chunk;
-      return flushBuffer(false);
+      return flushBuffer("stream");
     },
     finish() {
       if (finished) return "";
       finished = true;
-      return flushBuffer(true);
+      return flushBuffer("finish");
     },
     get citationCount() {
       return citationCount;

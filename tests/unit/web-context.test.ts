@@ -51,7 +51,7 @@ describe("web context rendering", () => {
   });
 
   it("omits empty lists and respects the token budget", () => {
-    expect(renderWebContext([], WEB_TOKEN_CAP)).toEqual({ text: "", includedCount: 0, truncated: false, snippetOnlyCount: 0 });
+    expect(renderWebContext([], WEB_TOKEN_CAP)).toEqual({ text: "", includedCount: 0, truncated: false, snippetOnlyCount: 0, includedHandles: [] });
     const tight = renderWebContext([source({ text: "x".repeat(20_000) }), source({ url: "https://example.com/b", title: "B", domain: "example.com", text: "second" })], 400);
     expect(tight.includedCount).toBeGreaterThanOrEqual(1);
     expect(tight.truncated).toBe(true);

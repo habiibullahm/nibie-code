@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { linkCitationMarkers } from "../../components/message-markdown";
 import { attachWebCitationHandles } from "../../lib/citations/attach";
+import { citationSourcesIncludedInContext } from "../../lib/citations/included";
 import { createCitationStreamFilter, parseCitationReferences } from "../../lib/citations/parse";
 import { persistMessageSources, loadMessageSourcesByConversation } from "../../lib/citations/persist";
 import { prepareWebSourceReferences, toCitationSourceViews } from "../../lib/citations/prepare";
 import { sanitizeCitationTitle } from "../../lib/citations/sanitize";
 import type { SourceReference } from "../../lib/citations/types";
 import { renderWebContext } from "../../lib/context/web-context";
+import { WEB_TOKEN_CAP } from "../../lib/context/token-budget";
 import type { WebContextInput } from "../../lib/web/types";
 
 const web = (overrides: Partial<WebContextInput> = {}): WebContextInput => ({
@@ -101,6 +103,67 @@ describe("citations parse", () => {
     expect(filter.push("b:1] world")).toBe("[1] world");
     expect(filter.finish()).toBe("");
     expect(filter.citationCount).toBe(1);
+  });
+
+  it("finish never leaves stuck [SOURCE: prefixes in output", () => {
+    const filter = createCitationStreamFilter(sources);
+    expect(filter.push("Lead [SOURCE:web:1")).toBe("Lead ");
+    const rest = filter.finish();
+    expect(rest).toBe("");
+    expect(`${rest}`).not.toContain("[SOURCE:");
+    expect(filter.invalidCitationCount).toBe(1);
+    // A bare incomplete open is also dropped.
+    const again = createCitationStreamFilter(sources);
+    expect(again.push("[SOURCE:web:")).toBe("");
+    expect(again.finish()).toBe("");
+    expect(again.finish()).toBe("");
+  });
+});
+
+describe("citations included-in-context allowlist", () => {
+  it("rejects handles for sources omitted from the rendered web context", () => {
+    const attached = attachWebCitationHandles([
+      web({ text: "Node.js 22 is current." }),
+      web({
+        url: "https://example.com/omitted",
+        title: "Omitted",
+        domain: "example.com",
+        text: "   ",
+      }),
+    ]);
+    expect(attached.sources.map((source) => source.id)).toEqual(["web:1", "web:2"]);
+    const rendered = renderWebContext(attached.web, WEB_TOKEN_CAP);
+    expect(rendered.includedHandles).toEqual(["web:1"]);
+    const included = citationSourcesIncludedInContext(attached.sources, rendered.includedHandles);
+    expect(included.map((source) => source.id)).toEqual(["web:1"]);
+    const parsed = parseCitationReferences(
+      "Real [SOURCE:web:1] and omitted [SOURCE:web:2].",
+      included,
+    );
+    expect(parsed.text).toBe("Real [1] and omitted .");
+    expect(parsed.citedOrdinals).toEqual([1]);
+    expect(parsed.invalidCitationCount).toBe(1);
+    expect(toCitationSourceViews(included)).toHaveLength(1);
+  });
+
+  it("rejects a later source when the token budget only fits the first", () => {
+    const attached = attachWebCitationHandles([
+      web({ text: "first source body ".repeat(80) }),
+      web({
+        url: "https://example.com/second",
+        title: "Second",
+        domain: "example.com",
+        text: "second source body ".repeat(80),
+      }),
+    ]);
+    const rendered = renderWebContext(attached.web, 400);
+    expect(rendered.includedHandles).toEqual(["web:1"]);
+    expect(rendered.includedHandles).not.toContain("web:2");
+    const included = citationSourcesIncludedInContext(attached.sources, rendered.includedHandles);
+    const parsed = parseCitationReferences("Cite [SOURCE:web:2] only.", included);
+    expect(parsed.text).not.toContain("[2]");
+    expect(parsed.text).not.toContain("[SOURCE:");
+    expect(parsed.invalidCitationCount).toBe(1);
   });
 });
 

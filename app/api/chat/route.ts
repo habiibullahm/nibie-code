@@ -11,6 +11,7 @@ import { contextCapabilitiesFor, getModelOptions, providerFor } from "@/lib/ai/r
 import { createReasoningStreamFilter, sanitizeModelOutput } from "@/lib/ai/sanitize-model-output";
 import { ProviderStreamError, readOpenAiSse } from "@/lib/ai/sse";
 import { attachWebCitationHandles } from "@/lib/citations/attach";
+import { citationSourcesIncludedInContext } from "@/lib/citations/included";
 import { createCitationStreamFilter } from "@/lib/citations/parse";
 import { citationViewsFromPrepared, persistMessageSources } from "@/lib/citations/persist";
 import type { SourceReference } from "@/lib/citations/types";
@@ -231,7 +232,9 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   // Failures never block the reply: empty web context continues as normal chat, with an authoritative
   // "verification unavailable" instruction when routing wanted search but sources were empty.
   let web: WebContextInput[] | undefined;
+  let preparedCitationSources: SourceReference[] = [];
   let citationSources: SourceReference[] = [];
+  let citationViews: ReturnType<typeof citationViewsFromPrepared> = [];
   let webVerificationUnavailable = false;
   const webDecision = decideWebSearch(userMessage.content, { hasRoomFileContext: Boolean(files?.length) });
   logInfo("web.route.decided", { requestId, search: webDecision.search, reason: webDecision.reason });
@@ -259,7 +262,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
         if (pipeline.sources.length) {
           const attached = attachWebCitationHandles(pipeline.sources);
           web = attached.web.length ? attached.web : undefined;
-          citationSources = attached.sources;
+          preparedCitationSources = attached.sources;
           const snippetOnlyCount = (web ?? []).filter((source) => source.retrieval === "web_snippet_only").length;
           logInfo("web.search.succeeded", {
             requestId,
@@ -276,10 +279,6 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
             requestId,
             sourceCount: web?.length ?? 0,
             snippetOnlyCount,
-          });
-          logInfo("citation.sources.prepared", {
-            requestId,
-            sourceCount: citationSources.length,
           });
           if (!web?.length) webVerificationUnavailable = true;
         } else {
@@ -310,7 +309,6 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       }
     }
   }
-  const citationViews = citationViewsFromPrepared(citationSources);
 
   // Every save of this generation only applies while its row is still streaming. An explicit Stop has already written the
   // text the user saw and marked the row interrupted, so a late finish, error or disconnect save can never replace it.
@@ -363,6 +361,15 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
     });
     prompt = toProviderMessages(plan);
     context = plan.diagnostics;
+    // Citation allowlist is only handles that made it into the rendered web block.
+    citationSources = citationSourcesIncludedInContext(preparedCitationSources, plan.includedCitationHandles);
+    citationViews = citationViewsFromPrepared(citationSources);
+    if (preparedCitationSources.length || citationSources.length) {
+      logInfo("citation.sources.prepared", {
+        requestId,
+        sourceCount: citationSources.length,
+      });
+    }
     const profileIncluded = plan.blocks.some((block) => block.id === "profile" && block.included);
     const roomIncluded = plan.blocks.some((block) => block.id === "room" && block.included);
     const pinsIncluded = plan.blocks.some((block) => block.id === "pins" && block.included);

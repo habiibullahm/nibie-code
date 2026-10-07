@@ -254,5 +254,6 @@ export function buildContext(input: BuildContextInput): ContextPlan {
     blocks,
     diagnostics,
     budget: { inputBudgetTokens, outputReserveTokens, estimatedTokens, truncated },
+    includedCitationHandles: renderedWeb?.includedHandles ?? [],
   };
 }

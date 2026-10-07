@@ -1169,6 +1169,27 @@ describe("POST /api/chat", () => {
       }
     });
 
+    it("drops a stuck SOURCE prefix when the provider stream ends mid-handle", async () => {
+      readyClient([]);
+      stream.mockResolvedValue(providerChunks(["Partial cite [SOURCE:web:1"], "stop"));
+      webMocks.decideWebSearch.mockReturnValue({ search: true, reason: "releases_versions" });
+      webMocks.getWebSearchConfig.mockReturnValue({ providerId: "tavily", apiKey: "test-key", maxResults: 8, maxPages: 4, maxSources: 5 });
+      webMocks.getWebSearchProvider.mockReturnValue({ id: "tavily", searchWeb: vi.fn() });
+      webMocks.runWebSearchPipeline.mockResolvedValue({
+        sources: [webSource],
+        degraded: false,
+        searchResultCount: 1,
+        pagesFetched: 1,
+      });
+      const response = await POST(validRequest());
+      expect(response.status).toBe(200);
+      const events = await Array.fromAsync(readChatSse(response.body!));
+      const shown = events.filter((event) => event.type === "delta").map((event) => event.type === "delta" ? event.text : "").join("");
+      expect(shown).toContain("Partial cite");
+      expect(shown).not.toContain("[SOURCE:");
+      expect(shown).not.toMatch(/\[SOURCE:web:1(?!\])/);
+    });
+
     it("injects verification-unavailable guidance when web is unconfigured but routing wants search", async () => {
       readyClient([]);
       stream.mockResolvedValue(providerChunks(["General answer."], "stop"));
@@ -1196,6 +1217,7 @@ describe("POST /api/chat", () => {
             ]),
           },
         });
+        expect(events[0]).not.toHaveProperty("sources");
         expect(JSON.stringify(warn.mock.calls)).toContain("provider_unconfigured");
         expect(warn.mock.calls.some(([line]) => String(line).includes("web.search.failed"))).toBe(true);
       } finally {
