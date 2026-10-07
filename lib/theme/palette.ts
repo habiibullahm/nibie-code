@@ -4,7 +4,7 @@ export const darkPalette = {
   bgApp: "#171717",
   bgRaised: "#1F1F1F",
   logoBody: "#F0EFEC",
-  textMuted: "#9A9A9A",
+  textMuted: "#A6A6A6",
   terracotta: "#D97757",
   paper: "#FCFBF9",
   logoBodyOnLight: "#2A2823",

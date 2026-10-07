@@ -5,7 +5,7 @@
  * inline script in app/layout.tsx, which sets the attribute before first paint).
  *
  * Dark is a neutral graphite workspace: selection, links, icons, and indicators stay grayscale (--emphasis).
- * The terracotta identity (--accent) is reserved for the Send button and the composer focus ring; the logo fold keeps it too. Static icons repeat dark values in lib/theme/palette.ts.
+ * The terracotta identity (--accent) is reserved for the Send button; the composer stays neutral in every state and the logo fold keeps its brand detail. Static icons repeat dark values in lib/theme/palette.ts.
  */
 :root, :root[data-theme="dark"] {
   color-scheme: dark;
@@ -22,15 +22,15 @@
   --border-soft: #292929;
   --border-strong: #454545;
   --text: #e7e7e7;
-  --text-2: #b8b8b8;
-  --text-3: #9a9a9a;
-  --text-4: #858585;
+  --text-2: #c4c4c4;
+  --text-3: #a6a6a6;
+  --text-4: #8f8f8f;
   --accent: #d97757;
   --accent-hover: #e18768;
   --accent-fg: #171717;
   --emphasis: #c8c8c8;
   --disabled-bg: #303030;
-  --disabled-fg: #777777;
+  --disabled-fg: #6f6f6f;
   --primary-bg: #e7e7e7;
   --primary-bg-hover: #f0f0f0;
   --primary-fg: #171717;
@@ -49,7 +49,7 @@
   --logo-fold: var(--brand-terracotta);
   --shadow-sm: 0 1px 2px #00000033;
   --shadow-composer: 0 8px 24px #0000002e, 0 1px 2px #00000040;
-  --shadow-composer-focus: 0 8px 24px #0000002e, 0 0 0 3px #d9775724;
+  --shadow-composer-focus: 0 8px 24px #0000002e, 0 1px 2px #00000040;
   --shadow-drawer: 12px 0 35px #00000066;
   --shadow-menu: 0 14px 36px #0000008c, 0 2px 8px #00000059;
   --shadow-frame: 0 28px 70px #00000066;
@@ -379,7 +379,7 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .composer-dock:has(.composer.is-expanded) { position: fixed; inset: 0; z-index: 1000; display: block; width: 100vw; height: 100dvh; padding: 0; overflow: hidden; background: var(--bg-app); }
 .composer-dock:has(.composer.is-expanded) > :not(.composer) { display: none; }
 .composer { display: flex; flex-direction: column; justify-content: center; gap: 4px; width: min(100%, 760px); min-height: 56px; margin: 0 auto; padding: 7px 9px 6px; border: 1px solid var(--border); border-radius: 15px; background: var(--bg-raised); box-shadow: var(--shadow-composer); transition: border-color .15s,box-shadow .15s; }
-.composer:focus-within { border-color: var(--accent); box-shadow: var(--shadow-composer-focus); }
+.composer:focus-within { border-color: var(--border-strong); box-shadow: var(--shadow-composer-focus); }
 .composer-form { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; grid-template-areas: "attach input actions"; align-items: end; column-gap: 6px; row-gap: 4px; width: 100%; min-width: 0; margin: 0; transition: row-gap .15s ease; }
 .composer-form.has-attachments { grid-template-areas: "attachments attachments attachments" "attach input actions"; }
 .composer-form.is-active { grid-template-areas: "input input input" "attach . actions"; row-gap: 5px; }
@@ -657,7 +657,7 @@ a.message-source-title:hover { text-decoration: underline; text-decoration-thick
 .composer-room-notice { width: min(100%, 760px); margin: 7px auto 0; color: var(--text-3); font-size: 11px; line-height: 1.5; }
 .composer-menu { position: relative; }
 .composer-menu-button { display: inline-flex; align-items: center; gap: 5px; max-width: 150px; min-height: 30px; padding: 0 8px 0 10px; border: 0; border-radius: 8px; background: var(--bg-subtle); color: var(--text-3); font-size: 11.5px; cursor: pointer; }
-.composer-secondary-tools .composer-menu-button { min-height: 28px; padding-inline: 5px; background: transparent; color: var(--text-4); }
+.composer-secondary-tools .composer-menu-button { min-height: 28px; padding-inline: 5px; background: transparent; color: var(--text-3); }
 .composer-secondary-tools .composer-menu-button:hover:not(:disabled), .composer-secondary-tools .composer-menu-button[aria-expanded="true"] { background: var(--hover); color: var(--text-2); }
 .composer-menu-button span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .composer-menu-button svg { flex: none; color: var(--text-4); }
