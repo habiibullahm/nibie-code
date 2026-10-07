@@ -493,10 +493,23 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
     reservationError = new Error("Reservation request failed.");
   }
   const usageReservationMs = Date.now() - reservationStartedAt;
+  // credits_remaining above the app ceiling means the DB RPC and WEEKLY_FREE_CREDIT_LIMIT drifted
+  // (seen when Preview ran limit=100 against a DB already migrated to 500) — fail closed as 503.
+  const ceilingMismatch =
+    Boolean(reservation) &&
+    typeof reservation?.accepted === "boolean" &&
+    Number.isInteger(reservation?.credits_remaining) &&
+    (reservation?.credits_remaining as number) > WEEKLY_FREE_CREDIT_LIMIT;
   if (reservationError || !reservation || typeof reservation.accepted !== "boolean"
     || !Number.isInteger(reservation.credits_remaining) || reservation.credits_remaining < 0 || reservation.credits_remaining > WEEKLY_FREE_CREDIT_LIMIT
     || typeof reservation.reset_at !== "string" || !Number.isFinite(Date.parse(reservation.reset_at))) {
-    logError("weekly_usage.reservation.failed", { requestId, logicalMode: mode, durationMs: usageReservationMs, code: operationalCodes.requestFailed });
+    logError("weekly_usage.reservation.failed", {
+      requestId,
+      logicalMode: mode,
+      durationMs: usageReservationMs,
+      code: operationalCodes.requestFailed,
+      ...(ceilingMismatch ? { reason: "ceiling_mismatch", appCreditLimit: WEEKLY_FREE_CREDIT_LIMIT } : {}),
+    });
     await releaseReservation();
     try { await persist(clientCancelled ? "Response stopped." : "Response unavailable.", clientCancelled ? "interrupted" : "error"); }
     finally { request.signal.removeEventListener("abort", onRequestAbort); }
