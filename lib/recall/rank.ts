@@ -3,6 +3,8 @@ import type { MemoryRecord, MemoryType, RankedMemory } from "@/lib/recall/types"
 const IDENTIFIER = /\b[A-Z]{2,}(?:[A-Z0-9._-]*)\b|\b[A-Za-z]+(?:_[A-Za-z0-9]+)+\b|\b(?:v?\d+\.\d+(?:\.\d+)?)\b/g;
 
 const CODING_QUERY = /\b(code|coding|typescript|javascript|react|sql|api|deploy|git|bug|fix|implement|function|class|module)\b/i;
+// Prefer injecting preference/instruction memories on example/style turns, not every ops query.
+const STYLE_GUIDANCE_QUERY = /\b(code|coding|typescript|javascript|python|react|example|snippet|implement|function|class|module|fetch|client|write|show)\b/i;
 
 const TYPE_WEIGHT: Record<MemoryType, number> = {
   instruction: 1.15,
@@ -41,6 +43,8 @@ function overlapScore(queryTokens: Set<string>, content: string) {
   return hit / queryTokens.size;
 }
 
+const MIN_LEXICAL = 0.2;
+
 /** Lightweight ranking: exact identifiers first, then lexical relevance, with type boosts for coding queries. */
 export function rankMemories(query: string, memories: MemoryRecord[], limit: number): RankedMemory[] {
   const queryTokens = tokenSet(query);
@@ -54,9 +58,13 @@ export function rankMemories(query: string, memories: MemoryRecord[], limit: num
     const keyLower = memory.normalizedKey.toLowerCase();
     const exactIdentifier = identifiers.some((id) => contentLower.includes(id) || keyLower.includes(id));
     const lexical = overlapScore(queryTokens, memory.content);
-    if (!exactIdentifier && lexical <= 0) continue;
+    // Example/style turns: preferences/instructions may apply without shared tokens (e.g. TypeScript).
+    const styleGuidance =
+      STYLE_GUIDANCE_QUERY.test(query) && (memory.type === "preference" || memory.type === "instruction");
+    if (!exactIdentifier && !styleGuidance && lexical < MIN_LEXICAL) continue;
     let score = lexical;
     if (exactIdentifier) score += 2;
+    if (styleGuidance && lexical === 0) score = 0.35;
     if (coding) score *= TYPE_WEIGHT[memory.type];
     else if (memory.type === "preference" || memory.type === "instruction") score *= 1.05;
     ranked.push({ ...memory, score, exactIdentifier });

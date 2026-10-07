@@ -168,7 +168,8 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   logInfo("chat.response.started", { requestId, regenerate, mode });
 
   // Explicit recall: save/forget intent and retrieval never block the reply.
-  const recallEnabled = preferenceState.preferences.recallEnabled !== false;
+  // Fail closed when preferences could not be read so a disabled user is not briefly re-enabled.
+  const recallEnabled = !preferenceState.error && preferenceState.preferences.recallEnabled !== false;
   if (recallEnabled && !regenerate) {
     try {
       await handleRecallTurn({

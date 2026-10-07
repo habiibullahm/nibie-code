@@ -52,4 +52,19 @@ describe("memory ranking", () => {
     ], 5);
     expect(ranked[0].id).toBe("inst");
   });
+
+  it("includes coding preferences without shared tokens", () => {
+    const ranked = rankMemories("Show me how to fetch an API", [
+      memory({ id: "pref", content: "I prefer TypeScript for code examples", type: "preference" }),
+      memory({ id: "cedar", content: "Project Cedar uses PostgreSQL", type: "project" }),
+    ], 5);
+    expect(ranked.map((item) => item.id)).toEqual(["pref"]);
+  });
+
+  it("requires stronger lexical overlap for project facts", () => {
+    const ranked = rankMemories("Explain CSS Grid layout", [
+      memory({ id: "cedar", content: "Project Cedar uses PostgreSQL", type: "project" }),
+    ], 5);
+    expect(ranked).toEqual([]);
+  });
 });

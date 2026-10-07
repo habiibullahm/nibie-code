@@ -350,10 +350,11 @@ export const memories = pgTable(
     index("memories_user_active_idx").on(table.userId, table.isActive),
     index("memories_user_updated_idx").on(table.userId, table.updatedAt, table.id),
     index("memories_embedding_hnsw_idx").using("hnsw", table.embedding.op("vector_cosine_ops")),
+    // Single-column FK so conversation delete nulls only the source id (composite SET NULL would also null user_id).
     foreignKey({
-      name: "memories_conversation_owner_fk",
-      columns: [table.sourceConversationId, table.userId],
-      foreignColumns: [conversations.id, conversations.userId],
+      name: "memories_source_conversation_fk",
+      columns: [table.sourceConversationId],
+      foreignColumns: [conversations.id],
     }).onDelete("set null"),
     check("memories_content_length", sql`char_length(${table.content}) between 1 and 1000 and ${table.content} = btrim(${table.content})`),
     check("memories_normalized_key_length", sql`char_length(${table.normalizedKey}) between 1 and 200 and ${table.normalizedKey} = btrim(${table.normalizedKey})`),

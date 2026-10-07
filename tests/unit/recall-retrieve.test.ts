@@ -1,12 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
-vi.mock("../../lib/files/embeddings", () => ({
-  embeddingKeyConfigured: () => false,
-  embedFileTexts: vi.fn(),
-  QUERY_EMBEDDING_TIMEOUT_MS: 1500,
-  validEmbedding: () => false,
-}));
 
 import { retrieveRelevantMemories } from "../../lib/recall/retrieve";
 

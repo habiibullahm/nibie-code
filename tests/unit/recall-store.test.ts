@@ -117,4 +117,36 @@ describe("memory store dedupe", () => {
     expect(result.count).toBe(1);
     expect(rows[0].is_active).toBe(false);
   });
+
+  it("does not forget unrelated memories from a short needle", async () => {
+    const { client, rows } = memoryClient([
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        type: "preference",
+        content: "I prefer TypeScript",
+        normalized_key: "i prefer typescript",
+        source_conversation_id: null,
+        source_message_id: null,
+        is_active: true,
+        created_at: "2026-10-07T00:00:00.000Z",
+        updated_at: "2026-10-07T00:00:00.000Z",
+        last_used_at: null,
+      },
+      {
+        id: "22222222-2222-4222-8222-222222222222",
+        type: "project",
+        content: "Project Cedar uses PostgreSQL",
+        normalized_key: "project cedar uses postgresql",
+        source_conversation_id: null,
+        source_message_id: null,
+        is_active: true,
+        created_at: "2026-10-07T00:00:00.000Z",
+        updated_at: "2026-10-07T00:00:00.000Z",
+        last_used_at: null,
+      },
+    ]);
+    const result = await deactivateMatchingMemories(client, "I");
+    expect(result.count).toBe(0);
+    expect(rows.every((row) => row.is_active)).toBe(true);
+  });
 });

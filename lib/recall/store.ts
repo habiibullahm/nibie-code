@@ -139,7 +139,13 @@ export async function deactivateMatchingMemories(supabase: MemoryStoreClient, fo
   try {
     const { memories, error } = await listOwnerMemories(supabase, { activeOnly: true });
     if (error) return { count: 0, error };
-    const matches = memories.filter((memory) => memory.normalizedKey === needle || memory.normalizedKey.includes(needle) || memory.content.toLowerCase().includes(needle));
+    const exact = memories.filter((memory) => memory.normalizedKey === needle);
+    // Prefer exact key matches. Substring matches require a substantial needle to avoid over-delete.
+    const matches = exact.length
+      ? exact
+      : needle.length >= 12
+        ? memories.filter((memory) => memory.normalizedKey.includes(needle) || memory.content.toLowerCase().includes(needle))
+        : [];
     let count = 0;
     for (const memory of matches) {
       const result = await deactivateOwnerMemory(supabase, memory.id);
