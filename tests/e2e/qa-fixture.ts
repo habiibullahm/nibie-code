@@ -56,10 +56,10 @@ type QaFixtures = {
 };
 
 export const test = base.extend<QaFixtures>({
-  qaPage: async ({ context, page }, use) => {
+  qaPage: async ({ context, page }, useFixture) => {
     await installVercelPreviewAccess(context);
     await signInQaUser(page);
-    await use(page);
+    await useFixture(page);
   },
 });
 
