@@ -1,11 +1,16 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
+import nextEnv from "@next/env";
+
+const { loadEnvConfig } = nextEnv;
+loadEnvConfig(process.cwd());
 
 export const DEFAULT_POLL_MS = 7_000;
 export const DEFAULT_MAX_WAIT_MS = 5 * 60_000;
+export const EXPECTED_PROJECT_NAME = "nibie";
 
 const TERMINAL_FAILURE = new Set(["ERROR", "CANCELED", "CANCELLED"]);
 const IN_PROGRESS = new Set(["BUILDING", "QUEUED", "INITIALIZING", "UPLOADING"]);
@@ -24,13 +29,9 @@ const IN_PROGRESS = new Set(["BUILDING", "QUEUED", "INITIALIZING", "UPLOADING"])
  * }} VercelDeployment
  */
 
-export function readVercelProject(cwd = process.cwd()) {
+export function readVercelProjectFile(cwd = process.cwd()) {
   const path = join(cwd, ".vercel", "project.json");
-  if (!existsSync(path)) {
-    throw new Error(
-      "Vercel project is not linked (missing .vercel/project.json). Run `vercel link` once locally, then retry. This script will not silent-link.",
-    );
-  }
+  if (!existsSync(path)) return null;
   let parsed;
   try {
     parsed = JSON.parse(readFileSync(path, "utf8"));
@@ -42,7 +43,36 @@ export function readVercelProject(cwd = process.cwd()) {
   if (!projectId || !orgId) {
     throw new Error(`.vercel/project.json must include orgId and projectId (found projectId=${projectId || "?"}, orgId=${orgId || "?"})`);
   }
-  return { projectId, orgId, path };
+  return { projectId, orgId, path, source: "file" };
+}
+
+/**
+ * Resolve project ids from gitignored `.vercel/project.json` or Cloud env
+ * `VERCEL_ORG_ID` + `VERCEL_PROJECT_ID`. Never runs interactive `vercel link`.
+ * When bootstrapping from env, writes `.vercel/project.json` (gitignored) so
+ * the Vercel CLI can reuse the same project.
+ */
+/**
+ * @param {string} [cwd]
+ * @param {NodeJS.ProcessEnv | Record<string, string | undefined>} [env]
+ */
+export function readVercelProject(cwd = process.cwd(), env = process.env) {
+  const fromFile = readVercelProjectFile(cwd);
+  if (fromFile) return fromFile;
+
+  const orgId = env.VERCEL_ORG_ID?.trim() || "";
+  const projectId = env.VERCEL_PROJECT_ID?.trim() || "";
+  if (!orgId || !projectId) {
+    throw new Error(
+      "Vercel project is not linked. Provide gitignored .vercel/project.json, or set VERCEL_ORG_ID and VERCEL_PROJECT_ID (plus VERCEL_TOKEN). This script will not run interactive vercel link.",
+    );
+  }
+
+  const dir = join(cwd, ".vercel");
+  const path = join(dir, "project.json");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path, `${JSON.stringify({ orgId, projectId }, null, 2)}\n`, "utf8");
+  return { projectId, orgId, path, source: "env" };
 }
 
 export function gitHeadSha(cwd = process.cwd(), spawn = spawnSync) {
@@ -108,12 +138,58 @@ export function isPreviewDeployment(deployment) {
   return target == null || target === "preview";
 }
 
+export function deploymentEnvironment(deployment) {
+  if (deployment?.target === "production") return "production";
+  if (deployment?.target === "preview" || deployment?.target == null) return "preview";
+  return String(deployment?.target || "preview");
+}
+
 export function immutableDeploymentUrl(deployment) {
   const host = String(deployment?.url || "").trim().replace(/^https?:\/\//, "");
   if (!host) {
     throw new Error(`Deployment ${deploymentId(deployment) || "(unknown)"} has no immutable url`);
   }
   return `https://${host}`;
+}
+
+/**
+ * Confirm the token can call Vercel and the configured project is the expected nibie project.
+ * Never logs the token.
+ */
+export async function verifyVercelAccess({
+  token,
+  orgId,
+  projectId,
+  fetchImpl = fetch,
+  expectedProjectName = EXPECTED_PROJECT_NAME,
+} = {}) {
+  if (!token) throw new Error("verifyVercelAccess requires token");
+
+  const userRes = await fetchImpl("https://api.vercel.com/v2/user", {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+  });
+  if (!userRes.ok) {
+    const body = await userRes.text().catch(() => "");
+    throw new Error(`Vercel auth failed (${userRes.status}): ${body.slice(0, 160) || userRes.statusText}`);
+  }
+  const userPayload = await userRes.json();
+  const username = userPayload?.user?.username || userPayload?.user?.email || "ok";
+
+  const params = new URLSearchParams();
+  if (orgId) params.set("teamId", orgId);
+  const projectRes = await fetchImpl(`https://api.vercel.com/v9/projects/${encodeURIComponent(projectId)}?${params}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+  });
+  if (!projectRes.ok) {
+    const body = await projectRes.text().catch(() => "");
+    throw new Error(`Vercel project lookup failed (${projectRes.status}): ${body.slice(0, 160) || projectRes.statusText}`);
+  }
+  const project = await projectRes.json();
+  const name = String(project?.name || "").trim();
+  if (expectedProjectName && name && name !== expectedProjectName) {
+    throw new Error(`Vercel project name is "${name}", expected "${expectedProjectName}"`);
+  }
+  return { username, projectName: name || expectedProjectName, projectId, orgId };
 }
 
 /**
@@ -220,11 +296,21 @@ export async function resolvePreviewDeployment({
       log.info?.(`[qa:preview] commit=${sha} deployment=${id} url=${url} state=${state} attempt=${attempt}`);
 
       if (state === "READY") {
+        const deploymentSha = deploymentCommitSha(pick.deployment);
+        const environment = deploymentEnvironment(pick.deployment);
+        if (deploymentSha !== String(sha).trim().toLowerCase()) {
+          throw new Error(`Deployment ${id} SHA mismatch: deployment=${deploymentSha} head=${sha}`);
+        }
+        if (environment !== "preview") {
+          throw new Error(`Deployment ${id} environment is ${environment}, expected preview`);
+        }
         return {
           sha,
           deploymentId: id,
           url,
           state,
+          deploymentSha,
+          environment,
           deployment: pick.deployment,
         };
       }
@@ -255,6 +341,7 @@ export async function resolvePreviewDeployment({
  *   env?: NodeJS.ProcessEnv,
  *   spawn?: (...args: any[]) => { status?: number | null },
  *   execPath?: string,
+ *   useVercelEnvRun?: boolean,
  * }} [options]
  */
 export function runQaSmoke({
@@ -263,13 +350,29 @@ export function runQaSmoke({
   env = process.env,
   spawn = spawnSync,
   execPath = process.execPath,
+  useVercelEnvRun = false,
 } = {}) {
   if (!baseUrl?.trim()) throw new Error("runQaSmoke requires baseUrl");
   const script = fileURLToPath(new URL("./qa-smoke.mjs", import.meta.url));
   const childEnv = { ...env, E2E_BASE_URL: baseUrl.trim() };
-  const result = spawn(execPath, [script, ...argv], {
+
+  // Protected previews need short-lived VERCEL_OIDC_TOKEN. Prefer wrapping with
+  // `vercel env run` when a token is available and OIDC is not already present.
+  const needsOidc =
+    useVercelEnvRun ||
+    (/vercel\.app$/i.test(new URL(baseUrl).hostname) && !childEnv.VERCEL_OIDC_TOKEN?.trim() && Boolean(childEnv.VERCEL_TOKEN?.trim()));
+
+  let command = execPath;
+  let args = [script, ...argv];
+  if (needsOidc) {
+    command = process.platform === "win32" ? "npx.cmd" : "npx";
+    args = ["--yes", "vercel@latest", "env", "run", "--", execPath, script, ...argv];
+  }
+
+  const result = spawn(command, args, {
     stdio: "inherit",
     env: childEnv,
+    shell: process.platform === "win32",
   });
   return result.status ?? 1;
 }
@@ -279,10 +382,19 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
   const env = deps.env || process.env;
   const log = deps.log || console;
 
-  const project = (deps.readProject || readVercelProject)(cwd);
+  const project = (deps.readProject || readVercelProject)(cwd, env);
   const sha = (deps.gitHead || gitHeadSha)(cwd, deps.spawn || spawnSync);
   const token = (deps.resolveToken || resolveVercelToken)(env, deps.home);
 
+  const identity = await (deps.verifyAccess || verifyVercelAccess)({
+    token,
+    orgId: project.orgId,
+    projectId: project.projectId,
+    fetchImpl: deps.fetchImpl,
+  });
+  log.info?.(
+    `[qa:preview] vercel ok user=${identity.username} project=${identity.projectName} source=${project.source || "file"}`,
+  );
   log.info?.(`[qa:preview] resolving preview for HEAD ${sha} (project=${project.projectId})`);
 
   const resolved = await (deps.resolve || resolvePreviewDeployment)({
@@ -298,11 +410,14 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
     log,
   });
 
+  log.info?.(
+    `[qa:preview] READY deployment=${resolved.deploymentId} url=${resolved.url} git=${resolved.deploymentSha} env=${resolved.environment}`,
+  );
   log.info?.(`[qa:preview] running test:qa:smoke against ${resolved.url}`);
   const status = (deps.runSmoke || runQaSmoke)({
     baseUrl: resolved.url,
     argv,
-    env,
+    env: { ...env, VERCEL_TOKEN: token },
     spawn: deps.spawn || spawnSync,
   });
   return status;

@@ -1,9 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   deploymentCommitSha,
+  deploymentEnvironment,
   immutableDeploymentUrl,
   isPreviewDeployment,
   pickHeadPreviewDeployment,
+  readVercelProject,
   resolvePreviewDeployment,
   runQaSmoke,
 } from "../../scripts/qa-preview-smoke.mjs";
@@ -73,6 +78,57 @@ describe("qa-preview-smoke helpers", () => {
     );
     expect(pick.kind).toBe("production-only");
   });
+
+  it("labels preview vs production environments", () => {
+    expect(deploymentEnvironment(deployment({ target: null }))).toBe("preview");
+    expect(deploymentEnvironment(deployment({ target: "preview" }))).toBe("preview");
+    expect(deploymentEnvironment(deployment({ target: "production" }))).toBe("production");
+  });
+});
+
+describe("readVercelProject", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("reads orgId/projectId from .vercel/project.json", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "qa-preview-"));
+    dirs.push(cwd);
+    mkdirSync(join(cwd, ".vercel"), { recursive: true });
+    writeFileSync(join(cwd, ".vercel", "project.json"), JSON.stringify({ orgId: "team_x", projectId: "prj_x" }));
+    expect(readVercelProject(cwd, process.env)).toMatchObject({
+      orgId: "team_x",
+      projectId: "prj_x",
+      source: "file",
+    });
+  });
+
+  it("bootstraps gitignored project.json from VERCEL_ORG_ID and VERCEL_PROJECT_ID", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "qa-preview-"));
+    dirs.push(cwd);
+    const project = readVercelProject(cwd, {
+      ...process.env,
+      VERCEL_ORG_ID: "team_from_env",
+      VERCEL_PROJECT_ID: "prj_from_env",
+    });
+    expect(project).toMatchObject({
+      orgId: "team_from_env",
+      projectId: "prj_from_env",
+      source: "env",
+    });
+    const written = JSON.parse(readFileSync(join(cwd, ".vercel", "project.json"), "utf8"));
+    expect(written).toEqual({ orgId: "team_from_env", projectId: "prj_from_env" });
+  });
+
+  it("fails clearly when neither file nor env ids are present", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "qa-preview-"));
+    dirs.push(cwd);
+    const env = { ...process.env };
+    delete env.VERCEL_ORG_ID;
+    delete env.VERCEL_PROJECT_ID;
+    expect(() => readVercelProject(cwd, env)).toThrow(/VERCEL_ORG_ID and VERCEL_PROJECT_ID/);
+  });
 });
 
 describe("resolvePreviewDeployment", () => {
@@ -90,6 +146,8 @@ describe("resolvePreviewDeployment", () => {
     expect(resolved.url).toBe("https://nibie-git-feat-x-team.vercel.app");
     expect(resolved.deploymentId).toBe("dpl_preview");
     expect(resolved.state).toBe("READY");
+    expect(resolved.deploymentSha).toBe(SHA);
+    expect(resolved.environment).toBe("preview");
     expect(listDeployments).toHaveBeenCalledTimes(1);
   });
 

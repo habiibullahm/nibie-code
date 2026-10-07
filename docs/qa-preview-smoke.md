@@ -19,30 +19,33 @@ Do **not** wire `test:qa:preview` into PR Guard unless QA secrets are intentiona
 | `E2E_USER_EMAIL` | `test:qa:smoke` / `test:qa:preview` | Dedicated QA account email |
 | `E2E_USER_PASSWORD` | `test:qa:smoke` / `test:qa:preview` | Dedicated QA account password |
 | `E2E_BASE_URL` | `test:qa:smoke` (manual / local / explicit) | Exact target URL. Not required for `test:qa:preview` (set automatically for the child). Defaults to `http://localhost:3100` when unset for low-level smoke. |
-| `VERCEL_TOKEN` | `test:qa:preview` | Vercel API token (or authenticate the Vercel CLI so its auth file is readable). Used only to list deployments. |
-| `VERCEL_OIDC_TOKEN` | Protected Vercel previews | Short-lived token injected by `vc env run`; sent only to the preview origin |
+| `VERCEL_TOKEN` | `test:qa:preview` | Vercel API token (or authenticate the Vercel CLI so its auth file is readable). Used to verify identity, list deployments, and optionally wrap smoke in `vercel env run`. |
+| `VERCEL_ORG_ID` | `test:qa:preview` (Cloud) | Team/org id. Used with `VERCEL_PROJECT_ID` to bootstrap gitignored `.vercel/project.json` when it is missing. |
+| `VERCEL_PROJECT_ID` | `test:qa:preview` (Cloud) | Project id for **nibie** (`habiibullahm/nibie-code`). |
+| `VERCEL_OIDC_TOKEN` | Protected Vercel previews | Short-lived token injected by `vercel env run`; sent only to the preview origin |
 
 Provide secrets via Cursor Cloud / CI secret store or a gitignored local env file. Name the variables only in docs and `.env.example`. Do not commit credential values, OIDC tokens, or API tokens.
 
 ## Auto-resolve preview (`test:qa:preview`)
 
-1. Read `.vercel/project.json` (`orgId`, `projectId`). Fails clearly if the project is not linked — does **not** run silent `vercel link`.
-2. Resolve `HEAD` via `git rev-parse HEAD`.
-3. Query Vercel deployments for that **exact** commit SHA (`meta-githubCommitSha`). Never picks “latest preview” or a blind branch alias.
-4. Ignore production deployments even when they share the SHA.
-5. Poll every ~7s (max ~5 min). `ERROR` / `CANCELED` fail immediately. Timeout fails clearly.
-6. Prefer the immutable `https://<deployment>.vercel.app` URL.
-7. Spawn `test:qa:smoke` with `E2E_BASE_URL` in the child env only. Safe logs include commit, deployment id, url, and state — never passwords, OIDC, or API keys.
+1. Resolve project via `.vercel/project.json` **or** `VERCEL_ORG_ID` + `VERCEL_PROJECT_ID` (writes gitignored `.vercel/project.json`). Does **not** run interactive `vercel link` or switch projects.
+2. Verify Vercel auth / project (expected name: `nibie`).
+3. Resolve `HEAD` via `git rev-parse HEAD`.
+4. Query Vercel deployments for that **exact** commit SHA (`meta-githubCommitSha`). Never picks “latest preview” or a blind branch alias.
+5. Ignore production deployments even when they share the SHA.
+6. Poll every ~7s (max ~5 min). `ERROR` / `CANCELED` fail immediately. Timeout fails clearly.
+7. Prefer the immutable `https://<deployment>.vercel.app` URL; require READY + preview + SHA match.
+8. Spawn `test:qa:smoke` with `E2E_BASE_URL` in the child env only. For protected previews, wrap with `vercel env run` when `VERCEL_OIDC_TOKEN` is absent so short-lived OIDC is injected. Safe logs include commit, deployment id, url, and state — never passwords, OIDC, or API keys.
 
 ```bash
-# One-time: link the repo to the Vercel project (creates gitignored .vercel/project.json)
-vercel link
+# Cloud Agents: set VERCEL_ORG_ID, VERCEL_PROJECT_ID, VERCEL_TOKEN, E2E_USER_* secrets, then:
+npm run test:qa:preview
 
-# Authenticate CLI or export VERCEL_TOKEN, then:
+# Or with an already-linked repo + CLI auth:
 vc env run -- npm run test:qa:preview
 ```
 
-`vc env run` supplies short-lived `VERCEL_OIDC_TOKEN` for Deployment Protection. `VERCEL_TOKEN` (or CLI auth) is still required so the resolver can list deployments.
+`vercel env run` supplies short-lived `VERCEL_OIDC_TOKEN` for Deployment Protection. `VERCEL_TOKEN` is still required so the resolver can list deployments.
 
 Diagnose CLI identity with:
 
