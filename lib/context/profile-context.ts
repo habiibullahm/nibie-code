@@ -62,6 +62,7 @@ export function profileReason(categories: ProfileCategory[]) {
 
 const summaryUnused: ContextSourceDiagnostic = { type: "thread_summary", label: "Thread summary", state: "not_used", reason: "Not needed yet." };
 
+// Preview cannot know whether this turn will search the web, so web diagnostics appear only on the reply start event.
 export function previewContextDiagnostics(input: { preferences: UserPreferences; preferenceReadFailed: boolean; hasEarlierMessages: boolean; room?: RoomContextInput | null; selectedFileCount?: number }): ContextDiagnostics {
   const pieces = input.preferenceReadFailed ? [] : profilePieces(input.preferences);
   const profile: ContextSourceDiagnostic = pieces.length

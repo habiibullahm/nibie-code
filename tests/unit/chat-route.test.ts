@@ -31,6 +31,34 @@ const { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc
   };
   return { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc, modelOptions: vi.fn(), contextCapabilities: vi.fn(() => ({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 })), withoutAttachments, attachmentState, stopState };
 });
+const webMocks = vi.hoisted(() => {
+  type WebSource = {
+    url: string;
+    title: string;
+    domain: string;
+    retrieval: "web_search" | "web_snippet_only";
+    publishedAt?: string | null;
+    text: string;
+  };
+  type PipelineResult = {
+    sources: WebSource[];
+    degraded: boolean;
+    failureCategory?: string;
+    searchResultCount: number;
+    pagesFetched: number;
+  };
+  return {
+    decideWebSearch: vi.fn((): { search: boolean; reason: string } => ({ search: false, reason: "default_no_search" })),
+    getWebSearchConfig: vi.fn((): null | { providerId: "tavily"; apiKey: string; maxResults: number; maxPages: number; maxSources: number } => null),
+    getWebSearchProvider: vi.fn((): null | { id: "tavily"; searchWeb: ReturnType<typeof vi.fn> } => null),
+    runWebSearchPipeline: vi.fn(async (): Promise<PipelineResult> => ({
+      sources: [],
+      degraded: false,
+      searchResultCount: 0,
+      pagesFetched: 0,
+    })),
+  };
+});
 vi.mock("@/lib/supabase/server", () => ({ createSupabaseServerClient: async () => withoutAttachments(await createClient()) }));
 vi.mock("@/lib/ai/provider", () => ({ chatProvider: { stream } }));
 vi.mock("@/lib/ai/registry", () => ({ getModelOptions: modelOptions, contextCapabilitiesFor: contextCapabilities, providerFor: (mode: string) => mode === "Fast" ? "sumopod" : "openai" }));
@@ -38,6 +66,10 @@ vi.mock("@/lib/ai/registry", () => ({ getModelOptions: modelOptions, contextCapa
 // Mocked here so the ordered table results above stay about the reply itself.
 const summaryStore = vi.hoisted(() => ({ load: vi.fn(), defer: vi.fn(), complete: vi.fn(), finish: vi.fn() }));
 vi.mock("@/lib/context/thread-summary-store", () => ({ loadThreadSummary: summaryStore.load, deferThreadSummaryMaintenance: summaryStore.defer }));
+vi.mock("@/lib/web/routing", () => ({ decideWebSearch: webMocks.decideWebSearch }));
+vi.mock("@/lib/web/config", () => ({ getWebSearchConfig: webMocks.getWebSearchConfig }));
+vi.mock("@/lib/web/provider", () => ({ getWebSearchProvider: webMocks.getWebSearchProvider }));
+vi.mock("@/lib/web/pipeline", () => ({ runWebSearchPipeline: webMocks.runWebSearchPipeline }));
 const allModes = { models: ["Fast", "Balanced", "High"].map((id) => ({ id, label: id, description: "" })) };
 
 import { POST } from "../../app/api/chat/route";
@@ -66,6 +98,10 @@ describe("POST /api/chat", () => {
     summaryStore.load.mockReset().mockResolvedValue(null);
     summaryStore.complete.mockReset(); summaryStore.finish.mockReset();
     summaryStore.defer.mockReset().mockImplementation(() => ({ complete: summaryStore.complete, finish: summaryStore.finish }));
+    webMocks.decideWebSearch.mockReset().mockImplementation(() => ({ search: false, reason: "default_no_search" }));
+    webMocks.getWebSearchConfig.mockReset().mockReturnValue(null);
+    webMocks.getWebSearchProvider.mockReset().mockReturnValue(null);
+    webMocks.runWebSearchPipeline.mockReset().mockResolvedValue({ sources: [], degraded: false, searchResultCount: 0, pagesFetched: 0 });
   });
   afterEach(() => vi.useRealTimers());
 
@@ -967,6 +1003,181 @@ describe("POST /api/chat", () => {
       } finally {
         warn.mockRestore();
       }
+    });
+  });
+
+  describe("web search context", () => {
+    const webSource = {
+      url: "https://nodejs.org/en",
+      title: "Node.js",
+      domain: "nodejs.org",
+      retrieval: "web_search" as const,
+      publishedAt: "2024-04-24",
+      text: "Node.js 22 is the current release line.",
+    };
+
+    it("does not call the pipeline when routing says no search", async () => {
+      readyClient([]);
+      stream.mockResolvedValue(providerChunks(["Hi."], "stop"));
+      webMocks.decideWebSearch.mockReturnValue({ search: false, reason: "conceptual" });
+      const response = await POST(validRequest());
+      expect(response.status).toBe(200);
+      await response.text();
+      expect(webMocks.runWebSearchPipeline).not.toHaveBeenCalled();
+      expect(webMocks.getWebSearchConfig).not.toHaveBeenCalled();
+    });
+
+    it("grounds the reply in web sources when search is configured", async () => {
+      readyClient([]);
+      stream.mockResolvedValue(providerChunks(["Node 22."], "stop"));
+      webMocks.decideWebSearch.mockReturnValue({ search: true, reason: "releases_versions" });
+      webMocks.getWebSearchConfig.mockReturnValue({ providerId: "tavily", apiKey: "test-key", maxResults: 8, maxPages: 4, maxSources: 5 });
+      webMocks.getWebSearchProvider.mockReturnValue({ id: "tavily", searchWeb: vi.fn() });
+      webMocks.runWebSearchPipeline.mockResolvedValue({
+        sources: [webSource],
+        degraded: false,
+        searchResultCount: 3,
+        pagesFetched: 1,
+      });
+      const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+      try {
+        const response = await POST(validRequest());
+        expect(response.status).toBe(200);
+        const events = await Array.fromAsync(readChatSse(response.body!));
+        expect(events[0]).toMatchObject({
+          type: "start",
+          context: { sources: expect.arrayContaining([{ type: "web", label: "Web sources", state: "included", reason: "A public web source" }]) },
+        });
+        const prompt = stream.mock.calls[0][1] as { role: string; content: string }[];
+        expect(prompt[0].content).not.toContain("Node.js 22 is the current release line");
+        expect(prompt[0].content).not.toMatch(/No browsing/i);
+        expect(prompt[1].content).toContain("<untrusted_web_content>");
+        expect(prompt[1].content).toContain("nodejs.org");
+        expect(prompt[1].content).toContain("Node.js 22 is the current release line");
+        expect(webMocks.runWebSearchPipeline).toHaveBeenCalledOnce();
+        expect(info.mock.calls.some(([line]) => String(line).includes("web.route.decided"))).toBe(true);
+        expect(info.mock.calls.some(([line]) => String(line).includes("web.context.included"))).toBe(true);
+        expect(JSON.stringify(info.mock.calls)).not.toContain("test-key");
+        expect(JSON.stringify(info.mock.calls)).not.toContain("Node.js 22 is the current release line");
+      } finally {
+        info.mockRestore();
+      }
+    });
+
+    it("still completes the reply when the web pipeline degrades", async () => {
+      readyClient([]);
+      stream.mockResolvedValue(providerChunks(["Done without web."], "stop"));
+      webMocks.decideWebSearch.mockReturnValue({ search: true, reason: "news" });
+      webMocks.getWebSearchConfig.mockReturnValue({ providerId: "tavily", apiKey: "test-key", maxResults: 8, maxPages: 4, maxSources: 5 });
+      webMocks.getWebSearchProvider.mockReturnValue({ id: "tavily", searchWeb: vi.fn() });
+      webMocks.runWebSearchPipeline.mockResolvedValue({
+        sources: [],
+        degraded: true,
+        failureCategory: "provider_error",
+        searchResultCount: 0,
+        pagesFetched: 0,
+      });
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      try {
+        const response = await POST(validRequest());
+        expect(response.status).toBe(200);
+        const events = await Array.fromAsync(readChatSse(response.body!));
+        expect(events.slice(-2)).toEqual([{ type: "status", status: "complete" }, { type: "done" }]);
+        expect(stream).toHaveBeenCalledOnce();
+        const prompt = stream.mock.calls[0][1] as { role: string; content: string }[];
+        expect(prompt.some((message) => message.content.includes("<untrusted_web_content>"))).toBe(false);
+        expect(prompt[0].content).toMatch(/Web verification was unavailable/i);
+        expect(prompt[0].content).toMatch(/Do not present unverified current public facts/i);
+        expect(events[0]).toMatchObject({
+          type: "start",
+          context: {
+            sources: expect.arrayContaining([
+              {
+                type: "web",
+                label: "Web sources",
+                state: "not_used",
+                reason: "Web verification was unavailable for this reply.",
+              },
+            ]),
+          },
+        });
+        expect(warn.mock.calls.some(([line]) => String(line).includes("web.search.failed"))).toBe(true);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it("injects verification-unavailable guidance when web is unconfigured but routing wants search", async () => {
+      readyClient([]);
+      stream.mockResolvedValue(providerChunks(["General answer."], "stop"));
+      webMocks.decideWebSearch.mockReturnValue({ search: true, reason: "temporal_currency" });
+      webMocks.getWebSearchConfig.mockReturnValue(null);
+      webMocks.getWebSearchProvider.mockReturnValue(null);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      try {
+        const response = await POST(validRequest());
+        expect(response.status).toBe(200);
+        const events = await Array.fromAsync(readChatSse(response.body!));
+        expect(events.slice(-2)).toEqual([{ type: "status", status: "complete" }, { type: "done" }]);
+        expect(webMocks.runWebSearchPipeline).not.toHaveBeenCalled();
+        const prompt = stream.mock.calls[0][1] as { role: string; content: string }[];
+        expect(prompt[0].content).toMatch(/Web verification was unavailable/i);
+        expect(events[0]).toMatchObject({
+          type: "start",
+          context: {
+            sources: expect.arrayContaining([
+              expect.objectContaining({
+                type: "web",
+                state: "not_used",
+                reason: "Web verification was unavailable for this reply.",
+              }),
+            ]),
+          },
+        });
+        expect(JSON.stringify(warn.mock.calls)).toContain("provider_unconfigured");
+        expect(warn.mock.calls.some(([line]) => String(line).includes("web.search.failed"))).toBe(true);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it("keeps Room file excerpts and web sources together when both apply", async () => {
+      const fileId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+      const question = "What is the latest Node.js LTS version for our deploy pipeline?";
+      const outcomes = [
+        { data: { id: "user-message", position: 1, content: question }, error: null },
+        { data: [{ id: "user-message", role: "user", content: question, status: "complete", position: 1 }], error: null },
+        { data: { id: assistantId }, error: null },
+      ];
+      const from = vi.fn((table: string) => {
+        if (table === "user_preferences") return query(preferenceResult);
+        if (table === "conversations") return query({ data: { id: "conversation", selected_model: "Balanced", room_id: "room" }, error: null });
+        if (table === "rooms") return query({ data: { name: "Ops", instructions: null }, error: null });
+        if (table === "room_briefs") return query({ data: null, error: null });
+        if (table === "pins") return query({ data: [], error: null });
+        if (table === "room_files") return query({ data: [{ id: fileId, original_name: "runbook.md", extracted_text: "deploy pipeline uses Node LTS", extracted_truncated: false }], error: null });
+        return query(outcomes.shift());
+      });
+      createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc });
+      webMocks.decideWebSearch.mockReturnValue({ search: true, reason: "releases_versions" });
+      webMocks.getWebSearchConfig.mockReturnValue({ providerId: "tavily", apiKey: "test-key", maxResults: 8, maxPages: 4, maxSources: 5 });
+      webMocks.getWebSearchProvider.mockReturnValue({ id: "tavily", searchWeb: vi.fn() });
+      webMocks.runWebSearchPipeline.mockResolvedValue({
+        sources: [webSource],
+        degraded: false,
+        searchResultCount: 2,
+        pagesFetched: 1,
+      });
+      stream.mockResolvedValue(providerChunks(["Node 22 for the pipeline."], "stop"));
+      const request = validRequest();
+      const response = await POST(new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify({ ...await request.json(), fileIds: [fileId] }) }));
+      expect(response.status).toBe(200);
+      await response.text();
+      const prompt = stream.mock.calls[0][1] as { role: string; content: string }[];
+      expect(prompt[1].content).toContain("deploy pipeline uses Node LTS");
+      expect(prompt[1].content).toContain("<untrusted_web_content>");
+      expect(prompt[1].content.indexOf("deploy pipeline uses Node LTS")).toBeLessThan(prompt[1].content.indexOf("<untrusted_web_content>"));
+      expect(webMocks.decideWebSearch).toHaveBeenCalledWith(question, { hasRoomFileContext: true });
     });
   });
 

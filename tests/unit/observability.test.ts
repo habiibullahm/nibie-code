@@ -99,6 +99,51 @@ describe("structured logger", () => {
     expect(serialized).not.toContain("eyJhbGciOi");
   });
 
+  it("keeps web search observability fields without bodies or keys", () => {
+    const record = buildLogRecord("info", "web.route.decided", {
+      requestId: "req-12345678",
+      search: true,
+      reason: "releases_versions",
+      apiKey: "tvly-secret-key",
+      body: "<html>fetched page</html>",
+    }, production);
+    expect(record).toMatchObject({
+      event: "web.route.decided",
+      requestId: "req-12345678",
+      search: true,
+      reason: "releases_versions",
+    });
+    expect(record).not.toHaveProperty("apiKey");
+    expect(record).not.toHaveProperty("body");
+    expect(sanitizeLogFields({
+      search: true,
+      reason: "news",
+      maxResults: 8,
+      resultCount: 3,
+      durationMs: 42,
+      category: "timeout",
+      fetchedCount: 2,
+      failedCount: 1,
+      sourceCount: 2,
+      snippetOnlyCount: 1,
+      code: operationalCodes.webSearchFailed,
+      body: "<html>secret</html>",
+      content: "fetched page text",
+    })).toEqual({
+      search: true,
+      reason: "news",
+      maxResults: 8,
+      resultCount: 3,
+      durationMs: 42,
+      category: "timeout",
+      fetchedCount: 2,
+      failedCount: 1,
+      sourceCount: 2,
+      snippetOnlyCount: 1,
+      code: operationalCodes.webSearchFailed,
+    });
+  });
+
   it("writes one json line without snapshotting the timestamp", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     try {

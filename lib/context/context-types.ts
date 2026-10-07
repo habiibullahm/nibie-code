@@ -1,10 +1,12 @@
 import type { UserPreferences } from "@/lib/preferences/types";
 import type { ChatModel } from "@/lib/chat/validation";
 import type { RoomContextInput } from "@/lib/context/room-context";
+import type { WebContextInput } from "@/lib/web/types";
 
 export type { RoomContextInput } from "@/lib/context/room-context";
+export type { WebContextInput } from "@/lib/web/types";
 
-export type ContextSourceType = "core" | "profile" | "room" | "pins" | "file" | "attachment" | "thread_summary" | "recent_messages" | "current_request";
+export type ContextSourceType = "core" | "profile" | "room" | "pins" | "file" | "attachment" | "web" | "thread_summary" | "recent_messages" | "current_request";
 
 export type ContextAuthority = "policy" | "untrusted_data";
 
@@ -25,8 +27,8 @@ export type ContextBlock = {
 };
 
 export type ContextSourceDiagnostic = {
-  type: "profile" | "room" | "pins" | "file" | "attachment" | "thread_summary" | "recent_messages";
-  label: "Your profile" | "This room" | "Pinned context" | "File context" | "Attachments" | "Thread summary" | "Recent conversation";
+  type: "profile" | "room" | "pins" | "file" | "attachment" | "web" | "thread_summary" | "recent_messages";
+  label: "Your profile" | "This room" | "Pinned context" | "File context" | "Attachments" | "Web sources" | "Thread summary" | "Recent conversation";
   state: "included" | "not_used";
   reason: string;
 };
@@ -109,6 +111,10 @@ export type BuildContextInput = {
   files?: FileContextInput[] | null;
   // Attachments of this conversation's messages in context, current message first. Omitted when there are none.
   attachments?: AttachmentContextInput[] | null;
+  // Public web sources already retrieved and SSRF-checked for this request. Omitted when routing skipped web or retrieval failed.
+  web?: WebContextInput[] | null;
+  // True when capability routing wanted web but sources were empty (unconfigured, provider fail, empty pipeline).
+  webVerificationUnavailable?: boolean;
 };
 
 export class ContextBuildError extends Error {

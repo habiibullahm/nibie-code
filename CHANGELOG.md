@@ -8,6 +8,7 @@ What's new in Nibie.
 
 ### Added
 
+- When a question needs current public information, Nibie can search the web and ground the reply in labelled sources while keeping Room files and your request in charge.
 - Give long prompts a larger editing space while keeping short messages compact.
 - Track your 100-credit weekly AI allowance and next reset in Settings; each response mode uses a different amount.
 - Attach up to three text-based files—text, Markdown, CSV, JSON, source code, or text-based PDFs—to a conversation. Nibie can answer follow-up questions from their contents, and the files stay with that conversation.
@@ -22,6 +23,8 @@ What's new in Nibie.
 
 ### Fixed
 
+- Web search no longer fires on conceptual or coding questions that only mention weak words like version, release, price, or job.
+- When web verification is unavailable, Nibie continues the reply without treating unverified current public facts as known.
 - Replies now show a single thinking indicator, without repeating the response status below the message box.
 - Once a conversation has started, the message box now says "Reply to Nibie…" instead of "Ask Nibie anything…".
 - Help → What's new now shows the latest updates instead of saying there's no release yet.

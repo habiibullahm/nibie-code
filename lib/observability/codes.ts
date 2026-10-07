@@ -10,6 +10,7 @@ export const operationalCodes = {
   roomDraftFailed: "ROOM_DRAFT_FAILED",
   attachmentSaveFailed: "ATTACHMENT_SAVE_FAILED",
   attachmentReadFailed: "ATTACHMENT_READ_FAILED",
+  webSearchFailed: "WEB_SEARCH_FAILED",
 } as const;
 
 export type OperationalCode = (typeof operationalCodes)[keyof typeof operationalCodes];
