@@ -50,6 +50,8 @@ export async function persistMessageSources(input: {
   const { error } = await table.insert(rows);
   if (!error) return { ok: true };
   if (schemaUnavailable(error)) return { ok: true, unavailable: true };
+  // Unique on (message_id, ordinal|handle): a Stop/generation race may insert twice — treat as already saved.
+  if (error.code === "23505") return { ok: true };
   return { ok: false };
 }
 

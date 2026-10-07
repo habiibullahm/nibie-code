@@ -4,7 +4,11 @@ import { attachWebCitationHandles } from "../../lib/citations/attach";
 import { citationSourcesIncludedInContext } from "../../lib/citations/included";
 import { createCitationStreamFilter, parseCitationReferences } from "../../lib/citations/parse";
 import { persistMessageSources, loadMessageSourcesByConversation } from "../../lib/citations/persist";
-import { prepareWebSourceReferences, toCitationSourceViews } from "../../lib/citations/prepare";
+import {
+  citationInstructionFor,
+  prepareWebSourceReferences,
+  toCitationSourceViews,
+} from "../../lib/citations/prepare";
 import { sanitizeCitationTitle } from "../../lib/citations/sanitize";
 import type { SourceReference } from "../../lib/citations/types";
 import { renderWebContext } from "../../lib/context/web-context";
@@ -52,6 +56,16 @@ describe("citations prepare", () => {
     ]);
     expect(sources[0]?.title).not.toMatch(/<|>|javascript:/i);
     expect(sources[0]?.title).toContain("Click");
+  });
+
+  it("builds authoritative citation rules that forbid prose source lists", () => {
+    const sources = prepareWebSourceReferences([web()]);
+    const rules = citationInstructionFor(sources);
+    expect(rules).toMatch(/Citation rules for this reply/);
+    expect(rules).toContain("[SOURCE:web:1]");
+    expect(rules).toMatch(/never with prose source lists/i);
+    expect(rules).toMatch(/Sumber/i);
+    expect(citationInstructionFor([])).toBe("");
   });
 });
 

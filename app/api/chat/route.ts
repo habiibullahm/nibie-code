@@ -14,6 +14,7 @@ import { attachWebCitationHandles } from "@/lib/citations/attach";
 import { citationSourcesIncludedInContext } from "@/lib/citations/included";
 import { createCitationStreamFilter } from "@/lib/citations/parse";
 import { citationViewsFromPrepared, persistMessageSources } from "@/lib/citations/persist";
+import { citationInstructionFor } from "@/lib/citations/prepare";
 import type { SourceReference } from "@/lib/citations/types";
 import { stopPollMs, stoppedPlaceholder } from "@/lib/chat/stop";
 import { buildContext } from "@/lib/context/build-context";
@@ -316,25 +317,39 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
     const { data, error } = await supabase.from("messages").select("status").eq("id", assistant.id).maybeSingle();
     return !error && data?.status === "interrupted";
   };
+  // Citations are advertised on SSE start; if Stop wins the content write, still attach message_sources so reload
+  // keeps Sources alongside any [n] markers in the kept partial. Once-only: Stop + generation race must not double-insert.
+  let citationSourcesPersisted = false;
+  const persistCitationSourcesForKeptReply = async (keptContent: string) => {
+    if (citationSourcesPersisted || !citationSources.length) return;
+    if (!keptContent.trim() || keptContent === stoppedPlaceholder) return;
+    citationSourcesPersisted = true;
+    const savedSources = await persistMessageSources({
+      supabase,
+      userId: user.id,
+      conversationId: conversation.id,
+      messageId: assistant.id,
+      sources: citationSources,
+    });
+    if (!savedSources.ok) {
+      citationSourcesPersisted = false;
+      logWarn("citation.sources.persist_failed", { requestId, sourceCount: citationSources.length });
+    }
+  };
   const persist = async (content: string, status: "complete" | "interrupted" | "error"): Promise<"saved" | "stopped" | "failed"> => {
     try {
       const { data, error } = await supabase.from("messages").update({ content, status }).eq("id", assistant.id).eq("status", "streaming").select("id").maybeSingle();
       if (!error && data) {
-        if ((status === "complete" || status === "interrupted") && citationSources.length) {
-          const savedSources = await persistMessageSources({
-            supabase,
-            userId: user.id,
-            conversationId: conversation.id,
-            messageId: assistant.id,
-            sources: citationSources,
-          });
-          if (!savedSources.ok) {
-            logWarn("citation.sources.persist_failed", { requestId, sourceCount: citationSources.length });
-          }
+        if (status === "complete" || status === "interrupted") {
+          await persistCitationSourcesForKeptReply(content);
         }
         return "saved";
       }
-      if (!error && await replyStopped()) return "stopped";
+      if (!error && await replyStopped()) {
+        // Stop already saved the visible text; still persist Sources for that kept partial.
+        await persistCitationSourcesForKeptReply(content);
+        return "stopped";
+      }
     } catch { /* reported below */ }
     logError("chat.persistence.failed", { requestId, code: operationalCodes.assistantPersistFailed, stage: "persist", status });
     return "failed";
@@ -364,6 +379,14 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
     // Citation allowlist is only handles that made it into the rendered web block.
     citationSources = citationSourcesIncludedInContext(preparedCitationSources, plan.includedCitationHandles);
     citationViews = citationViewsFromPrepared(citationSources);
+    // Put citation rules in the authoritative system message — not only the untrusted web preface —
+    // so the model emits [SOURCE:web:n] instead of inventing a prose Sources list.
+    if (citationSources.length && prompt[0]?.role === "system") {
+      const citationRules = citationInstructionFor(citationSources);
+      if (citationRules) {
+        prompt = [{ role: "system", content: `${prompt[0].content}\n\n${citationRules}` }, ...prompt.slice(1)];
+      }
+    }
     if (preparedCitationSources.length || citationSources.length) {
       logInfo("citation.sources.prepared", {
         requestId,
@@ -581,7 +604,10 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       const save = async (status: "complete" | "interrupted" | "error") => {
         seal();
         // An explicit Stop already saved the text its user saw; the generation's own output is never written over it.
-        if (userStopped) return "stopped" as const;
+        if (userStopped) {
+          await persistCitationSourcesForKeptReply(output);
+          return "stopped" as const;
+        }
         const content = output || (status === "interrupted" ? stoppedPlaceholder : "Response unavailable.");
         if (status === "interrupted") return interruptedSave ??= persist(content, status);
         return persist(content, status);

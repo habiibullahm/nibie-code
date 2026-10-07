@@ -54,15 +54,16 @@ export function toCitationSourceViews(sources: readonly SourceReference[]): Cita
   }));
 }
 
-/** Instruction appended when sources are present so the model cites by handle only. */
+/** Authoritative instruction for the core system prompt when citation sources are present. */
 export function citationInstructionFor(sources: readonly SourceReference[]): string {
   if (!sources.length) return "";
   const listed = sources
     .map((source) => `${formatSourceMarker(source.kind, Number(source.id.split(":")[1]))} — ${source.title}${source.domain ? ` (${source.domain})` : ""}`)
     .join("; ");
   return [
-    "Citation rules for this reply:",
+    "Citation rules for this reply (required):",
     "When a factual claim is supported by a listed source, append that source's exact handle immediately after the claim (for example [SOURCE:web:1]).",
+    "Cite only with those exact [SOURCE:…] handles — never with prose source lists, footnotes, or phrases that name sites as sources (for example \"Sources:\", \"Sumber:\", \"according to Pluang\", or \"TradingView reports\").",
     "Only use handles from this list. Never invent handles, URLs, titles, or source numbers.",
     "Do not invent a Sources section; the product UI renders sources separately.",
     `Allowed handles: ${listed}.`,

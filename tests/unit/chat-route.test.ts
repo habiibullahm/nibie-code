@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc, modelOptions, contextCapabilities, withoutAttachments, attachmentState, stopState } = vi.hoisted(() => {
+const { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc, modelOptions, contextCapabilities, withoutAttachments, attachmentState, stopState, messageSourceInserts } = vi.hoisted(() => {
   const createClient = vi.fn(); const stream = vi.fn(); const claim = vi.fn(); const usageReserve = vi.fn(); const usageStart = vi.fn(); const usageRelease = vi.fn();
   const rpc = vi.fn((name: string, args: unknown) => name === "search_room_file_chunks" ? Promise.resolve({ data: [], error: null }) : name === "reserve_weekly_ai_usage" ? usageReserve(args) : name === "start_weekly_ai_usage" ? usageStart(args) : name === "release_weekly_ai_usage" ? usageRelease(args) : claim(name, args));
   const attachmentState: { result: { data: unknown; error: unknown }; reads: unknown[][] } = { result: { data: [], error: null }, reads: [] };
   const stopState = { status: "streaming" as string | null, reads: 0 };
+  const messageSourceInserts: unknown[] = [];
   const statusRead = () => {
     const builder: Record<string, unknown> = {};
     builder.eq = () => builder;
@@ -29,11 +30,11 @@ const { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc
     });
     const messageSources = () => {
       const builder: Record<string, unknown> = {};
-      builder.insert = () => builder;
+      builder.insert = (rows: unknown) => { messageSourceInserts.push(rows); return builder; };
       builder.select = () => builder;
       builder.eq = () => builder;
       builder.order = () => builder;
-      builder.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data: [], error: null }).then(resolve);
+      builder.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data: null, error: null }).then(resolve);
       return builder;
     };
     return {
@@ -45,7 +46,7 @@ const { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc
               : from(table),
     };
   };
-  return { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc, modelOptions: vi.fn(), contextCapabilities: vi.fn(() => ({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 })), withoutAttachments, attachmentState, stopState };
+  return { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc, modelOptions: vi.fn(), contextCapabilities: vi.fn(() => ({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 })), withoutAttachments, attachmentState, stopState, messageSourceInserts };
 });
 const webMocks = vi.hoisted(() => {
   type WebSource = {
@@ -106,6 +107,7 @@ const assistant = { id: assistantId, position: 3, content: "…", status: "strea
 describe("POST /api/chat", () => {
   beforeEach(() => {
     attachmentState.result = { data: [], error: null }; attachmentState.reads = []; stopState.status = "streaming"; stopState.reads = 0;
+    messageSourceInserts.length = 0;
     preferenceResult = { data: null, error: null };
     createClient.mockReset(); stream.mockReset(); modelOptions.mockReset().mockReturnValue(allModes);
     contextCapabilities.mockReset().mockReturnValue({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 });
@@ -1090,6 +1092,22 @@ describe("POST /api/chat", () => {
           sources: [{ ordinal: 1, kind: "web", title: "Node.js", domain: "nodejs.org", url: "https://nodejs.org/en" }],
         });
         expect(prompt[1].content).toContain("cite_as: [SOURCE:web:1]");
+        // Authoritative citation rules live on the core system message, not only the untrusted web block.
+        expect(prompt[0].content).toMatch(/Citation rules for this reply/);
+        expect(prompt[0].content).toContain("[SOURCE:web:1]");
+        expect(prompt[0].content).toMatch(/never with prose source lists/i);
+        expect(messageSourceInserts).toHaveLength(1);
+        expect(messageSourceInserts[0]).toEqual([
+          expect.objectContaining({
+            message_id: assistantId,
+            ordinal: 1,
+            kind: "web",
+            handle: "web:1",
+            title: "Node.js",
+            url: "https://nodejs.org/en",
+            domain: "nodejs.org",
+          }),
+        ]);
         expect(JSON.stringify(info.mock.calls)).not.toContain("test-key");
         expect(JSON.stringify(info.mock.calls)).not.toContain("Node.js 22 is the current release line");
       } finally {
@@ -1188,6 +1206,49 @@ describe("POST /api/chat", () => {
       expect(shown).toContain("Partial cite");
       expect(shown).not.toContain("[SOURCE:");
       expect(shown).not.toMatch(/\[SOURCE:web:1(?!\])/);
+    });
+
+    it("persists message_sources when Stop keeps a partial web-grounded reply", async () => {
+      const cancel = vi.fn();
+      readyClient([]);
+      webMocks.decideWebSearch.mockReturnValue({ search: true, reason: "temporal_currency" });
+      webMocks.getWebSearchConfig.mockReturnValue({ providerId: "tavily", apiKey: "test-key", maxResults: 8, maxPages: 4, maxSources: 5 });
+      webMocks.getWebSearchProvider.mockReturnValue({ id: "tavily", searchWeb: vi.fn() });
+      webMocks.runWebSearchPipeline.mockResolvedValue({
+        sources: [webSource],
+        degraded: false,
+        searchResultCount: 2,
+        pagesFetched: 1,
+      });
+      stream.mockResolvedValue(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: "IHSG naik [SOURCE:web:1]." } }] })}\n\n`));
+        },
+        cancel,
+      }));
+      const response = await POST(validRequest());
+      expect(response.status).toBe(200);
+      const reader = response.body!.getReader();
+      // Consume start + first delta so generation output is non-empty before Stop.
+      await reader.read();
+      await reader.read();
+      stopState.status = "interrupted";
+      await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce(), { timeout: 5_000 });
+      while (true) {
+        const { done } = await reader.read();
+        if (done) break;
+      }
+      expect(messageSourceInserts).toHaveLength(1);
+      expect(messageSourceInserts[0]).toEqual([
+        expect.objectContaining({
+          message_id: assistantId,
+          ordinal: 1,
+          kind: "web",
+          handle: "web:1",
+          title: "Node.js",
+          url: "https://nodejs.org/en",
+        }),
+      ]);
     });
 
     it("injects verification-unavailable guidance when web is unconfigured but routing wants search", async () => {
