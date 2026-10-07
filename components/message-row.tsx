@@ -4,7 +4,7 @@ import { memo, useState, type KeyboardEvent } from "react";
 import { FileText, Pencil, RefreshCw } from "lucide-react";
 import { attachmentTypeLabel, formatBytes } from "@/lib/attachments/limits";
 import type { AttachmentSummary } from "@/lib/attachments/types";
-import { BrandMark, type BrandActivity } from "@/components/brand";
+import { BrandMark } from "@/components/brand";
 import { CopyButton } from "@/components/copy-button";
 import { MessageMarkdown } from "@/components/message-markdown";
 import { MessageSources } from "@/components/message-sources";
@@ -67,20 +67,28 @@ function MessageTime({ value }: { value: string | undefined }) {
 export const MessageRow = memo(function MessageRow({ message, initial, isLast, isLastUser, canMutate, disabled, editing, responseFailed = false, onRegenerate, onStartEdit, onCancelEdit, onSaveEdit }: Props) {
   if (message.role === "assistant") {
     const waiting = message.status === "streaming" && (!message.content || message.content === claimPlaceholder);
-    const brandActivity: BrandActivity = message.status === "streaming" ? (waiting ? "thinking" : "streaming") : "idle";
     const canCopy = message.status !== "streaming" && message.status !== "error" && Boolean(message.content) && !placeholderResponses.has(message.content);
     const canRegenerate = canMutate && isLast && message.status === "complete" && canCopy;
     const canRetry = canMutate && isLast && (message.status === "error" || message.status === "interrupted");
     const responseStatus = message.researchStage ? `Nibie is ${RESEARCH_STAGE_LABELS[message.researchStage].toLowerCase()}` : "Nibie is responding";
+    // No author header: the animated mark appears only while Nibie is thinking, and the caret covers streaming.
+    // Status labels (Deep Research, Stopped, errors) and the optional timestamp keep a small meta line.
+    const statuses = [
+      message.research ? `Deep Research${message.research.status === "incomplete" ? " · Incomplete" : message.research.status === "failed" ? " · Failed" : ""}` : null,
+      message.status === "interrupted" ? "Stopped" : null,
+    ].filter(Boolean).join(" · ");
+    const failed = message.status === "error";
     return <article className="message-row assistant">
       <div className="message-content assistant">
-        <div className="message-author">
-          <span className="message-author-mark"><BrandMark activity={brandActivity} /></span>
-          <span className="message-author-label">Nibie{message.research ? <span className="message-status"> · Deep Research{message.research.status === "incomplete" ? " · Incomplete" : message.research.status === "failed" ? " · Failed" : ""}</span> : null}{message.status === "interrupted" ? <span className="message-status"> · Stopped</span> : message.status === "error" ? <span className="message-status is-danger">{" · Couldn't respond"}</span> : null}</span>
+        {message.status === "streaming" ? <span className="visually-hidden" role="status">{responseStatus}</span> : null}
+        {!waiting && (statuses || failed || message.created_at) ? <div className="message-author">
+          {statuses ? <span className="message-status">{statuses}</span> : null}
+          {failed ? <span className="message-status is-danger">{statuses ? " · " : ""}{"Couldn't respond"}</span> : null}
           <MessageTime value={message.created_at} />
-          {message.status === "streaming" ? <span className="visually-hidden" role="status">{responseStatus}</span> : null}
-        </div>
-        {waiting ? (message.researchStage ? <span className="research-wait"><span className="research-stage">{RESEARCH_STAGE_LABELS[message.researchStage]}</span></span> : null) : <MessageMarkdown content={message.content} sources={message.sources} streaming={message.status === "streaming"} />}
+        </div> : null}
+        {waiting
+          ? <div className="response-thinking"><BrandMark activity="thinking" />{message.researchStage ? <span className="research-stage">{RESEARCH_STAGE_LABELS[message.researchStage]}</span> : null}</div>
+          : <MessageMarkdown content={message.content} sources={message.sources} streaming={message.status === "streaming"} />}
         {message.sources?.length && !waiting ? <MessageSources sources={message.sources} /> : null}
         {(canCopy || canRegenerate || canRetry) && <div className="message-actions">
           {canCopy && <CopyButton text={message.content} label="Copy response" />}

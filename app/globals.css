@@ -371,10 +371,10 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .message-content { min-width: 0; max-width: 100%; }
 .message-content.assistant { flex: 1; max-width: min(100%, 720px); padding-top: 1px; }
 .message-author { display: flex; align-items: center; gap: 6px; min-height: 18px; margin: 0 0 8px; color: var(--text-3); font-size: 12px; font-weight: 600; }
-.message-author-mark { display: inline-grid; place-items: center; flex: none; width: 18px; height: 18px; }
-.message-author-mark .brand-mark { width: 18px; height: 18px; }
-.message-author-label { min-width: 0; }
-.message-author .message-time { margin-left: 2px; }
+.message-author:empty { display: none; }
+.message-content.assistant > .message-author .message-time { margin-left: 0; }
+.response-thinking { display: flex; align-items: center; gap: 10px; min-height: 27px; }
+.response-thinking .brand-mark { width: 22px; height: 22px; }
 .message-status.is-danger { color: var(--danger); }
 .message-time { margin-left: 8px; color: var(--text-4); font-size: 10px; font-weight: 500; letter-spacing: .01em; white-space: nowrap; }
 .message-column.user .message-time { display: block; margin: 2px 2px 0 0; text-align: right; }
@@ -604,7 +604,6 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .skeleton-line.is-short { width: 34%; align-self: flex-end; height: 36px; border-radius: 12px; }
 .skeleton-line.is-medium { width: 68%; }
 @keyframes skeleton-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
-.research-wait { display: inline-flex; align-items: center; min-height: 20px; padding-left: 24px; }
 .research-stage { color: var(--text-3); font-size: 12.5px; letter-spacing: 0.01em; }
 
 /* Sign-in / sign-up */

@@ -123,10 +123,10 @@ test("a stopped response persists as interrupted and Retry completes it", async 
     const retried = await completedStream(page, () => page.getByRole("button", { name: "Retry", exact: true }).click());
     expect(retried.request().postDataJSON()).toMatchObject({ regenerate: true });
     await expect(assistant(page)).toHaveCount(1);
-    await expect(page.locator(".message-author").last()).not.toContainText("Stopped");
+    await expect(page.locator(".message-row.assistant").last().locator(".message-status", { hasText: "Stopped" })).toHaveCount(0);
     await page.reload();
     await expect(assistant(page)).toHaveCount(1);
-    await expect(page.locator(".message-author").last()).not.toContainText("Stopped");
+    await expect(page.locator(".message-row.assistant").last().locator(".message-status", { hasText: "Stopped" })).toHaveCount(0);
   } finally {
     await removeConversation(page, url ?? (page.url().includes("conversation=") ? page.url() : undefined));
   }
