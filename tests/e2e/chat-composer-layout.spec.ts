@@ -43,7 +43,7 @@ async function expectComposerGeometry(page: Page) {
       actionsBottom: actions.getBoundingClientRect().bottom,
       attachTop: attach.getBoundingClientRect().top,
       attachBottom: attach.getBoundingClientRect().bottom,
-      showsPlaceholderAsText: composer.textContent?.includes("Ask Nibie anything...") ?? false,
+      showsPlaceholderAsText: composer.textContent?.includes("What should we work through?") ?? false,
       composerBoxBottom: composer.getBoundingClientRect().bottom,
       messageBottom: message.getBoundingClientRect().bottom,
       textareaHeight: textarea.getBoundingClientRect().height,
