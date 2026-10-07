@@ -23,6 +23,9 @@ import { searchRoomFiles } from "@/lib/files/search";
 import { prioritizeRoomFileMatches } from "@/lib/files/retrieval";
 import { roomContextFromRows, type PinContextRow, type RoomBriefRow } from "@/lib/rooms/map";
 import { loadOwnerPreferences } from "@/lib/preferences/store";
+import { handleRecallTurn } from "@/lib/recall/handle";
+import { retrieveRelevantMemories } from "@/lib/recall/retrieve";
+import type { MemoryRecord, RecallOperationStatus } from "@/lib/recall/types";
 import { operationalCodes } from "@/lib/observability/codes";
 import { logError, logInfo, logWarn } from "@/lib/observability/logger";
 import { requestIdFrom } from "@/lib/observability/request-id";
@@ -54,7 +57,8 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   const supabase = await createSupabaseServerClient();
   // The session comes from the verified access token (no Auth round trip); row-level security still scopes every query below to its owner.
   // A missing session does not emit chat.response.started. Operators treat that absence as an auth or save-path miss.
-  if (!await getAuthenticatedUser(supabase)) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  const user = await getAuthenticatedUser(supabase);
+  if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
   const origin = request.headers.get("origin");
   if (origin && origin !== new URL(request.url).origin) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   if (request.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== "application/json") return NextResponse.json({ error: "A JSON request is required." }, { status: 415 });
@@ -163,6 +167,62 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   const durationMs = () => Date.now() - responseStartedAt;
   logInfo("chat.response.started", { requestId, regenerate, mode });
 
+  // Explicit recall: save/forget intent and retrieval never block the reply.
+  // Fail closed when preferences could not be read so a disabled user is not briefly re-enabled.
+  // Always run handle on non-regenerate turns so disabled/failed outcomes reach the model truthfully.
+  const recallEnabled = !preferenceState.error && preferenceState.preferences.recallEnabled !== false;
+  let recallOperation: RecallOperationStatus = "none";
+  if (!regenerate) {
+    try {
+      const recallResult = await handleRecallTurn({
+        supabase,
+        userId: user.id,
+        message: userMessage.content,
+        recallEnabled,
+        conversationId: conversation.id,
+        messageId: userMessage.id,
+        requestId,
+      });
+      recallOperation = recallResult.status;
+    } catch {
+      recallOperation = "save_failed";
+      logWarn("memory.write.failed", { requestId, category: "exception", code: operationalCodes.recallWriteFailed });
+    }
+  } else if (!recallEnabled) {
+    logInfo("memory.disabled", { requestId, stage: "turn" });
+  }
+
+  let memories: MemoryRecord[] | undefined;
+  if (recallEnabled) {
+    const retrieveStarted = Date.now();
+    logInfo("memory.retrieve.started", { requestId });
+    try {
+      const retrieved = await retrieveRelevantMemories({
+        supabase,
+        query: userMessage.content,
+        recallEnabled,
+        requestId,
+      });
+      if (retrieved.memories.length) memories = retrieved.memories;
+      logInfo("memory.retrieve.completed", {
+        requestId,
+        count: retrieved.memories.length,
+        durationMs: Date.now() - retrieveStarted,
+        degraded: retrieved.degraded,
+      });
+      if (retrieved.degraded) {
+        logWarn("memory.retrieve.completed", { requestId, category: "degraded", code: operationalCodes.recallRetrieveFailed });
+      }
+    } catch {
+      logWarn("memory.retrieve.completed", {
+        requestId,
+        category: "exception",
+        durationMs: Date.now() - retrieveStarted,
+        code: operationalCodes.recallRetrieveFailed,
+      });
+    }
+  }
+
   // Web search runs after Room hybrid retrieval and only for a fresh generation (replay already returned).
   // Failures never block the reply: empty web context continues as normal chat, with an authoritative
   // "verification unavailable" instruction when routing wanted search but sources were empty.
@@ -269,6 +329,8 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       attachments,
       web,
       webVerificationUnavailable,
+      memories,
+      recallOperation,
       messages: rows.map((row) => ({ role: row.role as "user" | "assistant", content: row.content, position: row.position })),
       currentPosition: userMessage.position,
     });
@@ -279,6 +341,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
     const pinsIncluded = plan.blocks.some((block) => block.id === "pins" && block.included);
     const fileIncluded = plan.blocks.some((block) => block.id === "file" && block.included);
     const webIncluded = plan.blocks.some((block) => block.id === "web" && block.included);
+    const memoryIncluded = plan.blocks.some((block) => block.id === "memory" && block.included);
     const summaryIncluded = plan.blocks.some((block) => block.id === "thread_summary" && block.included);
     logInfo("context.built", {
       requestId,
@@ -287,6 +350,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       roomIncluded,
       pinsIncluded,
       fileIncluded,
+      memoryIncluded,
       fileCount: files?.length ?? 0,
       attachmentCount: attachments.length,
       webIncluded,

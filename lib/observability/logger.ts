@@ -44,6 +44,11 @@ const sensitiveKeys = new Set([
   "workbench",
   "databaseurl",
   "supabasekey",
+  "memory",
+  "memories",
+  "memorycontent",
+  "normalizedkey",
+  "recall",
 ]);
 
 const secretText = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|bearer\s+\S+|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}|sk-[A-Za-z0-9]{8,}/i;

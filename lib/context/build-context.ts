@@ -6,12 +6,13 @@ import { pinPieces, type PinPiece } from "@/lib/context/pin-context";
 import { profilePieces, profileReason, type ProfilePiece } from "@/lib/context/profile-context";
 import { roomPieces, roomReason, type RoomPiece } from "@/lib/context/room-context";
 import { renderThreadSummary, resolveThreadSummary, selectThreadMessages } from "@/lib/context/thread-context";
+import { recallOperationInstruction, renderRecallContext } from "@/lib/context/recall-context";
 import {
   renderWebContext,
   WEB_VERIFICATION_UNAVAILABLE_DIAGNOSTIC_REASON,
   WEB_VERIFICATION_UNAVAILABLE_INSTRUCTION,
 } from "@/lib/context/web-context";
-import { ATTACHMENT_TOKEN_CAP, budgetLimits, estimateTokens, FILE_TOKEN_CAP, PIN_TOKEN_CAP, PROTECTED_RECENT_COUNT, ROOM_TOKEN_CAP, SUMMARY_TOKEN_CAP, WEB_TOKEN_CAP } from "@/lib/context/token-budget";
+import { ATTACHMENT_TOKEN_CAP, budgetLimits, estimateTokens, FILE_TOKEN_CAP, MEMORY_TOKEN_CAP, PIN_TOKEN_CAP, PROTECTED_RECENT_COUNT, ROOM_TOKEN_CAP, SUMMARY_TOKEN_CAP, WEB_TOKEN_CAP } from "@/lib/context/token-budget";
 
 function block(partial: ContextBlock): ContextBlock {
   return partial;
@@ -48,9 +49,12 @@ export function buildContext(input: BuildContextInput): ContextPlan {
   // Unreadable preferences fall back to the Default depth, like every other preference.
   const basePolicyText = contextPolicyFor(input.responseMode, input.preferenceReadFailed ? "balanced" : input.preferences.responseLength);
   const webVerificationUnavailable = Boolean(input.webVerificationUnavailable) && !(input.web?.length);
-  const corePolicyText = webVerificationUnavailable
-    ? `${basePolicyText}\n\n${WEB_VERIFICATION_UNAVAILABLE_INSTRUCTION}`
-    : basePolicyText;
+  const recallOpText = recallOperationInstruction(input.recallOperation);
+  const corePolicyText = [
+    basePolicyText,
+    webVerificationUnavailable ? WEB_VERIFICATION_UNAVAILABLE_INSTRUCTION : null,
+    recallOpText,
+  ].filter(Boolean).join("\n\n");
   const coreTokens = estimateTokens(corePolicyText);
   const currentTokens = estimateTokens(current.content);
   if (coreTokens + currentTokens > inputBudgetTokens) throw new ContextBuildError();
@@ -110,6 +114,11 @@ export function buildContext(input: BuildContextInput): ContextPlan {
   const renderedWeb = requestedWeb ? renderWebContext(requestedWeb, Math.min(WEB_TOKEN_CAP, remaining.value)) : null;
   if (renderedWeb?.text) remaining.value -= estimateTokens(renderedWeb.text);
 
+  // Explicit saved memories: after web, before thread summary. Untrusted user data.
+  const requestedMemories = input.memories?.length ? input.memories : null;
+  const renderedMemories = requestedMemories ? renderRecallContext(requestedMemories, Math.min(MEMORY_TOKEN_CAP, remaining.value)) : null;
+  if (renderedMemories?.text) remaining.value -= estimateTokens(renderedMemories.text);
+
   let summaryText = "";
   let summaryIncluded = false;
   let summaryDroppedForBudget = false;
@@ -129,7 +138,7 @@ export function buildContext(input: BuildContextInput): ContextPlan {
   const olderFit = takeNewest(olderMessages.filter((message) => message.position > coveredThrough), remaining);
   const dialogue = [...olderFit.included, ...protectedFit.included, current];
   const droppedMessages = [...olderFit.dropped, ...protectedFit.dropped];
-  const truncated = droppedMessages.length > 0 || droppedPieces.length > 0 || droppedRoom.length > 0 || droppedPins.length > 0 || Boolean(renderedFiles?.truncated) || Boolean(renderedAttachments?.truncated) || Boolean(renderedWeb?.truncated) || summaryDroppedForBudget;
+  const truncated = droppedMessages.length > 0 || droppedPieces.length > 0 || droppedRoom.length > 0 || droppedPins.length > 0 || Boolean(renderedFiles?.truncated) || Boolean(renderedAttachments?.truncated) || Boolean(renderedWeb?.truncated) || Boolean(renderedMemories?.truncated) || summaryDroppedForBudget;
 
   const profileText = includedPieces.map((piece) => piece.text).join("\n");
   const roomText = includedRoom.map((piece) => piece.text).join("\n\n");
@@ -137,6 +146,7 @@ export function buildContext(input: BuildContextInput): ContextPlan {
   const fileText = renderedFiles?.text ?? "";
   const attachmentText = renderedAttachments?.text ?? "";
   const webText = renderedWeb?.text ?? "";
+  const memoryText = renderedMemories?.text ?? "";
   const blocks: ContextBlock[] = [
     block({ id: "core", authority: "policy", priority: 1, required: true, text: corePolicyText, tokenEstimate: coreTokens, included: true, exclusionReason: null }),
     block({ id: "profile", authority: "untrusted_data", priority: 4, required: false, text: profileText, tokenEstimate: profileText ? estimateTokens(profileText) : 0, included: Boolean(profileText), exclusionReason: profileText ? null : input.preferenceReadFailed ? "read_failed" : droppedPieces.length && !includedPieces.length ? "budget" : "defaults_only" }),
@@ -153,6 +163,9 @@ export function buildContext(input: BuildContextInput): ContextPlan {
   }
   if (requestedWeb) {
     blocks.push(block({ id: "web", authority: "untrusted_data", priority: 6, required: false, text: webText, tokenEstimate: webText ? estimateTokens(webText) : 0, included: Boolean(webText), exclusionReason: webText ? null : "budget" }));
+  }
+  if (requestedMemories) {
+    blocks.push(block({ id: "memory", authority: "untrusted_data", priority: 6, required: false, text: memoryText, tokenEstimate: memoryText ? estimateTokens(memoryText) : 0, included: Boolean(memoryText), exclusionReason: memoryText ? null : "budget" }));
   }
   blocks.push(block({ id: "thread_summary", authority: "untrusted_data", priority: 6, required: false, text: summaryText, tokenEstimate: summaryText ? estimateTokens(summaryText) : 0, included: summaryIncluded, exclusionReason: summaryIncluded ? null : summaryDroppedForBudget ? "budget" : resolved.exclusionReason }));
   for (const message of dialogue) {
@@ -210,6 +223,12 @@ export function buildContext(input: BuildContextInput): ContextPlan {
       ? { type: "web", label: "Web sources", state: "not_used", reason: WEB_VERIFICATION_UNAVAILABLE_DIAGNOSTIC_REASON }
       : null;
 
+  const memoryDiagnostic: ContextSourceDiagnostic | null = requestedMemories
+    ? renderedMemories?.includedCount
+      ? { type: "memory", label: "Saved memories", state: "included", reason: renderedMemories.truncated ? "Partly included: some memories did not fit this reply." : renderedMemories.includedCount === 1 ? "A saved memory" : "Saved memories" }
+      : { type: "memory", label: "Saved memories", state: "not_used", reason: "Not used for this reply." }
+    : null;
+
   let diagnostics: ContextDiagnostics;
   try {
     const sources = [profileDiagnostic, recentDiagnostic, summaryDiagnostic];
@@ -223,6 +242,7 @@ export function buildContext(input: BuildContextInput): ContextPlan {
     }
     if (attachmentDiagnostic) sources.splice(sources.findIndex((source) => source.type === "recent_messages"), 0, attachmentDiagnostic);
     if (webDiagnostic) sources.splice(sources.findIndex((source) => source.type === "recent_messages"), 0, webDiagnostic);
+    if (memoryDiagnostic) sources.splice(sources.findIndex((source) => source.type === "recent_messages"), 0, memoryDiagnostic);
     diagnostics = { sources, recentMessageCount: dialogue.length };
   } catch {
     diagnostics = { sources: [], recentMessageCount: dialogue.length };

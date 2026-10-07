@@ -714,6 +714,13 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .chat-settings-switch span { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: var(--bg-raised); box-shadow: var(--shadow-sm); }
 .chat-settings-switch[aria-checked="true"] { border-color: var(--accent); background: var(--accent); }
 .chat-settings-switch[aria-checked="true"] span { transform: translateX(16px); background: var(--accent-fg); }
+.memory-group { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+.memory-row { display: flex; flex-direction: column; gap: 8px; padding: 10px 0; border-top: 1px solid var(--border-soft); }
+.memory-row[data-inactive="true"] { opacity: .7; }
+.memory-row-text { width: 100%; min-height: 64px; max-height: 140px; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg-app); color: var(--text); font: inherit; font-size: 13px; resize: vertical; }
+.memory-row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.memory-row-actions button { padding: 0; border: 0; background: transparent; color: var(--text-2); font: inherit; font-size: 12px; text-decoration: underline; cursor: pointer; }
+.memory-row-actions button:disabled { opacity: .55; cursor: default; }
 .settings-status { min-height: 18px; margin: 16px 0 0; color: var(--text-4); font-size: 12px; }
 .settings-error { margin: 0 0 12px; color: var(--danger); font-size: 12px; line-height: 1.5; }
 .settings-error button { margin-left: 8px; padding: 0; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 12px; text-decoration: underline; cursor: pointer; }

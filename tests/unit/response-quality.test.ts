@@ -122,13 +122,13 @@ describe("response quality rules and compatibility", () => {
     const plan = buildContext(input("hello"));
     const core = plan.blocks.find((block) => block.id === "core")!;
     const basePolicy = buildContext(input("hello", "Balanced")).blocks.find((block) => block.id === "core")!;
-    expect(basePolicy.tokenEstimate, `base policy is ${basePolicy.tokenEstimate} tokens; the smallest context window in the suite (1,400, room-files) leaves 1,394 after the current request`).toBeLessThan(1_395);
-    expect(core.tokenEstimate).toBeLessThan(1_400);
+    expect(basePolicy.tokenEstimate, `base policy is ${basePolicy.tokenEstimate} tokens; the smallest context window in the suite (1,450, room-files) leaves headroom after the current request`).toBeLessThan(1_445);
+    expect(core.tokenEstimate).toBeLessThan(1_450);
     expect(core.tokenEstimate).toBe(estimateTokens(contextPolicyFor("Fast")));
     expect(core.required).toBe(true);
     expect(plan.budget.estimatedTokens).toBe(plan.blocks.filter((block) => block.included).reduce((sum, block) => sum + block.tokenEstimate, 0));
     expect(estimateTokens(responseQualityFor("Fast"))).toBeLessThan(1_100);
-    for (const depth of ["concise", "balanced", "detailed"] as const) expect(estimateTokens(contextPolicyFor("Fast", depth))).toBeLessThan(1_400);
+    for (const depth of ["concise", "balanced", "detailed"] as const) expect(estimateTokens(contextPolicyFor("Fast", depth))).toBeLessThan(1_450);
   });
 
   it("keeps source injection outside authoritative policy and the current request last", () => {

@@ -13,9 +13,10 @@ export function toProviderMessages(plan: ContextPlan): ProviderMessage[] {
   const file = plan.blocks.find((block) => block.id === "file" && block.included);
   const attachment = plan.blocks.find((block) => block.id === "attachment" && block.included);
   const web = plan.blocks.find((block) => block.id === "web" && block.included);
+  const memory = plan.blocks.find((block) => block.id === "memory" && block.included);
   const summary = plan.blocks.find((block) => block.id === "thread_summary" && block.included);
-  if (profile || room || pins || file || attachment || web || summary) {
-    messages.push({ role: "system", content: [CONTEXT_DATA_PREAMBLE, profile?.text, room?.text, pins?.text, file?.text, attachment?.text, web?.text, summary?.text].filter(Boolean).join("\n\n") });
+  if (profile || room || pins || file || attachment || web || memory || summary) {
+    messages.push({ role: "system", content: [CONTEXT_DATA_PREAMBLE, profile?.text, room?.text, pins?.text, file?.text, attachment?.text, web?.text, memory?.text, summary?.text].filter(Boolean).join("\n\n") });
   }
   for (const block of plan.blocks) {
     if (!block.included || !block.dialogueRole) continue;

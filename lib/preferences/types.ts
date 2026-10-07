@@ -19,11 +19,12 @@ export type UserPreferences = {
   responseLength: ResponseLength;
   responseStyle: ResponseStyle;
   aboutYou: string | null;
+  recallEnabled: boolean;
   createdAt: string | null;
   updatedAt: string | null;
 };
 
-export type PreferencePatch = Partial<Pick<UserPreferences, "preferredName" | "preferredLanguage" | "defaultModel" | "responseLength" | "responseStyle" | "aboutYou">>;
+export type PreferencePatch = Partial<Pick<UserPreferences, "preferredName" | "preferredLanguage" | "defaultModel" | "responseLength" | "responseStyle" | "aboutYou" | "recallEnabled">>;
 
 export function defaultUserPreferences(): UserPreferences {
   return {
@@ -33,6 +34,7 @@ export function defaultUserPreferences(): UserPreferences {
     responseLength: "balanced",
     responseStyle: "natural",
     aboutYou: null,
+    recallEnabled: true,
     createdAt: null,
     updatedAt: null,
   };

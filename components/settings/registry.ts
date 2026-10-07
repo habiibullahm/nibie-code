@@ -1,7 +1,7 @@
-import { ChatSettingsSection, DataSettingsSection, GeneralSettingsSection, NibieSettingsSection, PersonalizationSettingsSection, ProfileSettingsSection, type SettingsSectionProps } from "@/components/settings/sections";
+import { ChatSettingsSection, DataSettingsSection, GeneralSettingsSection, MemorySettingsSection, NibieSettingsSection, PersonalizationSettingsSection, ProfileSettingsSection, type SettingsSectionProps } from "@/components/settings/sections";
 import type { ComponentType } from "react";
 
-export type SettingsSectionId = "profile" | "general" | "nibie" | "chat" | "personalization" | "data";
+export type SettingsSectionId = "profile" | "general" | "nibie" | "chat" | "personalization" | "memory" | "data";
 
 export type SettingsSectionDefinition = {
   id: SettingsSectionId;
@@ -16,5 +16,6 @@ export const settingsSections: readonly SettingsSectionDefinition[] = [
   { id: "nibie", label: "Nibie", Component: NibieSettingsSection },
   { id: "chat", label: "Chat", Component: ChatSettingsSection },
   { id: "personalization", label: "Personalization", Component: PersonalizationSettingsSection },
+  { id: "memory", label: "Memory", Component: MemorySettingsSection },
   { id: "data", label: "Data & Privacy", Component: DataSettingsSection },
 ];

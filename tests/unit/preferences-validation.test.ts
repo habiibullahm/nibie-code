@@ -11,6 +11,7 @@ describe("account preference validation", () => {
       responseLength: "balanced",
       responseStyle: "natural",
       aboutYou: null,
+      recallEnabled: true,
       createdAt: null,
       updatedAt: null,
     });
@@ -23,6 +24,7 @@ describe("account preference validation", () => {
     expect(parsePreferencePatch({ preferredName: "  Habib  ", aboutYou: "  Builds Nibie  " })).toEqual({
       data: { preferredName: "Habib", aboutYou: "Builds Nibie" },
     });
+    expect(parsePreferencePatch({ recallEnabled: false })).toEqual({ data: { recallEnabled: false } });
   });
 
   it("clears blank text instead of storing an empty string", () => {

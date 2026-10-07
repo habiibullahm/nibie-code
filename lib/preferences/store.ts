@@ -8,7 +8,7 @@ import { defaultUserPreferences, type PreferencePatch, type UserPreferences } fr
 import { parsePreferencePatch, preferenceModelSchema, preferredLanguageSchema, responseLengthSchema, responseStyleSchema } from "@/lib/preferences/validation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-const preferenceColumns = "preferred_name,preferred_language,default_model,response_length,response_style,about_you,created_at,updated_at";
+const preferenceColumns = "preferred_name,preferred_language,default_model,response_length,response_style,about_you,recall_enabled,created_at,updated_at";
 
 const preferenceRowSchema = z.object({
   preferred_name: z.string().nullable(),
@@ -17,6 +17,7 @@ const preferenceRowSchema = z.object({
   response_length: responseLengthSchema,
   response_style: responseStyleSchema,
   about_you: z.string().nullable(),
+  recall_enabled: z.boolean().default(true),
   created_at: z.string().min(1),
   updated_at: z.string().min(1),
 });
@@ -39,6 +40,7 @@ function fromRow(row: z.infer<typeof preferenceRowSchema>): UserPreferences {
     responseLength: row.response_length,
     responseStyle: row.response_style,
     aboutYou: row.about_you,
+    recallEnabled: row.recall_enabled,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -52,6 +54,7 @@ function toRow(userId: string, patch: PreferencePatch) {
   if (patch.responseLength !== undefined) row.response_length = patch.responseLength;
   if (patch.responseStyle !== undefined) row.response_style = patch.responseStyle;
   if (patch.aboutYou !== undefined) row.about_you = patch.aboutYou;
+  if (patch.recallEnabled !== undefined) row.recall_enabled = patch.recallEnabled;
   return row;
 }
 

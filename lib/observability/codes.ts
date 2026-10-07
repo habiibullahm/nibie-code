@@ -11,6 +11,8 @@ export const operationalCodes = {
   attachmentSaveFailed: "ATTACHMENT_SAVE_FAILED",
   attachmentReadFailed: "ATTACHMENT_READ_FAILED",
   webSearchFailed: "WEB_SEARCH_FAILED",
+  recallWriteFailed: "RECALL_WRITE_FAILED",
+  recallRetrieveFailed: "RECALL_RETRIEVE_FAILED",
 } as const;
 
 export type OperationalCode = (typeof operationalCodes)[keyof typeof operationalCodes];

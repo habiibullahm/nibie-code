@@ -15,6 +15,7 @@ type PreferenceRow = {
   response_length: string;
   response_style: string;
   about_you: string | null;
+  recall_enabled: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -38,6 +39,7 @@ function memoryClient(owner = "owner") {
                 response_length: row?.response_length ?? "balanced",
                 response_style: row?.response_style ?? "natural",
                 about_you: row?.about_you ?? null,
+                recall_enabled: row?.recall_enabled ?? true,
                 created_at: row?.created_at ?? "2026-10-02T00:00:00.000Z",
                 updated_at: "2026-10-02T00:00:01.000Z",
               };
@@ -47,6 +49,7 @@ function memoryClient(owner = "owner") {
               if ("response_length" in patch) next.response_length = String(patch.response_length);
               if ("response_style" in patch) next.response_style = String(patch.response_style);
               if ("about_you" in patch) next.about_you = patch.about_you as string | null;
+              if ("recall_enabled" in patch) next.recall_enabled = Boolean(patch.recall_enabled);
               if (patch.user_id !== owner) throw new Error("owner mismatch");
               row = next;
               return { data: next, error: null };
