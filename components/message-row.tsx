@@ -4,6 +4,7 @@ import { memo, useState, type KeyboardEvent } from "react";
 import { FileText, Pencil, RefreshCw } from "lucide-react";
 import { attachmentTypeLabel, formatBytes } from "@/lib/attachments/limits";
 import type { AttachmentSummary } from "@/lib/attachments/types";
+import { BrandMark, type BrandActivity } from "@/components/brand";
 import { CopyButton } from "@/components/copy-button";
 import { MessageMarkdown } from "@/components/message-markdown";
 import { MessageSources } from "@/components/message-sources";
@@ -66,13 +67,20 @@ function MessageTime({ value }: { value: string | undefined }) {
 export const MessageRow = memo(function MessageRow({ message, initial, isLast, isLastUser, canMutate, disabled, editing, responseFailed = false, onRegenerate, onStartEdit, onCancelEdit, onSaveEdit }: Props) {
   if (message.role === "assistant") {
     const waiting = message.status === "streaming" && (!message.content || message.content === claimPlaceholder);
+    const brandActivity: BrandActivity = message.status === "streaming" ? (waiting ? "thinking" : "streaming") : "idle";
     const canCopy = message.status !== "streaming" && message.status !== "error" && Boolean(message.content) && !placeholderResponses.has(message.content);
     const canRegenerate = canMutate && isLast && message.status === "complete" && canCopy;
     const canRetry = canMutate && isLast && (message.status === "error" || message.status === "interrupted");
+    const responseStatus = message.researchStage ? `Nibie is ${RESEARCH_STAGE_LABELS[message.researchStage].toLowerCase()}` : "Nibie is responding";
     return <article className="message-row assistant">
       <div className="message-content assistant">
-        <div className="message-author">Nibie{message.research ? <span className="message-status"> · Deep Research{message.research.status === "incomplete" ? " · Incomplete" : message.research.status === "failed" ? " · Failed" : ""}</span> : null}{message.status === "interrupted" ? <span className="message-status"> · Stopped</span> : message.status === "error" ? <span className="message-status is-danger">{" · Couldn't respond"}</span> : null}<MessageTime value={message.created_at} /></div>
-        {waiting ? <span className="research-wait" role="status" aria-label={message.researchStage ? `Nibie is ${RESEARCH_STAGE_LABELS[message.researchStage].toLowerCase()}` : "Nibie is responding"}>{message.researchStage ? <span className="research-stage">{RESEARCH_STAGE_LABELS[message.researchStage]}</span> : null}<span className="thinking-dots"><i /><i /><i /></span></span> : <><MessageMarkdown content={message.content} sources={message.sources} />{message.status === "streaming" && <span className="thinking-dots is-inline" role="status" aria-label="Nibie is responding"><i /><i /><i /></span>}</>}
+        <div className="message-author">
+          <span className="message-author-mark"><BrandMark activity={brandActivity} /></span>
+          <span className="message-author-label">Nibie{message.research ? <span className="message-status"> · Deep Research{message.research.status === "incomplete" ? " · Incomplete" : message.research.status === "failed" ? " · Failed" : ""}</span> : null}{message.status === "interrupted" ? <span className="message-status"> · Stopped</span> : message.status === "error" ? <span className="message-status is-danger">{" · Couldn't respond"}</span> : null}</span>
+          <MessageTime value={message.created_at} />
+          {message.status === "streaming" ? <span className="visually-hidden" role="status">{responseStatus}</span> : null}
+        </div>
+        {waiting ? <span className="research-wait">{message.researchStage ? <span className="research-stage">{RESEARCH_STAGE_LABELS[message.researchStage]}</span> : null}</span> : <MessageMarkdown content={message.content} sources={message.sources} />}
         {message.sources?.length && !waiting ? <MessageSources sources={message.sources} /> : null}
         {(canCopy || canRegenerate || canRetry) && <div className="message-actions">
           {canCopy && <CopyButton text={message.content} label="Copy response" />}
