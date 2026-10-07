@@ -23,6 +23,7 @@ What's new in Nibie.
 
 ### Fixed
 
+- Web search recognizes Indonesian web-intent and freshness cues for market questions (for example IHSG) without searching conceptual asks like “apa itu IHSG?”.
 - Web search no longer fires on conceptual or coding questions that only mention weak words like version, release, price, or job.
 - When web verification is unavailable, Nibie continues the reply without treating unverified current public facts as known.
 - Replies now show a single thinking indicator, without repeating the response status below the message box.
