@@ -95,7 +95,7 @@ export async function getChatWorkspaceData(conversationId: unknown) {
       ? supabase.from("message_attachments").select(`${attachmentSummaryColumns},message_id,created_at`).eq("conversation_id", parsedId.data).order("created_at", { ascending: true })
       : Promise.resolve(null),
     parsedId.success
-      ? loadMessageSourcesByConversation(supabase as Parameters<typeof loadMessageSourcesByConversation>[0], parsedId.data)
+      ? loadMessageSourcesByConversation(supabase, parsedId.data)
       : Promise.resolve({ byMessage: new Map<string, CitationSourceView[]>(), error: false, unavailable: true }),
   ]);
   const withoutArchive = schemaUnavailable(conversationResult.error)

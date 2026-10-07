@@ -68,8 +68,12 @@ describe("Supabase row-level security", () => {
     await sql`drop type if exists public.citation_source_kind cascade`;
     await sql`drop table if exists public.message_attachments cascade`;
     await sql`drop table if exists public.workbench_documents cascade`;
+    // Chunks reference room_files; drop them first so a re-migrate after incomplete cleanup cannot hit 42P07.
+    await sql`drop table if exists public.room_file_chunks cascade`;
     await sql`drop table if exists public.room_files cascade`;
     await sql`drop function if exists public.set_room_files_updated_at() cascade`;
+    await sql`drop function if exists public.search_room_file_chunks cascade`;
+    await sql`drop function if exists public.search_room_file_chunks_semantic cascade`;
     await sql`drop table if exists public.pins cascade`;
     await sql`drop function if exists public.set_pins_updated_at() cascade`;
     await sql`drop table if exists public.room_briefs cascade`;

@@ -15,27 +15,15 @@ type MessageSourceRow = {
   domain: string | null;
 };
 
-/** Minimal Supabase surface used for citation persistence (keeps unit tests mockable). */
-export type CitationSupabase = {
-  from: (table: string) => {
-    insert: (rows: unknown) => PromiseLike<{ error: QueryError }>;
-    select: (columns: string) => {
-      eq: (column: string, value: string) => {
-        order: (
-          column: string,
-          opts: { ascending: boolean },
-        ) => PromiseLike<{ data: MessageSourceRow[] | null; error: QueryError }>;
-      };
-    };
-  };
-};
+type InsertResult = { error: QueryError };
+type SelectResult = { data: MessageSourceRow[] | null; error: QueryError };
 
 /**
  * Persist prepared sources for an assistant message. Soft-fails when the table is not deployed yet.
  * Call once when the reply is saved as complete (or interrupted with visible text + sources).
  */
 export async function persistMessageSources(input: {
-  supabase: CitationSupabase;
+  supabase: { from: (table: string) => unknown };
   userId: string;
   conversationId: string;
   messageId: string;
@@ -56,7 +44,10 @@ export async function persistMessageSources(input: {
     retrieved_at: source.retrievedAt ? new Date(source.retrievedAt).toISOString() : null,
     source_id: source.sourceId ?? null,
   }));
-  const { error } = await input.supabase.from("message_sources").insert(rows);
+  const table = input.supabase.from("message_sources") as {
+    insert: (rows: unknown) => PromiseLike<InsertResult>;
+  };
+  const { error } = await table.insert(rows);
   if (!error) return { ok: true };
   if (schemaUnavailable(error)) return { ok: true, unavailable: true };
   return { ok: false };
@@ -64,11 +55,17 @@ export async function persistMessageSources(input: {
 
 /** Load citation views for messages in a conversation (owner-scoped via RLS). */
 export async function loadMessageSourcesByConversation(
-  supabase: CitationSupabase,
+  supabase: { from: (table: string) => unknown },
   conversationId: string,
 ): Promise<{ byMessage: Map<string, CitationSourceView[]>; error: boolean; unavailable: boolean }> {
-  const { data, error } = await supabase
-    .from("message_sources")
+  const table = supabase.from("message_sources") as {
+    select: (columns: string) => {
+      eq: (column: string, value: string) => {
+        order: (column: string, opts: { ascending: boolean }) => PromiseLike<SelectResult>;
+      };
+    };
+  };
+  const { data, error } = await table
     .select("message_id,ordinal,kind,title,url,domain")
     .eq("conversation_id", conversationId)
     .order("ordinal", { ascending: true });

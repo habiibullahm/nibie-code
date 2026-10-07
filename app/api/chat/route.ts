@@ -324,7 +324,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       if (!error && data) {
         if ((status === "complete" || status === "interrupted") && citationSources.length) {
           const savedSources = await persistMessageSources({
-            supabase: supabase as Parameters<typeof persistMessageSources>[0]["supabase"],
+            supabase,
             userId: user.id,
             conversationId: conversation.id,
             messageId: assistant.id,
