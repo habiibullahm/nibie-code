@@ -232,7 +232,7 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
           return;
         }
 
-        const research = await runDeepResearch({
+        let research = await runDeepResearch({
           question: userMessage.content,
           signal: aborter.signal,
           chatProvider,
@@ -271,11 +271,23 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
           logInfo("research.followup.started", { requestId, followUpUsed: true });
         }
 
-        if (aborter.signal.aborted || userStopped || clientCancelled || research.status === "interrupted") {
+        // True user Stop / client cancel only. Gather-deadline "interrupted" (no user abort) must not
+        // become a Stopped placeholder — with evidence it synthesizes as incomplete below.
+        if (userStopped || clientCancelled || aborter.signal.aborted) {
           await persist(stoppedPlaceholder, "interrupted");
           logInfo("research.interrupted", { requestId, durationMs: durationMs(), ...researchUsagePolicyFields() });
           enqueue("status", { status: "interrupted" });
           return;
+        }
+
+        // Gather deadline (or other non-user interrupt) with evidence → treat as incomplete for synthesis.
+        if (
+          research.status === "interrupted" &&
+          research.metrics.incompleteReason === "gather_deadline" &&
+          research.evidence.length > 0 &&
+          research.web.length > 0
+        ) {
+          research = { ...research, status: "incomplete" };
         }
 
         // Empty collection: hard-fail. Never reserve credits or synthesize a "research" answer.

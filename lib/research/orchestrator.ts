@@ -56,6 +56,8 @@ export type RunDeepResearchOptions = {
   searchProvider: WebSearchProvider | null;
   fetchPage?: typeof fetchWebPage;
   onProgress?: (stage: ResearchProgressStage) => void;
+  /** Override gather wall-clock (tests). Defaults to RESEARCH_GATHER_DEADLINE_MS. */
+  gatherDeadlineMs?: number;
 };
 
 function emptyMetrics(partial: Partial<ResearchRunMetrics> = {}): ResearchRunMetrics {
@@ -123,7 +125,7 @@ export async function runDeepResearch(
   }
 
   // Wall-clock gather deadline so plan+search+fetch fit under route maxDuration with room for synthesis.
-  const gatherGate = linkGatherDeadline(opts.signal, RESEARCH_GATHER_DEADLINE_MS);
+  const gatherGate = linkGatherDeadline(opts.signal, opts.gatherDeadlineMs ?? RESEARCH_GATHER_DEADLINE_MS);
   const gatherSignal = gatherGate.signal;
 
   progress("planning");
@@ -140,16 +142,18 @@ export async function runDeepResearch(
   } catch (error) {
     if (opts.signal.aborted || gatherSignal.aborted || (error instanceof ResearchPlanError && error.reason === "aborted")) {
       gatherGate.clear();
+      const timedOut = gatherGate.timedOut();
+      // Gather deadline without evidence is a failed run, not user Stop.
       return {
         ...base(),
-        status: "interrupted",
-        incompleteNotice: gatherGate.timedOut()
+        status: timedOut ? "failed" : "interrupted",
+        incompleteNotice: timedOut
           ? "Deep Research ran out of time while planning."
           : "Research was stopped during planning.",
         metrics: emptyMetrics({
           modelCallCount,
           durationMs: Date.now() - startedAt,
-          incompleteReason: gatherGate.timedOut() ? "gather_deadline" : undefined,
+          incompleteReason: timedOut ? "gather_deadline" : undefined,
         }),
       };
     }
@@ -160,18 +164,19 @@ export async function runDeepResearch(
 
   if (gatherSignal.aborted) {
     gatherGate.clear();
+    const timedOut = gatherGate.timedOut();
     return {
       ...base(),
-      status: "interrupted",
+      status: timedOut ? "failed" : "interrupted",
       plan,
-      incompleteNotice: gatherGate.timedOut()
+      incompleteNotice: timedOut
         ? "Deep Research ran out of time after planning."
         : "Research was stopped after planning.",
       metrics: emptyMetrics({
         modelCallCount,
         timeSensitive: plan.timeSensitive,
         durationMs: Date.now() - startedAt,
-        incompleteReason: gatherGate.timedOut() ? "gather_deadline" : undefined,
+        incompleteReason: timedOut ? "gather_deadline" : undefined,
       }),
     };
   }
@@ -191,11 +196,22 @@ export async function runDeepResearch(
 
   if (gatherSignal.aborted) {
     gatherGate.clear();
+    const timedOut = gatherGate.timedOut();
+    const evidence = initial.sources.map((s) => extractEvidenceChunk(s));
+    const web = evidenceToWebContext(evidence);
+    const status = !timedOut
+      ? "interrupted"
+      : evidence.length > 0 && web.length > 0
+        ? "incomplete"
+        : "failed";
     return {
       ...base(),
-      status: "interrupted",
+      status,
       plan,
-      incompleteNotice: gatherGate.timedOut()
+      evidence,
+      web,
+      contradictions: detectContradictions(evidence),
+      incompleteNotice: timedOut
         ? "Deep Research ran out of time while searching."
         : "Research was stopped while searching.",
       metrics: emptyMetrics({
@@ -205,9 +221,10 @@ export async function runDeepResearch(
         pagesFetched: initial.pagesFetched,
         pagesFailed: initial.pagesFailed,
         candidateUrlCount: initial.candidateUrlCount,
+        evidenceCount: evidence.length,
         timeSensitive: plan.timeSensitive,
         durationMs: Date.now() - startedAt,
-        incompleteReason: gatherGate.timedOut() ? "gather_deadline" : undefined,
+        incompleteReason: timedOut ? "gather_deadline" : undefined,
       }),
     };
   }
@@ -247,14 +264,22 @@ export async function runDeepResearch(
 
   if (opts.signal.aborted || gatherGate.timedOut()) {
     const evidence = gathered.sources.map((s) => extractEvidenceChunk(s));
+    const web = evidenceToWebContext(evidence);
+    const timedOut = gatherGate.timedOut();
+    // Gather deadline with evidence → incomplete (synthesize); without → failed. User abort → interrupted.
+    const status = !timedOut
+      ? "interrupted"
+      : evidence.length > 0 && web.length > 0
+        ? "incomplete"
+        : "failed";
     return {
       ...base(),
-      status: "interrupted",
+      status,
       plan,
       evidence,
-      web: evidenceToWebContext(evidence),
+      web,
       contradictions: detectContradictions(evidence),
-      incompleteNotice: gatherGate.timedOut()
+      incompleteNotice: timedOut
         ? "Deep Research ran out of time before synthesis."
         : "Research was stopped before synthesis.",
       metrics: emptyMetrics({
@@ -268,7 +293,7 @@ export async function runDeepResearch(
         followUpUsed,
         timeSensitive: plan.timeSensitive,
         durationMs: Date.now() - startedAt,
-        incompleteReason: gatherGate.timedOut() ? "gather_deadline" : undefined,
+        incompleteReason: timedOut ? "gather_deadline" : undefined,
       }),
     };
   }

@@ -1446,6 +1446,49 @@ describe("POST /api/chat", () => {
       expect(stream).not.toHaveBeenCalled();
       expect(researchMocks.runDeepResearch).toHaveBeenCalledOnce();
     });
+
+    it("synthesizes as incomplete on gather_deadline with evidence (not Stopped)", async () => {
+      const writes: unknown[] = [];
+      readyClient(writes);
+      webMocks.getWebSearchProvider.mockReturnValue({ id: "tavily", searchWeb: vi.fn() });
+      researchMocks.runDeepResearch.mockResolvedValue({
+        status: "interrupted",
+        plan: {
+          normalizedQuestion: "Compare options",
+          subquestions: ["a"],
+          initialQueries: ["a"],
+          timeSensitive: false,
+          notes: "",
+        },
+        evidence: [{ ...researchWeb }],
+        web: [researchWeb],
+        contradictions: [],
+        incompleteNotice: "Deep Research ran out of time before synthesis.",
+        usagePolicy: { id: "temporary_undercount_v1", summary: "test" },
+        metrics: {
+          modelCallCount: 1,
+          searchQueryCount: 2,
+          searchResultCount: 3,
+          pagesFetched: 1,
+          pagesFailed: 0,
+          candidateUrlCount: 2,
+          evidenceCount: 1,
+          followUpUsed: false,
+          durationMs: 70_000,
+          timeSensitive: false,
+          incompleteReason: "gather_deadline",
+        },
+      });
+      stream.mockResolvedValue(providerChunks(["Partial findings [SOURCE:web:1]."], "stop"));
+      const response = await POST(deepRequest());
+      expect(response.status).toBe(200);
+      const events = await Array.fromAsync(readChatSse(response.body!));
+      expect(events.slice(-2)).toEqual([{ type: "status", status: "complete" }, { type: "done" }]);
+      expect(usageReserve).toHaveBeenCalled();
+      expect(stream).toHaveBeenCalledOnce();
+      expect(writes).toContainEqual(expect.objectContaining({ content: "Partial findings [1].", status: "complete" }));
+      expect(writes).not.toContainEqual(expect.objectContaining({ content: "Response stopped.", status: "interrupted" }));
+    });
   });
 
   describe("thread summary", () => {

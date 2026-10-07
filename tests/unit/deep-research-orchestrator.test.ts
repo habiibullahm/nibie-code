@@ -150,6 +150,62 @@ describe("deep research orchestrator", () => {
     expect(result.status).toBe("interrupted");
   });
 
+  it("marks gather deadline with evidence as incomplete (not interrupted/Stop)", async () => {
+    const planJson = JSON.stringify({
+      normalizedQuestion: "Slow gather",
+      subquestions: ["a"],
+      initialQueries: ["postgresql jsonb"],
+      timeSensitive: false,
+      notes: "",
+    });
+    const chatProvider: ChatProvider = {
+      stream: vi.fn(async () => sseBody(planJson)),
+    };
+    const searchProvider: WebSearchProvider = {
+      id: "tavily",
+      searchWeb: vi.fn(async (_query, opts: { maxResults: number; signal: AbortSignal }) => {
+        // Hold until gather deadline aborts, then return a hit; snippet fill keeps evidence after fetch abort.
+        await new Promise<void>((resolve) => {
+          if (opts.signal.aborted) resolve();
+          else opts.signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+        return [
+          {
+            title: MOCK_RESEARCH_PAGES.postgresDocs.title,
+            url: MOCK_RESEARCH_PAGES.postgresDocs.url,
+            snippet: "PostgreSQL jsonb evidence after deadline.",
+            rank: 1,
+            domain: MOCK_RESEARCH_PAGES.postgresDocs.domain,
+          },
+        ];
+      }),
+    };
+    const fetchPage = vi.fn(async (_url: string, opts?: { signal?: AbortSignal }) => {
+      if (opts?.signal?.aborted) throw Object.assign(new Error("aborted"), { category: "timeout" });
+      return {
+        finalUrl: MOCK_RESEARCH_PAGES.postgresDocs.url,
+        contentType: "text/html",
+        body: MOCK_RESEARCH_PAGES.postgresDocs.body,
+      };
+    });
+
+    const result = await runDeepResearch({
+      question: "Compare PostgreSQL JSON",
+      signal: new AbortController().signal,
+      chatProvider,
+      planMode: "Fast",
+      searchProvider,
+      fetchPage: fetchPage as never,
+      gatherDeadlineMs: 25,
+    });
+
+    expect(result.status).toBe("incomplete");
+    expect(result.status).not.toBe("interrupted");
+    expect(result.evidence.length).toBeGreaterThan(0);
+    expect(result.metrics.incompleteReason).toBe("gather_deadline");
+    expect(result.incompleteNotice).toMatch(/ran out of time/i);
+  });
+
   it("fails transparently when search provider is missing", async () => {
     const result = await runDeepResearch({
       question: "Anything",
