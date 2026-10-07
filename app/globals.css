@@ -358,9 +358,9 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .message-author { display: flex; align-items: center; gap: 6px; min-height: 18px; margin: 0 0 8px; color: var(--text-3); font-size: 12px; font-weight: 600; }
 .message-author:empty { display: none; }
 .message-content.assistant > .message-author .message-time { margin-left: 0; }
-/* Before the first token: one quiet dash pulsing by opacity only. It is removed as soon as text arrives; streaming has no motion. */
+/* Before the first token: three quiet dots pulsing by opacity only. It is removed as soon as text arrives; streaming has no motion. */
 .response-waiting { display: flex; align-items: center; gap: 10px; min-height: 27px; }
-.response-thinking { flex: none; width: 18px; height: 2px; border-radius: 999px; background: var(--text-4); animation: nibie-thinking 1.3s ease-in-out infinite; }
+.response-thinking { flex: none; color: var(--text-4); font-size: 16px; line-height: 1; letter-spacing: 2px; animation: nibie-thinking 1.2s ease-in-out infinite; }
 @keyframes nibie-thinking { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .response-thinking { animation: none; opacity: .7; } }
 .message-status.is-danger { color: var(--danger); }
