@@ -980,22 +980,32 @@ describe("Supabase row-level security", () => {
   });
 
   it("keeps message_research owner-scoped and rejects cross-user reads and writes", async () => {
+    // Fresh conversations — suite conversationA may already be gone after export/delete-all.
+    const owner = randomUUID();
+    const stranger = randomUUID();
+    const thread = randomUUID();
+    const strangerThread = randomUUID();
+    const assistantOwn = randomUUID();
+    const assistantStranger = randomUUID();
+
     expect(await sql`select relrowsecurity, relforcerowsecurity from pg_class where oid = 'public.message_research'::regclass`).toEqual([
       { relrowsecurity: true, relforcerowsecurity: true },
     ]);
 
-    const assistantA = randomUUID();
-    const assistantB = randomUUID();
+    await sql`insert into auth.users (id) values (${owner}), (${stranger})`;
+    await sql`insert into public.conversations (id, user_id, title) values
+      (${thread}, ${owner}, 'Research owner'),
+      (${strangerThread}, ${stranger}, 'Research stranger')`;
     await sql`insert into public.messages (id, conversation_id, user_id, role, content, status, position) values
-      (${assistantA}, ${conversationA}, ${userA}, 'assistant', 'research a', 'complete', 2),
-      (${assistantB}, ${conversationB}, ${userB}, 'assistant', 'research b', 'complete', 2)`;
+      (${assistantOwn}, ${thread}, ${owner}, 'assistant', 'research a', 'complete', 1),
+      (${assistantStranger}, ${strangerThread}, ${stranger}, 'assistant', 'research b', 'complete', 1)`;
 
-    await asUser(userA, (tx) => tx`
+    await asUser(owner, (tx) => tx`
       insert into public.message_research (
         message_id, user_id, conversation_id, status, follow_up_used,
         search_query_count, pages_fetched, evidence_count, model_call_count, duration_ms, usage_policy
       ) values (
-        ${assistantA}, ${userA}, ${conversationA}, 'complete', false,
+        ${assistantOwn}, ${owner}, ${thread}, 'complete', false,
         2, 1, 2, 2, 1200, 'temporary_undercount_v1'
       )
     `);
@@ -1004,34 +1014,36 @@ describe("Supabase row-level security", () => {
         message_id, user_id, conversation_id, status, follow_up_used,
         search_query_count, pages_fetched, evidence_count, model_call_count, duration_ms, usage_policy
       ) values (
-        ${assistantB}, ${userB}, ${conversationB}, 'complete', true,
+        ${assistantStranger}, ${stranger}, ${strangerThread}, 'complete', true,
         3, 2, 3, 2, 2400, 'temporary_undercount_v1'
       )
     `;
 
-    const visible = await asUser(userA, (tx) => tx`select message_id, status, evidence_count from public.message_research`);
-    expect(visible).toEqual([{ message_id: assistantA, status: "complete", evidence_count: 2 }]);
+    const visible = await asUser(owner, (tx) => tx`
+      select message_id, status, evidence_count from public.message_research where conversation_id = ${thread}
+    `);
+    expect(visible).toEqual([{ message_id: assistantOwn, status: "complete", evidence_count: 2 }]);
 
-    await expect(asUser(userA, (tx) => tx`
+    await expect(asUser(owner, (tx) => tx`
       insert into public.message_research (
         message_id, user_id, conversation_id, status
-      ) values (${assistantB}, ${userA}, ${conversationB}, 'failed')
+      ) values (${assistantStranger}, ${owner}, ${strangerThread}, 'failed')
     `)).rejects.toThrow();
 
-    const hiddenUpdate = await asUser(userA, (tx) => tx`
-      update public.message_research set status = 'failed' where message_id = ${assistantB} returning message_id
+    const hiddenUpdate = await asUser(owner, (tx) => tx`
+      update public.message_research set status = 'failed' where message_id = ${assistantStranger} returning message_id
     `);
-    const hiddenDelete = await asUser(userA, (tx) => tx`
-      delete from public.message_research where message_id = ${assistantB} returning message_id
+    const hiddenDelete = await asUser(owner, (tx) => tx`
+      delete from public.message_research where message_id = ${assistantStranger} returning message_id
     `);
     expect(hiddenUpdate).toHaveLength(0);
     expect(hiddenDelete).toHaveLength(0);
 
-    const [stillPrivate] = await sql`select status, evidence_count from public.message_research where message_id = ${assistantB}`;
+    const [stillPrivate] = await sql`select status, evidence_count from public.message_research where message_id = ${assistantStranger}`;
     expect(stillPrivate).toEqual({ status: "complete", evidence_count: 3 });
 
-    await asUser(userA, (tx) => tx`delete from public.messages where id = ${assistantA}`);
-    expect(await sql`select message_id from public.message_research where message_id = ${assistantA}`).toHaveLength(0);
-    expect(await sql`select message_id from public.message_research where message_id = ${assistantB}`).toHaveLength(1);
+    await asUser(owner, (tx) => tx`delete from public.messages where id = ${assistantOwn}`);
+    expect(await sql`select message_id from public.message_research where message_id = ${assistantOwn}`).toHaveLength(0);
+    expect(await sql`select message_id from public.message_research where message_id = ${assistantStranger}`).toHaveLength(1);
   });
 });
