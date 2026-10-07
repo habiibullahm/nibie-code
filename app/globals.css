@@ -502,6 +502,10 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .markdown.is-streaming { white-space: pre-wrap; }
 .markdown > :first-child { margin-top: 0; }
 .markdown > :last-child { margin-bottom: 0; }
+/* Streaming caret: neutral, only after a text block (not code or tables), static under reduced motion. */
+.markdown.has-caret > :is(p, h1, h2, h3, h4, blockquote):last-child::after, .markdown.has-caret > :is(ul, ol):last-child > li:last-child::after { content: ""; display: inline-block; width: 2px; height: 1.05em; margin-left: 3px; border-radius: 1px; vertical-align: -.17em; background: var(--text-3); animation: response-caret 1.1s steps(2, jump-none) infinite; }
+@keyframes response-caret { from { opacity: 1; } to { opacity: .2; } }
+@media (prefers-reduced-motion: reduce) { .markdown.has-caret :is(p, h1, h2, h3, h4, blockquote, li)::after { animation: none; } }
 /* Inherit the answer size: the generic .message-content p rule is for user bubbles and plain text. */
 .markdown p { margin: 0 0 var(--md-gap); font-size: inherit; line-height: inherit; white-space: normal; }
 /* Models are asked for ## and ###; a stray # renders no larger than ##. */

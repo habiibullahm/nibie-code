@@ -80,7 +80,7 @@ export const MessageRow = memo(function MessageRow({ message, initial, isLast, i
           <MessageTime value={message.created_at} />
           {message.status === "streaming" ? <span className="visually-hidden" role="status">{responseStatus}</span> : null}
         </div>
-        {waiting ? (message.researchStage ? <span className="research-wait"><span className="research-stage">{RESEARCH_STAGE_LABELS[message.researchStage]}</span></span> : null) : <MessageMarkdown content={message.content} sources={message.sources} />}
+        {waiting ? (message.researchStage ? <span className="research-wait"><span className="research-stage">{RESEARCH_STAGE_LABELS[message.researchStage]}</span></span> : null) : <MessageMarkdown content={message.content} sources={message.sources} streaming={message.status === "streaming"} />}
         {message.sources?.length && !waiting ? <MessageSources sources={message.sources} /> : null}
         {(canCopy || canRegenerate || canRetry) && <div className="message-actions">
           {canCopy && <CopyButton text={message.content} label="Copy response" />}
