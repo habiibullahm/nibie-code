@@ -10,6 +10,7 @@ import {
   pickHeadPreviewDeployment,
   readVercelProject,
   resolvePreviewDeployment,
+  fetchVercelOidcToken,
   runQaSmoke,
   verifyVercelAccess,
 } from "../../scripts/qa-preview-smoke.mjs";
@@ -322,6 +323,40 @@ describe("resolvePreviewDeployment", () => {
         log: silentLog,
       }),
     ).rejects.toThrow(/Timed out after 120s/);
+  });
+});
+
+describe("fetchVercelOidcToken", () => {
+  it("returns VERCEL_OIDC_TOKEN from env-pull payload", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ env: { VERCEL_OIDC_TOKEN: "oidc-test-token", OTHER: "nope" } }),
+      text: async () => "",
+    }));
+
+    const oidc = await fetchVercelOidcToken({
+      token: "tok",
+      orgId: "team_x",
+      projectId: "prj_x",
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+    expect(oidc).toBe("oidc-test-token");
+    const calledUrl = String(fetchMock.mock.calls.at(0)?.at(0) ?? "");
+    expect(calledUrl).toContain("/v3/env/pull/prj_x/preview");
+  });
+
+  it("fails when OIDC is missing from the pull payload", async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ env: { OTHER: "x" } }),
+      text: async () => "",
+    })) as unknown as typeof fetch;
+
+    await expect(
+      fetchVercelOidcToken({ token: "tok", projectId: "prj_x", fetchImpl }),
+    ).rejects.toThrow(/VERCEL_OIDC_TOKEN was missing/);
   });
 });
 

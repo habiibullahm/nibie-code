@@ -207,6 +207,49 @@ export async function verifyVercelAccess({
 }
 
 /**
+ * Fetch a short-lived VERCEL_OIDC_TOKEN via the env-pull API.
+ * Prefer this over `vercel env run` for Cloud project tokens (vcp_*) that
+ * cannot resolve CLI user/team identity. Never logs the token value.
+ *
+ * @param {{
+ *   token: string,
+ *   orgId?: string,
+ *   projectId: string,
+ *   environment?: string,
+ *   fetchImpl?: typeof fetch,
+ * }} options
+ * @returns {Promise<string>}
+ */
+export async function fetchVercelOidcToken({
+  token,
+  orgId,
+  projectId,
+  environment = "preview",
+  fetchImpl = fetch,
+} = {}) {
+  if (!token?.trim()) throw new Error("fetchVercelOidcToken requires token");
+  if (!projectId?.trim()) throw new Error("fetchVercelOidcToken requires projectId");
+
+  const params = new URLSearchParams({ source: "vercel-cli:pull" });
+  if (orgId) params.set("teamId", orgId);
+  const url = `https://api.vercel.com/v3/env/pull/${encodeURIComponent(projectId)}/${encodeURIComponent(environment)}?${params}`;
+  const response = await fetchImpl(url, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+  });
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Vercel OIDC pull failed (${response.status}): ${body.slice(0, 160) || response.statusText}`);
+  }
+  const payload = await response.json();
+  const envMap = payload?.env && typeof payload.env === "object" ? payload.env : payload;
+  const oidc = typeof envMap?.VERCEL_OIDC_TOKEN === "string" ? envMap.VERCEL_OIDC_TOKEN.trim() : "";
+  if (!oidc || oidc === "[SENSITIVE]") {
+    throw new Error("Vercel OIDC pull succeeded but VERCEL_OIDC_TOKEN was missing");
+  }
+  return oidc;
+}
+
+/**
  * Pick the preview deployment for the exact HEAD SHA.
  * Never returns production, even when production shares the SHA.
  * When several previews match, prefer the newest createdAt.
@@ -370,15 +413,20 @@ export function runQaSmoke({
   const script = fileURLToPath(new URL("./qa-smoke.mjs", import.meta.url));
   const childEnv = { ...env, E2E_BASE_URL: baseUrl.trim() };
 
-  // Protected previews need short-lived VERCEL_OIDC_TOKEN. Prefer wrapping with
-  // `vercel env run` when a token is available and OIDC is not already present.
-  const needsOidc =
+  // Optional escape hatch: wrap with `vercel env run` when explicitly requested.
+  // Prefer injecting VERCEL_OIDC_TOKEN via fetchVercelOidcToken in main() — Cloud
+  // project tokens (vcp_*) can pull OIDC over the API but often fail `env run`
+  // because /v2/user and /teams are unavailable.
+  const wrapWithEnvRun =
     useVercelEnvRun ||
-    (/vercel\.app$/i.test(new URL(baseUrl).hostname) && !childEnv.VERCEL_OIDC_TOKEN?.trim() && Boolean(childEnv.VERCEL_TOKEN?.trim()));
+    (childEnv.QA_PREVIEW_USE_VERCEL_ENV_RUN === "1" &&
+      /vercel\.app$/i.test(new URL(baseUrl).hostname) &&
+      !childEnv.VERCEL_OIDC_TOKEN?.trim() &&
+      Boolean(childEnv.VERCEL_TOKEN?.trim()));
 
   let command = execPath;
   let args = [script, ...argv];
-  if (needsOidc) {
+  if (wrapWithEnvRun) {
     command = process.platform === "win32" ? "npx.cmd" : "npx";
     args = ["--yes", "vercel@latest", "env", "run", "--", execPath, script, ...argv];
   }
@@ -427,11 +475,30 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
   log.info?.(
     `[qa:preview] READY deployment=${resolved.deploymentId} url=${resolved.url} git=${resolved.deploymentSha} env=${resolved.environment}`,
   );
+
+  const smokeEnv = { ...env, VERCEL_TOKEN: token };
+  const previewHost = (() => {
+    try {
+      return new URL(resolved.url).hostname;
+    } catch {
+      return "";
+    }
+  })();
+  if (/vercel\.app$/i.test(previewHost) && !smokeEnv.VERCEL_OIDC_TOKEN?.trim()) {
+    log.info?.("[qa:preview] fetching short-lived VERCEL_OIDC_TOKEN for protected preview");
+    smokeEnv.VERCEL_OIDC_TOKEN = await (deps.fetchOidc || fetchVercelOidcToken)({
+      token,
+      orgId: project.orgId,
+      projectId: project.projectId,
+      fetchImpl: deps.fetchImpl,
+    });
+  }
+
   log.info?.(`[qa:preview] running test:qa:smoke against ${resolved.url}`);
   const status = (deps.runSmoke || runQaSmoke)({
     baseUrl: resolved.url,
     argv,
-    env: { ...env, VERCEL_TOKEN: token },
+    env: smokeEnv,
     spawn: deps.spawn || spawnSync,
   });
   return status;

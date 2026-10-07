@@ -35,7 +35,7 @@ Provide secrets via Cursor Cloud / CI secret store or a gitignored local env fil
 5. Ignore production deployments even when they share the SHA.
 6. Poll every ~7s (max ~5 min). `ERROR` / `CANCELED` fail immediately. Timeout fails clearly.
 7. Prefer the immutable `https://<deployment>.vercel.app` URL; require READY + preview + SHA match.
-8. Spawn `test:qa:smoke` with `E2E_BASE_URL` in the child env only. For protected previews, wrap with `vercel env run` when `VERCEL_OIDC_TOKEN` is absent so short-lived OIDC is injected. Safe logs include commit, deployment id, url, and state — never passwords, OIDC, or API keys.
+8. For protected previews, pull short-lived `VERCEL_OIDC_TOKEN` via the env-pull API when absent, then spawn `test:qa:smoke` with `E2E_BASE_URL` (and OIDC) in the child env only. Safe logs include commit, deployment id, url, and state — never passwords, OIDC, or API keys.
 
 ```bash
 # Cloud Agents: set VERCEL_ORG_ID, VERCEL_PROJECT_ID, VERCEL_TOKEN, E2E_USER_* secrets, then:
@@ -45,13 +45,15 @@ npm run test:qa:preview
 vc env run -- npm run test:qa:preview
 ```
 
-`vercel env run` supplies short-lived `VERCEL_OIDC_TOKEN` for Deployment Protection. `VERCEL_TOKEN` is still required so the resolver can list deployments.
+`test:qa:preview` pulls a short-lived `VERCEL_OIDC_TOKEN` from the Vercel env-pull API (same source as `vercel pull`) and injects it into the smoke child only. That path works with Cloud project tokens that can list deployments but cannot call `/v2/user` (so `vc whoami` / `vercel env run` may fail). `VERCEL_TOKEN` is still required so the resolver can list deployments. Optional escape hatch: set `QA_PREVIEW_USE_VERCEL_ENV_RUN=1` to wrap smoke with `vercel env run` instead.
 
 Diagnose CLI identity with:
 
 ```bash
 vc whoami
 ```
+
+Project tokens may return “User not found” for `whoami`; project + deployments API access is enough for preview resolve + OIDC pull.
 
 ## Protected Vercel previews (low-level)
 
