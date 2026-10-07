@@ -24,6 +24,7 @@ export const preferenceModel = pgEnum("preference_model", ["fast", "balanced", "
 export const responseLength = pgEnum("response_length", ["concise", "balanced", "detailed"]);
 export const responseStyle = pgEnum("response_style", ["natural", "professional", "direct"]);
 export const weeklyUsageMode = pgEnum("weekly_usage_mode", ["Fast", "Balanced", "High"]);
+export const memoryType = pgEnum("memory_type", ["preference", "project", "instruction", "fact"]);
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey(),
@@ -310,6 +311,7 @@ export const userPreferences = pgTable(
     responseLength: responseLength("response_length").notNull().default("balanced"),
     responseStyle: responseStyle("response_style").notNull().default("natural"),
     aboutYou: text("about_you"),
+    recallEnabled: boolean("recall_enabled").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
   },
@@ -322,6 +324,40 @@ export const userPreferences = pgTable(
       "user_preferences_about_you_length",
       sql`${table.aboutYou} is null or (char_length(${table.aboutYou}) between 1 and 1500 and ${table.aboutYou} = btrim(${table.aboutYou}))`,
     ),
+  ],
+);
+
+// Explicit cross-conversation memories. Owner-scoped; never shared across users.
+export const memories = pgTable(
+  "memories",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    type: memoryType("type").notNull(),
+    content: text("content").notNull(),
+    normalizedKey: text("normalized_key").notNull(),
+    sourceConversationId: uuid("source_conversation_id"),
+    sourceMessageId: uuid("source_message_id"),
+    isActive: boolean("is_active").notNull().default(true),
+    embedding: vector("embedding", { dimensions: 512 }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    unique("memories_id_user_id_key").on(table.id, table.userId),
+    unique("memories_user_key_unique").on(table.userId, table.normalizedKey),
+    index("memories_user_active_idx").on(table.userId, table.isActive),
+    index("memories_user_updated_idx").on(table.userId, table.updatedAt, table.id),
+    index("memories_embedding_hnsw_idx").using("hnsw", table.embedding.op("vector_cosine_ops")),
+    foreignKey({
+      name: "memories_conversation_owner_fk",
+      columns: [table.sourceConversationId, table.userId],
+      foreignColumns: [conversations.id, conversations.userId],
+    }).onDelete("set null"),
+    check("memories_content_length", sql`char_length(${table.content}) between 1 and 1000 and ${table.content} = btrim(${table.content})`),
+    check("memories_normalized_key_length", sql`char_length(${table.normalizedKey}) between 1 and 200 and ${table.normalizedKey} = btrim(${table.normalizedKey})`),
+    check("memories_embedding_nonzero", sql`${table.embedding} IS NULL OR vector_norm(${table.embedding}) > 0`),
   ],
 );
 
