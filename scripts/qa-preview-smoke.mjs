@@ -155,6 +155,15 @@ export function immutableDeploymentUrl(deployment) {
 /**
  * Confirm the token can call Vercel and the configured project is the expected nibie project.
  * Never logs the token.
+ *
+ * @param {{
+ *   token?: string,
+ *   orgId?: string,
+ *   projectId?: string,
+ *   fetchImpl?: typeof fetch,
+ *   expectedProjectName?: string,
+ * }} [options]
+ * @returns {Promise<{ username: string, projectName: string, projectId?: string, orgId?: string }>}
  */
 export async function verifyVercelAccess({
   token,
