@@ -31,7 +31,7 @@ describe("GET /api/usage", () => {
 
   it("fails closed on missing, invalid, or impossible database usage data", async () => {
     rpc.mockReturnValue({ maybeSingle: vi.fn().mockResolvedValue({
-      data: { credits_used: 101, credits_remaining: -1, reset_at: "not a date" }, error: null,
+      data: { credits_used: 501, credits_remaining: -1, reset_at: "not a date" }, error: null,
     }) });
     const response = await GET();
     expect(response.status).toBe(503);

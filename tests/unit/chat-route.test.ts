@@ -114,7 +114,7 @@ describe("POST /api/chat", () => {
     claim.mockReset().mockReturnValue(query({ data: assistant, error: null }));
     usageReserve.mockReset().mockImplementation(({ p_logical_mode }: { p_logical_mode: "Fast" | "Balanced" | "High" }) => {
       const credits_charged = { Fast: 1, Balanced: 3, High: 6 }[p_logical_mode];
-      return query({ data: { accepted: true, credits_charged, credits_used: credits_charged, credits_remaining: 100 - credits_charged, reset_at: "2026-10-05T00:00:00.000Z" }, error: null });
+      return query({ data: { accepted: true, credits_charged, credits_used: credits_charged, credits_remaining: 500 - credits_charged, reset_at: "2026-10-05T00:00:00.000Z" }, error: null });
     });
     usageRelease.mockReset().mockImplementation(() => query({ data: true, error: null }));
     usageStart.mockReset().mockImplementation(() => query({ data: true, error: null }));
@@ -273,7 +273,7 @@ describe("POST /api/chat", () => {
   it("rejects an exhausted allowance with a stable code and never calls the provider", async () => {
     const writes: unknown[] = [];
     readyClient(writes);
-    usageReserve.mockReturnValue(query({ data: { accepted: false, credits_charged: 0, credits_used: 100, credits_remaining: 0, reset_at: "2026-10-05T00:00:00.000Z" }, error: null }));
+    usageReserve.mockReturnValue(query({ data: { accepted: false, credits_charged: 0, credits_used: 500, credits_remaining: 0, reset_at: "2026-10-05T00:00:00.000Z" }, error: null }));
     const response = await POST(validRequest());
     expect(response.status).toBe(429);
     expect(await response.json()).toEqual({

@@ -71,7 +71,7 @@ describe("new chat room persistence and server context", () => {
     const rpc = vi.fn((name: string) => query(name === "append_user_message"
       ? { id: messageId, position: 1 }
       : name === "reserve_weekly_ai_usage"
-        ? { accepted: true, credits_charged: 3, credits_used: 3, credits_remaining: 97, reset_at: "2026-10-05T00:00:00.000Z" }
+        ? { accepted: true, credits_charged: 3, credits_used: 3, credits_remaining: 497, reset_at: "2026-10-05T00:00:00.000Z" }
         : name === "start_weekly_ai_usage"
           ? true
         : { id: assistantId, position: 2, content: "", status: "streaming", replayed: false }));
@@ -132,7 +132,7 @@ describe("new chat room persistence and server context", () => {
       throw new Error(`Unexpected table: ${table}`);
     });
     createClient.mockResolvedValue({ auth, from, rpc: (name: string) => query(name === "reserve_weekly_ai_usage"
-      ? { accepted: true, credits_charged: 3, credits_used: 3, credits_remaining: 97, reset_at: "2026-10-05T00:00:00.000Z" }
+      ? { accepted: true, credits_charged: 3, credits_used: 3, credits_remaining: 497, reset_at: "2026-10-05T00:00:00.000Z" }
       : name === "start_weekly_ai_usage" ? true : { id: assistantId, position: 3, content: "", status: "streaming", replayed: false }) });
     for (const target of [roomId, roomB, null]) {
       from.mockClear(); reads = 0; stream.mockClear();
