@@ -118,8 +118,8 @@ jobs:
               const rows = await sql`
                 select 1 as ok
                 from information_schema.tables
-                where table_schema = 'public'
-                  and table_name = 'action_runs'
+                where table_schema = ${"public"}
+                  and table_name = ${"action_runs"}
                 limit 1
               `;
               if (!rows.length) {
