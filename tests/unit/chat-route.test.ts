@@ -37,17 +37,30 @@ const { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc
       builder.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data: null, error: null }).then(resolve);
       return builder;
     };
+    const messageResearch = () => {
+      const builder: Record<string, unknown> = {};
+      builder.upsert = () => builder;
+      builder.insert = () => builder;
+      builder.select = () => builder;
+      builder.eq = () => builder;
+      builder.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data: null, error: null }).then(resolve);
+      return builder;
+    };
     return {
       ...value,
       from: (table: string) =>
         table === "message_attachments" ? none()
           : table === "message_sources" ? messageSources()
-            : table === "messages" ? messages()
-              : from(table),
+            : table === "message_research" ? messageResearch()
+              : table === "messages" ? messages()
+                : from(table),
     };
   };
   return { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc, modelOptions: vi.fn(), contextCapabilities: vi.fn(() => ({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 })), withoutAttachments, attachmentState, stopState, messageSourceInserts };
 });
+const researchMocks = vi.hoisted(() => ({
+  runDeepResearch: vi.fn(),
+}));
 const webMocks = vi.hoisted(() => {
   type WebSource = {
     url: string;
@@ -87,6 +100,7 @@ vi.mock("@/lib/web/routing", () => ({ decideWebSearch: webMocks.decideWebSearch 
 vi.mock("@/lib/web/config", () => ({ getWebSearchConfig: webMocks.getWebSearchConfig }));
 vi.mock("@/lib/web/provider", () => ({ getWebSearchProvider: webMocks.getWebSearchProvider }));
 vi.mock("@/lib/web/pipeline", () => ({ runWebSearchPipeline: webMocks.runWebSearchPipeline }));
+vi.mock("@/lib/research/orchestrator", () => ({ runDeepResearch: researchMocks.runDeepResearch }));
 const recallMocks = vi.hoisted(() => ({
   handleRecallTurn: vi.fn(async (): Promise<{ status: string; wrote: boolean; forgot: number; degraded: boolean }> => ({ status: "none", wrote: false, forgot: 0, degraded: false })),
   retrieveRelevantMemories: vi.fn(async (): Promise<{ memories: Array<Record<string, unknown>>; degraded: boolean }> => ({ memories: [], degraded: false })),
@@ -128,6 +142,7 @@ describe("POST /api/chat", () => {
     webMocks.runWebSearchPipeline.mockReset().mockResolvedValue({ sources: [], degraded: false, searchResultCount: 0, pagesFetched: 0 });
     recallMocks.handleRecallTurn.mockReset().mockResolvedValue({ status: "none", wrote: false, forgot: 0, degraded: false });
     recallMocks.retrieveRelevantMemories.mockReset().mockResolvedValue({ memories: [], degraded: false });
+    researchMocks.runDeepResearch.mockReset();
   });
   afterEach(() => vi.useRealTimers());
 
@@ -1323,6 +1338,156 @@ describe("POST /api/chat", () => {
       expect(prompt[1].content).toContain("<untrusted_web_content>");
       expect(prompt[1].content.indexOf("deploy pipeline uses Node LTS")).toBeLessThan(prompt[1].content.indexOf("<untrusted_web_content>"));
       expect(webMocks.decideWebSearch).toHaveBeenCalledWith(question, { hasRoomFileContext: true });
+    });
+  });
+
+  describe("deep research", () => {
+    const researchWeb = {
+      url: "https://docs.example.com/guide",
+      title: "Official guide",
+      domain: "docs.example.com",
+      retrieval: "web_search" as const,
+      publishedAt: "2026-01-01",
+      text: "Official documented behavior for the feature.",
+    };
+
+    function deepRequest() {
+      return new Request("http://localhost/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          conversationId: "5e9bdcca-9205-4fea-a773-13952bb78c44",
+          userMessageId: "b79e56e1-b479-46f4-97d3-30b2e22be90e",
+          deepResearch: true,
+        }),
+      });
+    }
+
+    it("emits progress stages and cited sources when Deep Research succeeds", async () => {
+      readyClient([]);
+      webMocks.getWebSearchProvider.mockReturnValue({ id: "tavily", searchWeb: vi.fn() });
+      researchMocks.runDeepResearch.mockResolvedValue({
+        status: "complete",
+        plan: {
+          normalizedQuestion: "Compare options",
+          subquestions: ["a", "b"],
+          initialQueries: ["a", "b"],
+          timeSensitive: false,
+          notes: "",
+        },
+        evidence: [{ ...researchWeb }],
+        web: [researchWeb],
+        contradictions: [],
+        incompleteNotice: null,
+        usagePolicy: { id: "temporary_undercount_v1", summary: "test" },
+        metrics: {
+          modelCallCount: 1,
+          searchQueryCount: 2,
+          searchResultCount: 4,
+          pagesFetched: 1,
+          pagesFailed: 0,
+          candidateUrlCount: 2,
+          evidenceCount: 1,
+          followUpUsed: false,
+          durationMs: 100,
+          timeSensitive: false,
+        },
+      });
+      stream.mockResolvedValue(providerChunks(["Findings with [SOURCE:web:1]."], "stop"));
+      const response = await POST(deepRequest());
+      expect(response.status).toBe(200);
+      const events = await Array.fromAsync(readChatSse(response.body!));
+      expect(events[0]).toMatchObject({ type: "start", research: true });
+      expect(events.some((e) => e.type === "sources")).toBe(true);
+      expect(events.some((e) => e.type === "progress" && e.stage === "synthesizing")).toBe(true);
+      expect(events.slice(-2)).toEqual([{ type: "status", status: "complete" }, { type: "done" }]);
+      expect(webMocks.decideWebSearch).not.toHaveBeenCalled();
+      expect(webMocks.runWebSearchPipeline).not.toHaveBeenCalled();
+      expect(researchMocks.runDeepResearch).toHaveBeenCalledOnce();
+      expect(usageReserve).toHaveBeenCalled();
+      expect(stream).toHaveBeenCalledOnce();
+    });
+
+    it("hard-fails empty collection without reserving credits or synthesizing", async () => {
+      readyClient([]);
+      webMocks.getWebSearchProvider.mockReturnValue({ id: "tavily", searchWeb: vi.fn() });
+      researchMocks.runDeepResearch.mockResolvedValue({
+        status: "failed",
+        plan: {
+          normalizedQuestion: "Obscure market share",
+          subquestions: [],
+          initialQueries: ["obscure saas"],
+          timeSensitive: true,
+          notes: "",
+        },
+        evidence: [],
+        web: [],
+        contradictions: [],
+        incompleteNotice: "Deep Research could not collect usable sources. Please try again later or switch to Normal.",
+        usagePolicy: { id: "temporary_undercount_v1", summary: "test" },
+        metrics: {
+          modelCallCount: 1,
+          searchQueryCount: 1,
+          searchResultCount: 0,
+          pagesFetched: 0,
+          pagesFailed: 0,
+          candidateUrlCount: 0,
+          evidenceCount: 0,
+          followUpUsed: true,
+          durationMs: 50,
+          timeSensitive: true,
+          incompleteReason: "empty",
+        },
+      });
+      const response = await POST(deepRequest());
+      expect(response.status).toBe(200);
+      await expect(Array.fromAsync(readChatSse(response.body!))).rejects.toThrow(/could not collect usable sources/i);
+      expect(usageReserve).not.toHaveBeenCalled();
+      expect(stream).not.toHaveBeenCalled();
+      expect(researchMocks.runDeepResearch).toHaveBeenCalledOnce();
+    });
+
+    it("synthesizes as incomplete on gather_deadline with evidence (not Stopped)", async () => {
+      const writes: unknown[] = [];
+      readyClient(writes);
+      webMocks.getWebSearchProvider.mockReturnValue({ id: "tavily", searchWeb: vi.fn() });
+      researchMocks.runDeepResearch.mockResolvedValue({
+        status: "interrupted",
+        plan: {
+          normalizedQuestion: "Compare options",
+          subquestions: ["a"],
+          initialQueries: ["a"],
+          timeSensitive: false,
+          notes: "",
+        },
+        evidence: [{ ...researchWeb }],
+        web: [researchWeb],
+        contradictions: [],
+        incompleteNotice: "Deep Research ran out of time before synthesis.",
+        usagePolicy: { id: "temporary_undercount_v1", summary: "test" },
+        metrics: {
+          modelCallCount: 1,
+          searchQueryCount: 2,
+          searchResultCount: 3,
+          pagesFetched: 1,
+          pagesFailed: 0,
+          candidateUrlCount: 2,
+          evidenceCount: 1,
+          followUpUsed: false,
+          durationMs: 70_000,
+          timeSensitive: false,
+          incompleteReason: "gather_deadline",
+        },
+      });
+      stream.mockResolvedValue(providerChunks(["Partial findings [SOURCE:web:1]."], "stop"));
+      const response = await POST(deepRequest());
+      expect(response.status).toBe(200);
+      const events = await Array.fromAsync(readChatSse(response.body!));
+      expect(events.slice(-2)).toEqual([{ type: "status", status: "complete" }, { type: "done" }]);
+      expect(usageReserve).toHaveBeenCalled();
+      expect(stream).toHaveBeenCalledOnce();
+      expect(writes).toContainEqual(expect.objectContaining({ content: "Partial findings [1].", status: "complete" }));
+      expect(writes).not.toContainEqual(expect.objectContaining({ content: "Response stopped.", status: "interrupted" }));
     });
   });
 

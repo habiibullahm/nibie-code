@@ -23,6 +23,9 @@ type Props = {
   mode: ChatModel;
   models: ModelOption[];
   onModelChange: (model: ChatModel) => void;
+  /** Explicit research control — orthogonal to Fast/Balanced/High. */
+  researchMode: "normal" | "deep";
+  onResearchModeChange: (mode: "normal" | "deep") => void;
   // True only while a mode change is being saved; the picker says so instead of claiming a response is running.
   savingMode: boolean;
   caption: string | null;
@@ -53,7 +56,7 @@ function fitCollapsedTextarea(element: HTMLTextAreaElement) {
 }
 
 // The draft lives here, not in the workspace: typing re-renders only this component, never the message list or sidebar.
-export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, streaming, mode, models, onModelChange, savingMode, caption, diagnostics, onEditProfile, onSubmit, onStop, onAttach, attachmentsEnabled = false, onRoomFiles, attachmentPanel = null, roomItems, roomId, roomLabel, roomSelectionNotice, roomsLoading, onRoomChange, centered = false }: Props) {
+export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, streaming, mode, models, onModelChange, researchMode, onResearchModeChange, savingMode, caption, diagnostics, onEditProfile, onSubmit, onStop, onAttach, attachmentsEnabled = false, onRoomFiles, attachmentPanel = null, roomItems, roomId, roomLabel, roomSelectionNotice, roomsLoading, onRoomChange, centered = false }: Props) {
   const [draft, setDraft] = useState("");
   const [expanded, setExpanded] = useState(false);
   const [canExpand, setCanExpand] = useState(false);
@@ -203,6 +206,10 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
   }
 
   const modelItems: MenuItem<ChatModel>[] = models.map((option) => ({ value: option.id, label: option.label, detail: option.credits === undefined ? option.description : `${option.description} · ${option.credits} credit${option.credits === 1 ? "" : "s"}` }));
+  const researchItems: MenuItem<"normal" | "deep">[] = [
+    { value: "normal", label: "Normal", detail: "Standard reply · web when needed" },
+    { value: "deep", label: "Deep Research", detail: "Multi-source gather · compare · cite · costs more" },
+  ];
   const hasDraft = draft.length > 0;
   const hasAttachments = attachments.items.length > 0 || Boolean(attachments.notice);
   const isActive = hasDraft || hasAttachments;
@@ -238,6 +245,7 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
       <div className="composer-left-tools">
         {onRoomChange ? <ComposerMenu name="Room" description="Choose where this conversation belongs." value={roomId} items={roomItems} onChange={onRoomChange} disabled={sending || streaming || roomsLoading} disabledReason={roomsLoading ? "Loading rooms" : "Message is being sent"} /> : <span className="composer-room-context" aria-label={`Room context: ${roomLabel}`} title={roomLabel}>{roomLabel}</span>}
         <ComposerMenu name="Model" value={mode} items={modelItems} onChange={onModelChange} disabled={sending || streaming || !models.length} disabledReason={!models.length ? "No models are configured" : savingMode ? "Saving…" : "A response is running"} />
+        <ComposerMenu name="Research" description="Choose how far Nibie should research before answering." value={researchMode} items={researchItems} onChange={onResearchModeChange} disabled={sending || streaming} disabledReason="A response is running" />
       </div>
     </div>
     {caption ? <p className="composer-caption" role="status">{caption}</p> : null}

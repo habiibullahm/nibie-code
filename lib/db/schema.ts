@@ -430,6 +430,41 @@ export const messageAttachments = pgTable(
   ],
 );
 
+// Deep Research V1 run metadata (counts/status only — no CoT or page text).
+export const messageResearch = pgTable(
+  "message_research",
+  {
+    messageId: uuid("message_id").primaryKey(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id").notNull(),
+    status: text("status").notNull(),
+    followUpUsed: boolean("follow_up_used").notNull().default(false),
+    searchQueryCount: integer("search_query_count").notNull().default(0),
+    searchResultCount: integer("search_result_count").notNull().default(0),
+    pagesFetched: integer("pages_fetched").notNull().default(0),
+    pagesFailed: integer("pages_failed").notNull().default(0),
+    evidenceCount: integer("evidence_count").notNull().default(0),
+    modelCallCount: integer("model_call_count").notNull().default(0),
+    durationMs: integer("duration_ms").notNull().default(0),
+    timeSensitive: boolean("time_sensitive").notNull().default(false),
+    usagePolicy: text("usage_policy").notNull().default("temporary_undercount_v1"),
+    incompleteReason: text("incomplete_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "message_research_message_owner_fk",
+      columns: [table.messageId, table.conversationId, table.userId],
+      foreignColumns: [messages.id, messages.conversationId, messages.userId],
+    }).onDelete("cascade"),
+    index("message_research_conversation_idx").on(table.conversationId, table.messageId),
+    check(
+      "message_research_status_check",
+      sql`${table.status} IN ('complete', 'interrupted', 'failed', 'incomplete')`,
+    ),
+  ],
+);
+
 // Citation metadata for an assistant message. Server-owned SourceReference rows so reload
 // does not re-run web search. Memory is never a citation source.
 export const messageSources = pgTable(

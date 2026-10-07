@@ -96,6 +96,15 @@ Open one `requestId` and read the earlier lines for that id.
 | `citation.sources.prepared` | Web (or future) sources were prepared as server-owned `SourceReference` rows. Fields: `sourceCount`, `requestId`. Never titles, URLs, or excerpts. |
 | `citation.references.parsed` | Stream/batch citation parse finished. Fields: `sourceCount`, `citationCount`, `requestId`. |
 | `citation.references.invalid` | Unknown or invented citation handles were dropped. Fields: `sourceCount`, `invalidCitationCount`, `requestId`. |
+| `research.started` | Explicit Deep Research run began. Fields: `requestId`, `researchUsagePolicy`. Never question text. |
+| `research.plan.completed` | Planner finished (or fallback). Fields: `subquestionCount`, `queryCount`, `timeSensitive`, `durationMs`. |
+| `research.search.completed` | Search round finished. Fields: `searchQueryCount`, `searchResultCount`, `candidateUrlCount`. |
+| `research.fetch.completed` | Page fetch round finished. Fields: `pagesFetched`, `pagesFailed`, `evidenceCount`. |
+| `research.followup.started` | Optional single follow-up round began. Fields: `followUpUsed`. |
+| `research.synthesis.started` | Cited synthesis stream began. Fields: `sourceCount`, `modelCallCount`, `researchUsagePolicy`. |
+| `research.completed` | Deep Research reply saved complete. Counts + `durationMs` + usage policy only. |
+| `research.interrupted` | User Stop / abort during research. |
+| `research.failed` | Transparent research failure. Fields: `category`, `code` `DEEP_RESEARCH_FAILED`. |
 
 Thread summary events never include message, summary, or provider text.
 

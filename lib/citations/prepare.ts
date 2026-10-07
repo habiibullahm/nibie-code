@@ -12,6 +12,8 @@ import type { CitationSourceView, SourceReference } from "@/lib/citations/types"
 import type { WebContextInput } from "@/lib/web/types";
 
 export const MAX_PREPARED_SOURCES = 5;
+/** Deep Research may prepare up to this many web sources (DB ordinal cap is 20). */
+export const MAX_RESEARCH_PREPARED_SOURCES = 10;
 
 /**
  * Build server-owned SourceReference rows from web pipeline outputs.
@@ -20,11 +22,13 @@ export const MAX_PREPARED_SOURCES = 5;
 export function prepareWebSourceReferences(
   inputs: readonly WebContextInput[],
   retrievedAt: Date = new Date(),
+  maxSources: number = MAX_PREPARED_SOURCES,
 ): SourceReference[] {
+  const limit = Math.min(20, Math.max(1, Math.trunc(maxSources)));
   const sources: SourceReference[] = [];
   const iso = retrievedAt.toISOString();
   for (const input of inputs) {
-    if (sources.length >= MAX_PREPARED_SOURCES) break;
+    if (sources.length >= limit) break;
     const url = sanitizeCitationUrl(input.url);
     if (!url) continue;
     const domain = sanitizeCitationDomain(input.domain, url);
