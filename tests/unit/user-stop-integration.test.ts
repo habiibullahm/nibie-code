@@ -62,7 +62,7 @@ function database(mode: string, options: { lateClaim?: boolean; failStopWrite?: 
     const run = async () => {
       if (name === "reserve_weekly_ai_usage") {
         const cost = weights[args.p_logical_mode] ?? 0; creditsUsed += cost;
-        return { data: { accepted: true, credits_charged: cost, credits_used: creditsUsed, credits_remaining: 100 - creditsUsed, reset_at: "2026-10-05T00:00:00.000Z" }, error: null };
+        return { data: { accepted: true, credits_charged: cost, credits_used: creditsUsed, credits_remaining: 500 - creditsUsed, reset_at: "2026-10-05T00:00:00.000Z" }, error: null };
       }
       if (name === "start_weekly_ai_usage") return { data: true, error: null };
       if (name === "release_weekly_ai_usage") { creditsUsed = Math.max(0, creditsUsed - (weights[mode] ?? 0)); return { data: true, error: null }; }

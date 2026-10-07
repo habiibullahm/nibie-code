@@ -120,6 +120,13 @@
       "when": 1791470000000,
       "tag": "0016_message_sources",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1791480000000,
+      "tag": "0017_weekly_usage_limit_500",
+      "breakpoints": true
     }
   ]
 }

@@ -294,7 +294,7 @@ export const weeklyAiUsage = pgTable(
   },
   (table) => [
     unique("weekly_ai_usage_user_week_key").on(table.userId, table.weekStart),
-    check("weekly_ai_usage_credits_nonnegative", sql`${table.creditsUsed} between 0 and 100`),
+    check("weekly_ai_usage_credits_nonnegative", sql`${table.creditsUsed} between 0 and 500`),
     check("weekly_ai_usage_fast_nonnegative", sql`${table.fastRequests} >= 0`),
     check("weekly_ai_usage_balanced_nonnegative", sql`${table.balancedRequests} >= 0`),
     check("weekly_ai_usage_high_nonnegative", sql`${table.highRequests} >= 0`),

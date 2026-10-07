@@ -18,7 +18,7 @@ describe("weekly free AI usage policy", () => {
 
   it("computes remaining allowance including zero at exhaustion", () => {
     expect(creditsRemaining(0)).toBe(WEEKLY_FREE_CREDIT_LIMIT);
-    expect(creditsRemaining(28)).toBe(72);
+    expect(creditsRemaining(28)).toBe(472);
     expect(creditsRemaining(WEEKLY_FREE_CREDIT_LIMIT)).toBe(0);
   });
 

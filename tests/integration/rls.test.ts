@@ -130,16 +130,36 @@ describe("Supabase row-level security", () => {
     expect(rows[0]).toEqual({ credits_used: 10, fast_requests: 1, balanced_requests: 1, high_requests: 1 });
   });
 
-  it("rejects a 105-request concurrent race at exactly 100 credits", async () => {
+  it("rejects a concurrent race at exactly 500 credits without resetting counters", async () => {
     const owner = await createUsageUser();
-    const generationIds = await Promise.all(Array.from({ length: 105 }, () => createGeneration(owner)));
+    const utcMonday = new Date();
+    utcMonday.setUTCHours(0, 0, 0, 0);
+    utcMonday.setUTCDate(utcMonday.getUTCDate() - ((utcMonday.getUTCDay() + 6) % 7));
+    const weekStart = utcMonday.toISOString().slice(0, 10);
+    // Seed near the new ceiling so the race stays small but still proves the hard cap and concurrency safety.
+    await sql`insert into public.weekly_ai_usage (user_id, week_start, credits_used, fast_requests) values (${owner}, ${weekStart}::date, 495, 495)`;
+    const generationIds = await Promise.all(Array.from({ length: 10 }, () => createGeneration(owner)));
     const results = await Promise.all(generationIds.map((id) => reserveUsage(owner, id, "Fast")));
     const reservations = results.map(([row]) => row);
-    expect(reservations.filter((row) => row.accepted)).toHaveLength(100);
+    expect(reservations.filter((row) => row.accepted)).toHaveLength(5);
     expect(reservations.filter((row) => !row.accepted)).toHaveLength(5);
     const [usage] = await asUser(owner, (tx) => tx`select credits_used, fast_requests from public.weekly_ai_usage`);
-    expect(usage).toEqual({ credits_used: 100, fast_requests: 100 });
+    expect(usage).toEqual({ credits_used: 500, fast_requests: 500 });
   }, 30_000);
+
+  it("gives accounts already at 100 credits 400 remaining under the raised ceiling", async () => {
+    const owner = await createUsageUser();
+    const utcMonday = new Date();
+    utcMonday.setUTCHours(0, 0, 0, 0);
+    utcMonday.setUTCDate(utcMonday.getUTCDate() - ((utcMonday.getUTCDay() + 6) % 7));
+    const weekStart = utcMonday.toISOString().slice(0, 10);
+    await sql`insert into public.weekly_ai_usage (user_id, week_start, credits_used, fast_requests) values (${owner}, ${weekStart}::date, 100, 100)`;
+    const [usage] = await asUser(owner, (tx) => tx`select * from public.get_current_weekly_ai_usage()`);
+    expect(usage).toMatchObject({ credits_used: 100, credits_remaining: 400 });
+    const generation = await createGeneration(owner);
+    const [reserved] = await reserveUsage(owner, generation, "Fast");
+    expect(reserved).toMatchObject({ accepted: true, credits_charged: 1, credits_used: 101, credits_remaining: 399 });
+  });
 
   it("isolates usage by owner and denies direct client writes", async () => {
     const ownerA = await createUsageUser();
@@ -169,7 +189,7 @@ describe("Supabase row-level security", () => {
     expect(usage.credits_used).toBe(0);
     expect(Date.parse(usage.reset_at as string)).toBeGreaterThan(Date.now());
     const [reserved] = await reserveUsage(owner, generation, "Fast");
-    expect(reserved).toMatchObject({ accepted: true, credits_charged: 1, credits_used: 1, credits_remaining: 99 });
+    expect(reserved).toMatchObject({ accepted: true, credits_charged: 1, credits_used: 1, credits_remaining: 499 });
   });
 
   it("makes pre-stream reservation release atomic and idempotent without negative usage", async () => {

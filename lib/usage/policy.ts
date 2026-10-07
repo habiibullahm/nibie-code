@@ -1,6 +1,6 @@
 import type { ChatModel } from "@/lib/chat/validation";
 
-export const WEEKLY_FREE_CREDIT_LIMIT = 100;
+export const WEEKLY_FREE_CREDIT_LIMIT = 500;
 export const WEEK_STARTS_ON_UTC_DAY = 1; // Monday, ISO weekday
 
 export const weeklyCreditCost: Readonly<Record<ChatModel, number>> = {
