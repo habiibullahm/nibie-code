@@ -1,7 +1,7 @@
 .landing {
   overflow-x: clip;
   background:
-    radial-gradient(ellipse 70% 42% at 70% -8%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 62%),
+    radial-gradient(ellipse 70% 42% at 70% -8%, color-mix(in srgb, var(--emphasis) 16%, transparent), transparent 62%),
     var(--bg-app);
   color: var(--text);
 }
@@ -78,7 +78,7 @@
 .landing-hero { padding-top: 112px; padding-bottom: 28px; }
 .landing-kicker {
   margin: 0 0 22px;
-  color: var(--accent);
+  color: var(--emphasis);
   font-size: 12px;
   font-weight: 650;
   letter-spacing: .14em;
@@ -127,7 +127,7 @@
   z-index: 0;
   inset: 12% 8% auto;
   height: 46%;
-  background: radial-gradient(ellipse at center, color-mix(in srgb, var(--accent) 28%, transparent), transparent 68%);
+  background: radial-gradient(ellipse at center, color-mix(in srgb, var(--emphasis) 28%, transparent), transparent 68%);
   filter: blur(28px);
   pointer-events: none;
 }
@@ -235,7 +235,7 @@
   padding: 32px 0;
   border-top: 1px solid var(--border-soft);
 }
-.landing-statements span { color: var(--accent); font-size: 13px; font-weight: 650; letter-spacing: .12em; }
+.landing-statements span { color: var(--emphasis); font-size: 13px; font-weight: 650; letter-spacing: .12em; }
 .landing-statements p {
   margin: 0;
   color: var(--text);
