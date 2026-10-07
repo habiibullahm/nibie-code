@@ -288,7 +288,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
 
   // No-action path: no web sources; chat continues as before Actions V1.
   let web: WebContextInput[] | undefined;
-  let preparedCitationSources: SourceReference[] = [];
+  const preparedCitationSources: SourceReference[] = [];
   let citationSources: SourceReference[] = [];
   let citationViews: ReturnType<typeof citationViewsFromPrepared> = [];
   const webVerificationUnavailable = false;

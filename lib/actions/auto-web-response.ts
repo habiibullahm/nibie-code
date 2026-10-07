@@ -480,7 +480,7 @@ export async function createAutoWebActionChatResponse(input: AutoWebActionChatIn
         let responseStream: ReadableStream<Uint8Array>;
         try {
           responseStream = await chatProvider.stream(mode, prompt, aborter.signal);
-        } catch (error) {
+        } catch {
           clearTimeout(timeout);
           const interrupted = userStopped || clientCancelled || aborter.signal.aborted;
           if (interrupted) logWarn("chat.response.interrupted", { requestId, stage: "provider", status: "interrupted", durationMs: durationMs() });
