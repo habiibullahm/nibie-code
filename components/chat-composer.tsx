@@ -221,7 +221,7 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
         {expanded ? <div className="composer-expanded-header"><span className="composer-expanded-label">Message</span><button className="composer-icon" type="button" aria-label="Collapse composer" title="Collapse composer" aria-expanded="true" onClick={toggleExpanded}><Minimize2 size={16} aria-hidden="true" /></button></div> : null}
         <div className="composer-content">
           <ComposerAttachments items={attachments.items} notice={attachments.notice} disabled={sending} onRemove={attachments.remove} onRetry={attachments.retry} />
-          <textarea ref={textareaRef} aria-label="Message Nibie" placeholder={centered ? "What should we work through?" : "Continue the thought…"} enterKeyHint={enterToSend ? "send" : "enter"} value={draft} rows={1} onChange={(event) => { expandedBeforeClearRef.current = null; setDraft(event.target.value); }} onKeyDown={handleKeyDown} />
+          <textarea ref={textareaRef} aria-label="Message Nibie" placeholder={centered ? "Ask Nibie anything..." : "Reply to Nibie..."} enterKeyHint={enterToSend ? "send" : "enter"} value={draft} rows={1} onChange={(event) => { expandedBeforeClearRef.current = null; setDraft(event.target.value); }} onKeyDown={handleKeyDown} />
         </div>
         {attachmentsEnabled ? <input ref={fileInputRef} className="composer-file-input" type="file" multiple accept={ATTACHMENT_ACCEPT} tabIndex={-1} aria-hidden="true" onChange={(event) => { attachments.add([...(event.target.files ?? [])]); event.target.value = ""; }} /> : null}
         <div className="composer-footer">

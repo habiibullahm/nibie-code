@@ -21,7 +21,6 @@ What's new in Nibie.
 
 ### Changed
 
-- The message box now asks “What should we work through?” in a new chat and “Continue the thought…” in an existing one, and its text cursor uses Nibie’s terracotta.
 - Nibie now uses an abstract ribbon mark instead of a letter-like symbol. Replies are shown as plain text without a name header, and a softly pulsing “Thinking…” shows only while Nibie is thinking, disappearing as soon as the answer starts.
 - Nibie's dark workspace now uses calmer neutral graphite surfaces and a clearer text hierarchy, so long answers, conversation titles, and section labels are easier to read during long chats.
 - Weekly AI allowance is now 500 credits per week (was 100); Fast, Balanced, and High still cost 1, 3, and 6.

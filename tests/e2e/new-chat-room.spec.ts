@@ -16,9 +16,9 @@ test.beforeEach(async ({ page }) => { await page.goto("/preview"); });
 
 test("new chat starts in General; initial selection survives typing and becomes the thread context", async ({ page }) => {
   await expect(roomSelector(page)).toHaveAccessibleName("Room: General");
-  await expect(page.getByRole("textbox", { name: "Message Nibie" })).toHaveAttribute("placeholder", "What should we work through?");
+  await expect(page.getByRole("textbox", { name: "Message Nibie" })).toHaveAttribute("placeholder", "Ask Nibie anything...");
   await send(page, "General hello");
-  await expect(page.getByRole("textbox", { name: "Message Nibie" })).toHaveAttribute("placeholder", "Continue the thought…");
+  await expect(page.getByRole("textbox", { name: "Message Nibie" })).toHaveAttribute("placeholder", "Reply to Nibie...");
   await expect(roomSelector(page)).toHaveAccessibleName("Room: General");
   await newChat(page);
   await chooseRoom(page, roomName);
