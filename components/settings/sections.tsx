@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { deleteMemoryAction, forgetMemoryAction, listMemoriesAction, updateMemoryAction } from "@/app/actions/memories";
+import { deleteMemoryAction, forgetMemoryAction, listMemoriesAction, listMemoriesPageAction, updateMemoryAction } from "@/app/actions/memories";
 import { DataPrivacyPanel } from "@/components/data-privacy-dialog";
 import { WeeklyUsageSummary } from "@/components/settings/weekly-usage-summary";
 import { ThemeSwitcher } from "@/components/theme-switcher";
@@ -199,15 +199,30 @@ export function MemorySettingsSection({ preferences, disabled, preview = false, 
   const [memories, setMemories] = useState<MemoryRecord[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(!preview);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [nextOffset, setNextOffset] = useState(0);
   const enabled = preferences.recallEnabled;
 
   async function reload() {
     if (preview) {
       setMemories([]);
+      setHasMore(false);
+      setNextOffset(0);
       setLoading(false);
       return;
     }
     setLoading(true);
+    // Prefer paged load so lists beyond the chat retrieval cap stay reachable.
+    const page = await listMemoriesPageAction({ offset: 0, activeOnly: "all" });
+    if (!page.error && page.data) {
+      setLoading(false);
+      setLoadError(null);
+      setMemories(page.data.memories);
+      setHasMore(page.data.hasMore);
+      setNextOffset(page.data.nextOffset);
+      return;
+    }
     const result = await listMemoriesAction();
     setLoading(false);
     if (result.error) {
@@ -216,6 +231,25 @@ export function MemorySettingsSection({ preferences, disabled, preview = false, 
     }
     setLoadError(null);
     setMemories(result.data ?? []);
+    setHasMore(false);
+    setNextOffset(result.data?.length ?? 0);
+  }
+
+  async function loadMore() {
+    if (preview || loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    const page = await listMemoriesPageAction({ offset: nextOffset, activeOnly: "all" });
+    setLoadingMore(false);
+    if (page.error || !page.data) {
+      setLoadError(page.error ?? "Memories couldn't be loaded. Refresh to try again.");
+      return;
+    }
+    setMemories((current) => {
+      const seen = new Set(current.map((memory) => memory.id));
+      return [...current, ...page.data!.memories.filter((memory) => !seen.has(memory.id))];
+    });
+    setHasMore(page.data.hasMore);
+    setNextOffset(page.data.nextOffset);
   }
 
   useEffect(() => {
@@ -224,11 +258,22 @@ export function MemorySettingsSection({ preferences, disabled, preview = false, 
       if (preview) {
         if (!cancelled) {
           setMemories([]);
+          setHasMore(false);
           setLoading(false);
         }
         return;
       }
       setLoading(true);
+      const page = await listMemoriesPageAction({ offset: 0, activeOnly: "all" });
+      if (cancelled) return;
+      if (!page.error && page.data) {
+        setLoading(false);
+        setLoadError(null);
+        setMemories(page.data.memories);
+        setHasMore(page.data.hasMore);
+        setNextOffset(page.data.nextOffset);
+        return;
+      }
       const result = await listMemoriesAction();
       if (cancelled) return;
       setLoading(false);
@@ -238,6 +283,8 @@ export function MemorySettingsSection({ preferences, disabled, preview = false, 
       }
       setLoadError(null);
       setMemories(result.data ?? []);
+      setHasMore(false);
+      setNextOffset(result.data?.length ?? 0);
     })();
     return () => { cancelled = true; };
   }, [preview]);
@@ -277,6 +324,11 @@ export function MemorySettingsSection({ preferences, disabled, preview = false, 
       <div className="settings-theme-label">{typeLabels[group.type]}</div>
       {group.items.map((memory) => <MemoryRow key={memory.id} memory={memory} disabled={disabled} preview={preview} onChanged={() => void reload()} />)}
     </div>)}
+    {hasMore ? <div className="memory-row-actions">
+      <button type="button" disabled={disabled || loadingMore} onClick={() => void loadMore()}>
+        {loadingMore ? "Loading…" : "Load more memories"}
+      </button>
+    </div> : null}
   </SettingsSection>;
 }
 

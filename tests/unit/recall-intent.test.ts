@@ -42,6 +42,14 @@ describe("memory intent detection", () => {
       kind: "forget",
       raw: "saya lebih suka jawaban singkat",
     });
+    expect(detectMemoryIntent("Jangan ingat lagi bahwa saya lebih suka jawaban singkat")).toEqual({
+      kind: "forget",
+      raw: "bahwa saya lebih suka jawaban singkat",
+    });
+    expect(detectMemoryIntent("Lupakan bahwa Project Cedar menggunakan PostgreSQL")).toEqual({
+      kind: "forget",
+      raw: "bahwa Project Cedar menggunakan PostgreSQL",
+    });
     expect(detectMemoryIntent("Lupakan production DB is read-only")).toEqual({
       kind: "forget",
       raw: "production DB is read-only",

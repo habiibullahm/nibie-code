@@ -1,7 +1,7 @@
 import "server-only";
 
 import { rankMemories } from "@/lib/recall/rank";
-import { listOwnerMemories, touchMemoriesUsed, type MemoryStoreClient } from "@/lib/recall/store";
+import { listOwnerMemoriesForRetrieval, touchMemoriesUsed, type MemoryStoreClient } from "@/lib/recall/store";
 import { MEMORY_RETRIEVE_MAX, type MemoryRecord, type RankedMemory } from "@/lib/recall/types";
 
 export type RetrieveMemoriesInput = {
@@ -66,7 +66,7 @@ export async function retrieveRelevantMemories(input: RetrieveMemoriesInput): Pr
   if (!input.recallEnabled || !input.query.trim()) return { memories: [], degraded: false };
 
   try {
-    const listed = await listOwnerMemories(input.supabase, { activeOnly: true });
+    const listed = await listOwnerMemoriesForRetrieval(input.supabase, { activeOnly: true });
     if (listed.error) return { memories: [], degraded: true };
 
     let ranked = rankMemories(input.query, listed.memories, limit);

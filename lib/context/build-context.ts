@@ -6,7 +6,7 @@ import { pinPieces, type PinPiece } from "@/lib/context/pin-context";
 import { profilePieces, profileReason, type ProfilePiece } from "@/lib/context/profile-context";
 import { roomPieces, roomReason, type RoomPiece } from "@/lib/context/room-context";
 import { renderThreadSummary, resolveThreadSummary, selectThreadMessages } from "@/lib/context/thread-context";
-import { renderRecallContext } from "@/lib/context/recall-context";
+import { recallOperationInstruction, renderRecallContext } from "@/lib/context/recall-context";
 import {
   renderWebContext,
   WEB_VERIFICATION_UNAVAILABLE_DIAGNOSTIC_REASON,
@@ -49,9 +49,12 @@ export function buildContext(input: BuildContextInput): ContextPlan {
   // Unreadable preferences fall back to the Default depth, like every other preference.
   const basePolicyText = contextPolicyFor(input.responseMode, input.preferenceReadFailed ? "balanced" : input.preferences.responseLength);
   const webVerificationUnavailable = Boolean(input.webVerificationUnavailable) && !(input.web?.length);
-  const corePolicyText = webVerificationUnavailable
-    ? `${basePolicyText}\n\n${WEB_VERIFICATION_UNAVAILABLE_INSTRUCTION}`
-    : basePolicyText;
+  const recallOpText = recallOperationInstruction(input.recallOperation);
+  const corePolicyText = [
+    basePolicyText,
+    webVerificationUnavailable ? WEB_VERIFICATION_UNAVAILABLE_INSTRUCTION : null,
+    recallOpText,
+  ].filter(Boolean).join("\n\n");
   const coreTokens = estimateTokens(corePolicyText);
   const currentTokens = estimateTokens(current.content);
   if (coreTokens + currentTokens > inputBudgetTokens) throw new ContextBuildError();

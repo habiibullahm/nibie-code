@@ -6,7 +6,7 @@ const root = process.cwd();
 
 function files(dir: string, acc: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
-    if (name === "node_modules" || name === ".next" || name === ".git" || name === ".vitest") continue;
+    if (name === "node_modules" || name === ".next" || name === ".git" || name === ".vitest" || name === ".claude" || name === ".cursor") continue;
     const path = join(dir, name);
     if (statSync(path).isDirectory()) files(path, acc);
     else acc.push(path);

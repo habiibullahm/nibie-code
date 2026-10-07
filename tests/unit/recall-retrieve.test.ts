@@ -31,23 +31,20 @@ const row: MemoryRow = {
 };
 
 function client(options?: { failList?: boolean; rows?: MemoryRow[] }) {
+  const result = () =>
+    Promise.resolve(
+      options?.failList
+        ? { data: null, error: { message: "fail" } }
+        : { data: options?.rows ?? [row], error: null },
+    );
+  const chain = {
+    order: () => chain,
+    eq: () => chain,
+    limit: () => result(),
+  };
   return {
     from: () => ({
-      select: () => ({
-        order: () => ({
-          order: () => ({
-            limit: () => ({
-              eq: async () => options?.failList
-                ? { data: null, error: { message: "fail" } }
-                : { data: options?.rows ?? [row], error: null },
-              then: (resolve: (value: unknown) => unknown) => Promise.resolve({
-                data: options?.failList ? null : (options?.rows ?? [row]),
-                error: options?.failList ? { message: "fail" } : null,
-              }).then(resolve),
-            }),
-          }),
-        }),
-      }),
+      select: () => chain,
       update: () => ({
         in: async () => ({ data: null, error: null }),
       }),

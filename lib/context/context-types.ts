@@ -1,7 +1,7 @@
 import type { UserPreferences } from "@/lib/preferences/types";
 import type { ChatModel } from "@/lib/chat/validation";
 import type { RoomContextInput } from "@/lib/context/room-context";
-import type { MemoryRecord } from "@/lib/recall/types";
+import type { MemoryRecord, RecallOperationStatus } from "@/lib/recall/types";
 import type { WebContextInput } from "@/lib/web/types";
 
 export type { RoomContextInput } from "@/lib/context/room-context";
@@ -118,6 +118,8 @@ export type BuildContextInput = {
   webVerificationUnavailable?: boolean;
   // Explicit user-owned memories already retrieved for this request. Omitted when recall is off or none matched.
   memories?: MemoryRecord[] | null;
+  // Outcome of an explicit remember/forget on this turn. Authoritative; not untrusted memory content.
+  recallOperation?: RecallOperationStatus | null;
 };
 
 export class ContextBuildError extends Error {

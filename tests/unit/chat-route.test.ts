@@ -71,7 +71,7 @@ vi.mock("@/lib/web/config", () => ({ getWebSearchConfig: webMocks.getWebSearchCo
 vi.mock("@/lib/web/provider", () => ({ getWebSearchProvider: webMocks.getWebSearchProvider }));
 vi.mock("@/lib/web/pipeline", () => ({ runWebSearchPipeline: webMocks.runWebSearchPipeline }));
 const recallMocks = vi.hoisted(() => ({
-  handleRecallTurn: vi.fn(async (): Promise<{ wrote: boolean; forgot: number; degraded: boolean }> => ({ wrote: false, forgot: 0, degraded: false })),
+  handleRecallTurn: vi.fn(async (): Promise<{ status: string; wrote: boolean; forgot: number; degraded: boolean }> => ({ status: "none", wrote: false, forgot: 0, degraded: false })),
   retrieveRelevantMemories: vi.fn(async (): Promise<{ memories: Array<Record<string, unknown>>; degraded: boolean }> => ({ memories: [], degraded: false })),
 }));
 vi.mock("@/lib/recall/handle", () => ({ handleRecallTurn: recallMocks.handleRecallTurn }));
@@ -108,7 +108,7 @@ describe("POST /api/chat", () => {
     webMocks.getWebSearchConfig.mockReset().mockReturnValue(null);
     webMocks.getWebSearchProvider.mockReset().mockReturnValue(null);
     webMocks.runWebSearchPipeline.mockReset().mockResolvedValue({ sources: [], degraded: false, searchResultCount: 0, pagesFetched: 0 });
-    recallMocks.handleRecallTurn.mockReset().mockResolvedValue({ wrote: false, forgot: 0, degraded: false });
+    recallMocks.handleRecallTurn.mockReset().mockResolvedValue({ status: "none", wrote: false, forgot: 0, degraded: false });
     recallMocks.retrieveRelevantMemories.mockReset().mockResolvedValue({ memories: [], degraded: false });
   });
   afterEach(() => vi.useRealTimers());
@@ -1334,14 +1334,16 @@ describe("POST /api/chat", () => {
         score: 1,
         exactIdentifier: false,
       };
-      recallMocks.handleRecallTurn.mockResolvedValueOnce({ wrote: true, forgot: 0, degraded: false });
+      recallMocks.handleRecallTurn.mockResolvedValueOnce({ status: "save_succeeded", wrote: true, forgot: 0, degraded: false });
       recallMocks.retrieveRelevantMemories.mockResolvedValueOnce({ memories: [], degraded: false });
       readyClient([]);
       stream.mockResolvedValue(providerChunks(["Noted."], "stop"));
       expect((await POST(validRequest())).status).toBe(200);
       expect(recallMocks.handleRecallTurn).toHaveBeenCalledOnce();
+      const savedPrompt = stream.mock.calls.at(-1)?.[1] as { role: string; content: string }[];
+      expect(savedPrompt[0]?.content).toContain("remember request succeeded");
 
-      recallMocks.handleRecallTurn.mockResolvedValueOnce({ wrote: false, forgot: 0, degraded: false });
+      recallMocks.handleRecallTurn.mockResolvedValueOnce({ status: "none", wrote: false, forgot: 0, degraded: false });
       recallMocks.retrieveRelevantMemories.mockResolvedValueOnce({ memories: [saved], degraded: false });
       readyClient([]);
       stream.mockResolvedValue(providerChunks(["Use TypeScript."], "stop"));
@@ -1356,7 +1358,7 @@ describe("POST /api/chat", () => {
       expect((await POST(validRequest())).status).toBe(200);
     });
 
-    it("skips write and retrieve when recall is disabled", async () => {
+    it("surfaces memory_disabled in the provider prompt and skips retrieval", async () => {
       preferenceResult = {
         data: {
           preferred_name: null,
@@ -1371,11 +1373,30 @@ describe("POST /api/chat", () => {
         },
         error: null,
       };
+      recallMocks.handleRecallTurn.mockResolvedValueOnce({ status: "memory_disabled", wrote: false, forgot: 0, degraded: false });
       readyClient([]);
       stream.mockResolvedValue(providerChunks(["Ok."], "stop"));
       expect((await POST(validRequest())).status).toBe(200);
-      expect(recallMocks.handleRecallTurn).not.toHaveBeenCalled();
+      expect(recallMocks.handleRecallTurn).toHaveBeenCalledOnce();
+      expect((recallMocks.handleRecallTurn.mock.calls[0] as unknown as [{ recallEnabled?: boolean }] | undefined)?.[0]).toMatchObject({ recallEnabled: false });
       expect(recallMocks.retrieveRelevantMemories).not.toHaveBeenCalled();
+      const prompt = stream.mock.calls.at(-1)?.[1] as { role: string; content: string }[];
+      expect(prompt[0]?.content).toContain("Memory is off");
+      expect(prompt[0]?.content).not.toContain("remember request succeeded");
+    });
+
+    it("surfaces save_failed and forget_not_found in the provider prompt", async () => {
+      recallMocks.handleRecallTurn.mockResolvedValueOnce({ status: "save_failed", wrote: false, forgot: 0, degraded: true });
+      readyClient([]);
+      stream.mockResolvedValue(providerChunks(["Ok."], "stop"));
+      await (await POST(validRequest())).text();
+      expect((stream.mock.calls.at(-1)?.[1] as { content: string }[])[0]?.content).toContain("remember request failed");
+
+      recallMocks.handleRecallTurn.mockResolvedValueOnce({ status: "forget_not_found", wrote: false, forgot: 0, degraded: false });
+      readyClient([]);
+      stream.mockResolvedValue(providerChunks(["Ok."], "stop"));
+      await (await POST(validRequest())).text();
+      expect((stream.mock.calls.at(-1)?.[1] as { content: string }[])[0]?.content).toContain("no matching saved memory");
     });
   });
 });

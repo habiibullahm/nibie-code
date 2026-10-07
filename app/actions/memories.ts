@@ -6,7 +6,8 @@ import { parseMemoryDraft } from "@/lib/recall/normalize";
 import {
   deactivateOwnerMemory,
   deleteOwnerMemory,
-  listOwnerMemories,
+  listOwnerMemoriesAll,
+  listOwnerMemoriesPage,
   updateOwnerMemory,
   upsertMemoryByKey,
 } from "@/lib/recall/store";
@@ -26,12 +27,30 @@ async function authenticatedClient() {
   return { supabase, user };
 }
 
+/** Full Settings list via paging (not capped at retrieval's 80). */
 export async function listMemoriesAction(): Promise<MemoryActionResult<MemoryRecord[]>> {
   try {
     const { supabase } = await authenticatedClient();
-    const result = await listOwnerMemories(supabase, { activeOnly: false });
+    const result = await listOwnerMemoriesAll(supabase, { activeOnly: "all" });
     if (result.error) return { error: result.error };
     return { data: result.memories };
+  } catch {
+    return { error: sessionFailed };
+  }
+}
+
+export async function listMemoriesPageAction(input?: {
+  offset?: number;
+  activeOnly?: boolean | "all";
+}): Promise<MemoryActionResult<{ memories: MemoryRecord[]; hasMore: boolean; nextOffset: number }>> {
+  try {
+    const { supabase } = await authenticatedClient();
+    const page = await listOwnerMemoriesPage(supabase, {
+      offset: input?.offset ?? 0,
+      activeOnly: input?.activeOnly ?? "all",
+    });
+    if (page.error) return { error: page.error };
+    return { data: { memories: page.memories, hasMore: page.hasMore, nextOffset: page.nextOffset } };
   } catch {
     return { error: sessionFailed };
   }
@@ -96,7 +115,7 @@ export async function deleteMemoryAction(id: unknown): Promise<MemoryActionResul
 export async function listActiveMemoriesAction(): Promise<MemoryActionResult<MemoryRecord[]>> {
   try {
     const { supabase } = await authenticatedClient();
-    const result = await listOwnerMemories(supabase, { activeOnly: true });
+    const result = await listOwnerMemoriesAll(supabase, { activeOnly: true });
     if (result.error) {
       logWarn("memory.retrieve.completed", { category: "settings_list", degraded: true });
       return { error: result.error };

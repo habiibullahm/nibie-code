@@ -32,7 +32,7 @@ describe("recall turn handle", () => {
       recallEnabled: true,
       requestId: "req-1",
     });
-    expect(result).toEqual({ wrote: true, forgot: 0, degraded: false });
+    expect(result).toEqual({ status: "save_succeeded", wrote: true, forgot: 0, degraded: false });
     expect(upsertMemoryByKey).toHaveBeenCalledOnce();
   });
 
@@ -45,10 +45,10 @@ describe("recall turn handle", () => {
       recallEnabled: true,
       requestId: "req-2",
     });
-    expect(result).toEqual({ wrote: false, forgot: 1, degraded: false });
+    expect(result).toEqual({ status: "forget_succeeded", wrote: false, forgot: 1, degraded: false });
   });
 
-  it("does nothing when recall is disabled", async () => {
+  it("reports memory_disabled when recall is off but intent is present", async () => {
     upsertMemoryByKey.mockClear();
     const result = await handleRecallTurn({
       supabase: {} as never,
@@ -57,17 +57,37 @@ describe("recall turn handle", () => {
       recallEnabled: false,
       requestId: "req-3",
     });
-    expect(result).toEqual({ wrote: false, forgot: 0, degraded: false });
+    expect(result).toEqual({ status: "memory_disabled", wrote: false, forgot: 0, degraded: false });
     expect(upsertMemoryByKey).not.toHaveBeenCalled();
   });
 
-  it("soft-fails store errors without throwing", async () => {
+  it("reports save_failed on store errors", async () => {
     upsertMemoryByKey.mockResolvedValue({ memory: null, error: "fail" });
     await expect(handleRecallTurn({
       supabase: {} as never,
       userId: "owner",
       message: "Remember that deploy is in Seoul",
       recallEnabled: true,
-    })).resolves.toEqual({ wrote: false, forgot: 0, degraded: true });
+    })).resolves.toEqual({ status: "save_failed", wrote: false, forgot: 0, degraded: true });
+  });
+
+  it("reports forget_not_found when nothing matches", async () => {
+    deactivateMatchingMemories.mockResolvedValue({ count: 0, error: null });
+    await expect(handleRecallTurn({
+      supabase: {} as never,
+      userId: "owner",
+      message: "Forget that Cedar uses PostgreSQL",
+      recallEnabled: true,
+    })).resolves.toEqual({ status: "forget_not_found", wrote: false, forgot: 0, degraded: false });
+  });
+
+  it("reports forget_failed when forget store errors", async () => {
+    deactivateMatchingMemories.mockResolvedValue({ count: 0, error: "fail" });
+    await expect(handleRecallTurn({
+      supabase: {} as never,
+      userId: "owner",
+      message: "Forget that Cedar uses PostgreSQL",
+      recallEnabled: true,
+    })).resolves.toEqual({ status: "forget_failed", wrote: false, forgot: 0, degraded: true });
   });
 });

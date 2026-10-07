@@ -9,11 +9,12 @@ const PROJECT_CUES = /\b(project|repo|codebase|stack|deploy|production|staging|n
 
 /** Strip save/forget wrappers that may remain and collapse whitespace. */
 export function extractDurableStatement(raw: string) {
-  return raw
-    .replace(CONTROLS, "")
-    .replace(/^(that\s+|this\s+|untuk\s+)/i, "")
-    .trim()
-    .replace(/\s+/g, " ");
+  let text = raw.replace(CONTROLS, "").trim().replace(/\s+/g, " ");
+  // EN + ID residual wrappers after intent prefixes (e.g. "bahwa Cedar menggunakan…").
+  text = text.replace(/^(that\s+|this\s+|untuk\s+|bahwa\s+|tentang\s+)/i, "").trim();
+  // Second pass covers stacked wrappers: "bahwa tentang …" / "that tentang …".
+  text = text.replace(/^(that\s+|this\s+|untuk\s+|bahwa\s+|tentang\s+)/i, "").trim();
+  return text.replace(/\s+/g, " ");
 }
 
 export function normalizeMemoryContent(raw: string) {

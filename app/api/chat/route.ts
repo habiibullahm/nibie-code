@@ -25,7 +25,7 @@ import { roomContextFromRows, type PinContextRow, type RoomBriefRow } from "@/li
 import { loadOwnerPreferences } from "@/lib/preferences/store";
 import { handleRecallTurn } from "@/lib/recall/handle";
 import { retrieveRelevantMemories } from "@/lib/recall/retrieve";
-import type { MemoryRecord } from "@/lib/recall/types";
+import type { MemoryRecord, RecallOperationStatus } from "@/lib/recall/types";
 import { operationalCodes } from "@/lib/observability/codes";
 import { logError, logInfo, logWarn } from "@/lib/observability/logger";
 import { requestIdFrom } from "@/lib/observability/request-id";
@@ -169,10 +169,12 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
 
   // Explicit recall: save/forget intent and retrieval never block the reply.
   // Fail closed when preferences could not be read so a disabled user is not briefly re-enabled.
+  // Always run handle on non-regenerate turns so disabled/failed outcomes reach the model truthfully.
   const recallEnabled = !preferenceState.error && preferenceState.preferences.recallEnabled !== false;
-  if (recallEnabled && !regenerate) {
+  let recallOperation: RecallOperationStatus = "none";
+  if (!regenerate) {
     try {
-      await handleRecallTurn({
+      const recallResult = await handleRecallTurn({
         supabase,
         userId: user.id,
         message: userMessage.content,
@@ -181,7 +183,9 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
         messageId: userMessage.id,
         requestId,
       });
+      recallOperation = recallResult.status;
     } catch {
+      recallOperation = "save_failed";
       logWarn("memory.write.failed", { requestId, category: "exception", code: operationalCodes.recallWriteFailed });
     }
   } else if (!recallEnabled) {
@@ -326,6 +330,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       web,
       webVerificationUnavailable,
       memories,
+      recallOperation,
       messages: rows.map((row) => ({ role: row.role as "user" | "assistant", content: row.content, position: row.position })),
       currentPosition: userMessage.position,
     });
