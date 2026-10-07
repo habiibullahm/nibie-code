@@ -1,6 +1,6 @@
 "use client";
 
-import { isValidElement, memo, useMemo, useState, type ReactNode } from "react";
+import { isValidElement, memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import { WrapText } from "lucide-react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -19,8 +19,27 @@ function textOf(node: ReactNode): string {
   return "";
 }
 
+type Highlighter = typeof import("@/lib/markdown/highlight");
+let loadedHighlighter: Highlighter | null = null;
+let highlighterRequest: Promise<Highlighter> | null = null;
+
+// The grammars load on the first fenced block with a language; until then (and on the server) the code is plain text.
+function useHighlighter(enabled: boolean) {
+  const [highlighter, setHighlighter] = useState(loadedHighlighter);
+  useEffect(() => {
+    if (!enabled || highlighter) return;
+    let active = true;
+    highlighterRequest ??= import("@/lib/markdown/highlight").then((module) => (loadedHighlighter = module));
+    highlighterRequest.then((module) => { if (active) setHighlighter(module); }, () => { highlighterRequest = null; });
+    return () => { active = false; };
+  }, [enabled, highlighter]);
+  return highlighter;
+}
+
 function CodeBlock({ language, text }: { language: string | undefined; text: string }) {
   const [wrapped, setWrapped] = useState(false);
+  const highlighter = useHighlighter(Boolean(language));
+  const highlighted = useMemo(() => highlighter?.highlightCode(text, language) ?? null, [highlighter, text, language]);
   return <div className={`code-block${wrapped ? " is-wrapped" : ""}`}>
     <div className="code-block-header">
       <span>{language ?? "text"}</span>
@@ -29,7 +48,7 @@ function CodeBlock({ language, text }: { language: string | undefined; text: str
         <CopyButton text={text} label={language ? `Copy ${language} code block` : "Copy code block"} compact iconOnly />
       </div>
     </div>
-    <pre tabIndex={0}><code>{text}</code></pre>
+    <pre tabIndex={0}><code>{highlighted ?? text}</code></pre>
   </div>;
 }
 

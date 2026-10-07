@@ -8,6 +8,7 @@ What's new in Nibie.
 
 ### Added
 
+- Code in Nibie's answers is now syntax-highlighted in calm, muted colors for common languages, including shell commands and their flags.
 - Choose Deep Research from the Research menu for a bounded multi-source researched answer with citations, progress stages, and Incomplete/Failed labels when collection is partial or fails.
 - When a reply uses web sources, Nibie shows clickable citation markers and a Sources list with title and domain, kept with the message so they survive reload.
 - Ask Nibie to remember a preference or project fact across conversations, and manage or turn off Memory in Settings. Your current request always wins over what was saved.

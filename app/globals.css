@@ -553,6 +553,21 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .code-block pre:focus-visible { outline: 2px solid var(--link); outline-offset: -2px; }
 .code-block pre code { display: block; width: max-content; min-width: 100%; color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.65; white-space: pre; }
 .code-block.is-wrapped pre code { width: auto; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Syntax colors (highlight.js classes from lib/markdown/highlight.ts): muted so code reads calmly on graphite. */
+.code-block { --code-keyword: #c4a6e4; --code-string: #a9c690; --code-number: #dbb683; --code-function: #89c4bd; --code-type: #e2d29b; --code-attr: #d4a5a5; --code-comment: var(--text-4); --code-punct: var(--text-3); }
+:root[data-theme="light"] .code-block { --code-keyword: #7a4fa8; --code-string: #4d7533; --code-number: #94621d; --code-function: #2a756e; --code-type: #7d6610; --code-attr: #9a4f5c; }
+.code-block .hljs-keyword, .code-block .hljs-selector-tag, .code-block .hljs-doctag, .code-block .hljs-meta .hljs-keyword { color: var(--code-keyword); }
+.code-block .hljs-string, .code-block .hljs-regexp, .code-block .hljs-addition, .code-block .hljs-meta .hljs-string { color: var(--code-string); }
+.code-block .hljs-number, .code-block .hljs-literal, .code-block .hljs-symbol, .code-block .hljs-bullet, .code-block .hljs-literal .hljs-keyword { color: var(--code-number); }
+.code-block .hljs-title, .code-block .hljs-built_in, .code-block .hljs-name, .code-block .hljs-section { color: var(--code-function); }
+.code-block .hljs-type, .code-block .hljs-title.class_, .code-block .hljs-selector-class, .code-block .hljs-selector-id { color: var(--code-type); }
+.code-block .hljs-attr, .code-block .hljs-attribute, .code-block .hljs-property, .code-block .hljs-params, .code-block .hljs-selector-attr, .code-block .hljs-variable, .code-block .hljs-template-variable { color: var(--code-attr); }
+.code-block .hljs-comment, .code-block .hljs-quote, .code-block .hljs-meta, .code-block .hljs-meta.prompt_ { color: var(--code-comment); }
+.code-block .hljs-comment { font-style: italic; }
+.code-block .hljs-punctuation, .code-block .hljs-operator, .code-block .hljs-tag { color: var(--code-punct); }
+.code-block .hljs-deletion { color: var(--danger); }
+.code-block .hljs-emphasis { font-style: italic; }
+.code-block .hljs-strong { font-weight: 600; }
 @media (max-width: 760px) {
   .markdown { --md-gap: 10px; font-size: 14px; }
   .markdown h1, .markdown h2 { font-size: 16.5px; }
