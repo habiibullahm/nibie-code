@@ -11,7 +11,7 @@ export function nibieShareImage() {
     <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: "space-between", background: darkPalette.bgApp, color: darkPalette.logoBody, padding: "76px 84px" }}>
       <div style={{ display: "flex", alignItems: "center" }}>
         <div style={{ display: "flex", width: 92, height: 92, alignItems: "center", justifyContent: "center", background: darkPalette.bgRaised, borderRadius: 24 }}>
-          <svg width="68" height="50" viewBox={logoViewBox}>
+          <svg width="72" height="48" viewBox={logoViewBox}>
             <path d={logoFoldPath} fill={logoFoldColor} />
             <path d={logoBodyPath} fill={logoBodyColor} />
           </svg>

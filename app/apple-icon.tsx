@@ -8,7 +8,7 @@ export const contentType = "image/png";
 export default function AppleIcon() {
   return new ImageResponse(
     <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: darkPalette.bgApp }}>
-      <svg width="148" height="110" viewBox={logoViewBox}>
+      <svg width="150" height="100" viewBox={logoViewBox}>
         <path d={logoFoldPath} fill={logoFoldColor} />
         <path d={logoBodyPath} fill={logoBodyColor} />
       </svg>
