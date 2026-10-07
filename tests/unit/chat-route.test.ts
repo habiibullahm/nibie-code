@@ -70,6 +70,12 @@ vi.mock("@/lib/web/routing", () => ({ decideWebSearch: webMocks.decideWebSearch 
 vi.mock("@/lib/web/config", () => ({ getWebSearchConfig: webMocks.getWebSearchConfig }));
 vi.mock("@/lib/web/provider", () => ({ getWebSearchProvider: webMocks.getWebSearchProvider }));
 vi.mock("@/lib/web/pipeline", () => ({ runWebSearchPipeline: webMocks.runWebSearchPipeline }));
+const recallMocks = vi.hoisted(() => ({
+  handleRecallTurn: vi.fn(async (): Promise<{ wrote: boolean; forgot: number; degraded: boolean }> => ({ wrote: false, forgot: 0, degraded: false })),
+  retrieveRelevantMemories: vi.fn(async (): Promise<{ memories: Array<Record<string, unknown>>; degraded: boolean }> => ({ memories: [], degraded: false })),
+}));
+vi.mock("@/lib/recall/handle", () => ({ handleRecallTurn: recallMocks.handleRecallTurn }));
+vi.mock("@/lib/recall/retrieve", () => ({ retrieveRelevantMemories: recallMocks.retrieveRelevantMemories }));
 const allModes = { models: ["Fast", "Balanced", "High"].map((id) => ({ id, label: id, description: "" })) };
 
 import { POST } from "../../app/api/chat/route";
@@ -102,6 +108,8 @@ describe("POST /api/chat", () => {
     webMocks.getWebSearchConfig.mockReset().mockReturnValue(null);
     webMocks.getWebSearchProvider.mockReset().mockReturnValue(null);
     webMocks.runWebSearchPipeline.mockReset().mockResolvedValue({ sources: [], degraded: false, searchResultCount: 0, pagesFetched: 0 });
+    recallMocks.handleRecallTurn.mockReset().mockResolvedValue({ wrote: false, forgot: 0, degraded: false });
+    recallMocks.retrieveRelevantMemories.mockReset().mockResolvedValue({ memories: [], degraded: false });
   });
   afterEach(() => vi.useRealTimers());
 
@@ -1307,6 +1315,67 @@ describe("POST /api/chat", () => {
       expect(events.slice(-2)).toEqual([{ type: "status", status: "complete" }, { type: "done" }]);
       expect(writes).toContainEqual({ content: "Done.", status: "complete" });
       expect(writes).not.toContainEqual(expect.objectContaining({ status: "error" }));
+    });
+  });
+
+  describe("recall / memory", () => {
+    it("saves on remember, retrieves into a later turn, and soft-fails store errors", async () => {
+      const saved = {
+        id: "11111111-1111-4111-8111-111111111111",
+        type: "preference" as const,
+        content: "I prefer TypeScript",
+        normalizedKey: "i prefer typescript",
+        sourceConversationId: null,
+        sourceMessageId: null,
+        isActive: true,
+        createdAt: "2026-10-07T00:00:00.000Z",
+        updatedAt: "2026-10-07T00:00:00.000Z",
+        lastUsedAt: null,
+        score: 1,
+        exactIdentifier: false,
+      };
+      recallMocks.handleRecallTurn.mockResolvedValueOnce({ wrote: true, forgot: 0, degraded: false });
+      recallMocks.retrieveRelevantMemories.mockResolvedValueOnce({ memories: [], degraded: false });
+      readyClient([]);
+      stream.mockResolvedValue(providerChunks(["Noted."], "stop"));
+      expect((await POST(validRequest())).status).toBe(200);
+      expect(recallMocks.handleRecallTurn).toHaveBeenCalledOnce();
+
+      recallMocks.handleRecallTurn.mockResolvedValueOnce({ wrote: false, forgot: 0, degraded: false });
+      recallMocks.retrieveRelevantMemories.mockResolvedValueOnce({ memories: [saved], degraded: false });
+      readyClient([]);
+      stream.mockResolvedValue(providerChunks(["Use TypeScript."], "stop"));
+      await (await POST(validRequest())).text();
+      const prompt = stream.mock.calls.at(-1)?.[1] as { role: string; content: string }[];
+      expect(prompt.some((message) => message.content.includes("I prefer TypeScript"))).toBe(true);
+      expect(prompt.some((message) => message.content.includes("untrusted_memory_content"))).toBe(true);
+
+      recallMocks.retrieveRelevantMemories.mockRejectedValueOnce(new Error("provider down"));
+      readyClient([]);
+      stream.mockResolvedValue(providerChunks(["Still works."], "stop"));
+      expect((await POST(validRequest())).status).toBe(200);
+    });
+
+    it("skips write and retrieve when recall is disabled", async () => {
+      preferenceResult = {
+        data: {
+          preferred_name: null,
+          preferred_language: "auto",
+          default_model: "balanced",
+          response_length: "balanced",
+          response_style: "natural",
+          about_you: null,
+          recall_enabled: false,
+          created_at: "2026-10-07T00:00:00.000Z",
+          updated_at: "2026-10-07T00:00:00.000Z",
+        },
+        error: null,
+      };
+      readyClient([]);
+      stream.mockResolvedValue(providerChunks(["Ok."], "stop"));
+      expect((await POST(validRequest())).status).toBe(200);
+      expect(recallMocks.handleRecallTurn).not.toHaveBeenCalled();
+      expect(recallMocks.retrieveRelevantMemories).not.toHaveBeenCalled();
     });
   });
 });

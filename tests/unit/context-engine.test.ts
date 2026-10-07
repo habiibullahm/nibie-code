@@ -104,10 +104,14 @@ describe("context engine", () => {
   });
 
   it("keeps core, the current message, and the output reserve when the thread is long", () => {
-    const plan = buildContext(input({ messages: messages(32, 8_000), currentPosition: 32, capabilities: { contextWindowTokens: 4_400, maxOutputTokens: 1_000 } }));
+    const current = "x".repeat(8_000);
+    const output = 1_000;
+    // Core + current must fit; older turns fill and then truncate against the remaining budget.
+    const windowTokens = estimateTokens(CONTEXT_POLICY_TEXT) + estimateTokens(current) + output + 40;
+    const plan = buildContext(input({ messages: messages(32, 8_000), currentPosition: 32, capabilities: { contextWindowTokens: windowTokens, maxOutputTokens: output } }));
     const dialogue = toProviderMessages(plan).filter((message) => message.role !== "system");
-    expect(dialogue.at(-1)?.content).toBe("x".repeat(8_000));
-    expect(plan.budget.outputReserveTokens).toBe(1_000);
+    expect(dialogue.at(-1)?.content).toBe(current);
+    expect(plan.budget.outputReserveTokens).toBe(output);
     expect(plan.blocks.find((block) => block.id === "core")?.included).toBe(true);
     expect(plan.budget.truncated).toBe(true);
     expect(plan.diagnostics.sources[1].reason).toBe("Older messages left out so this reply stays focused.");

@@ -42,8 +42,9 @@ describe("settings ownership", () => {
     });
     expect(privacyEntries).toEqual([]);
 
-    const migrations = files(join(root, "drizzle")).filter((file) => file.endsWith(".sql") && readFileSync(file, "utf8").includes("user_preferences"));
-    expect(migrations).toHaveLength(1);
-    expect(migrations[0].replaceAll("\\", "/")).toContain("drizzle/0003_user_preferences.sql");
+    const migrations = files(join(root, "drizzle")).filter((file) => file.endsWith(".sql") && readFileSync(file, "utf8").includes("user_preferences")).map((file) => file.replaceAll("\\", "/"));
+    expect(migrations.some((file) => file.includes("drizzle/0003_user_preferences.sql"))).toBe(true);
+    // Later additive columns (for example recall_enabled) may touch user_preferences; foundation stays 0003.
+    expect(migrations.every((file) => /drizzle\/00(03_user_preferences|15_memories)\.sql$/.test(file))).toBe(true);
   });
 });

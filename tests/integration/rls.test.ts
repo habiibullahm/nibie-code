@@ -73,6 +73,11 @@ describe("Supabase row-level security", () => {
     await sql`drop table if exists public.room_briefs cascade`;
     await sql`drop table if exists public.rooms cascade`;
     await sql`drop function if exists public.set_rooms_updated_at() cascade`;
+    await sql`drop table if exists public.memories cascade`;
+    await sql`drop function if exists public.set_memories_updated_at() cascade`;
+    await sql`drop function if exists public.search_memories_lexical(text, integer) cascade`;
+    await sql`drop function if exists public.search_memories_semantic cascade`;
+    await sql`drop type if exists public.memory_type cascade`;
     await sql`drop table if exists public.user_preferences cascade`;
     await sql`drop function if exists public.set_user_preferences_updated_at() cascade`;
     await sql`drop table if exists public.messages cascade`;
@@ -633,7 +638,7 @@ describe("Supabase row-level security", () => {
 
   it("stores owner preferences, rejects another owner's access, and leaves conversation models alone", async () => {
     await asUser(userA, (tx) => tx`insert into public.user_preferences (user_id) values (${userA})`);
-    const [created] = await asUser(userA, (tx) => tx`select preferred_name, preferred_language, default_model, response_length, response_style, about_you from public.user_preferences`);
+    const [created] = await asUser(userA, (tx) => tx`select preferred_name, preferred_language, default_model, response_length, response_style, about_you, recall_enabled from public.user_preferences`);
     expect(created).toEqual({
       preferred_name: null,
       preferred_language: "auto",
@@ -641,6 +646,7 @@ describe("Supabase row-level security", () => {
       response_length: "balanced",
       response_style: "natural",
       about_you: null,
+      recall_enabled: true,
     });
 
     const hidden = await asUser(userB, (tx) => tx`select user_id from public.user_preferences`);
@@ -672,6 +678,44 @@ describe("Supabase row-level security", () => {
     await expect(asUser(userA, (tx) => tx`update public.user_preferences set preferred_name = ${"x".repeat(81)}`)).rejects.toThrow();
     const [still] = await asUser(userA, (tx) => tx`select preferred_language, default_model, preferred_name from public.user_preferences`);
     expect(still).toEqual({ preferred_language: "id", default_model: "fast", preferred_name: "Habib" });
+
+    await asUser(userA, (tx) => tx`update public.user_preferences set recall_enabled = false where user_id = ${userA}`);
+    const [recallOff] = await asUser(userA, (tx) => tx`select recall_enabled from public.user_preferences`);
+    expect(recallOff.recall_enabled).toBe(false);
+  });
+
+  it("keeps memories owner-scoped and rejects cross-user reads and writes", async () => {
+    const memoryA = randomUUID();
+    const memoryB = randomUUID();
+    await asUser(userA, (tx) => tx`
+      insert into public.memories (id, user_id, type, content, normalized_key, source_conversation_id)
+      values (${memoryA}, ${userA}, 'preference', 'I prefer TypeScript', 'i prefer typescript', ${conversationA})
+    `);
+    await sql`
+      insert into public.memories (id, user_id, type, content, normalized_key)
+      values (${memoryB}, ${userB}, 'fact', 'Secret fact', 'secret fact')
+    `;
+
+    const visible = await asUser(userA, (tx) => tx`select id, content from public.memories`);
+    expect(visible).toEqual([{ id: memoryA, content: "I prefer TypeScript" }]);
+
+    await expect(asUser(userA, (tx) => tx`
+      insert into public.memories (user_id, type, content, normalized_key)
+      values (${userB}, 'fact', 'Stolen', 'stolen')
+    `)).rejects.toThrow();
+
+    const hiddenUpdate = await asUser(userA, (tx) => tx`update public.memories set content = 'Hijacked' where id = ${memoryB} returning id`);
+    const hiddenDelete = await asUser(userA, (tx) => tx`delete from public.memories where id = ${memoryB} returning id`);
+    expect(hiddenUpdate).toHaveLength(0);
+    expect(hiddenDelete).toHaveLength(0);
+
+    const [stillPrivate] = await sql`select content from public.memories where id = ${memoryB}`;
+    expect(stillPrivate.content).toBe("Secret fact");
+
+    const lexical = await asUser(userA, (tx) => tx`select id, content from public.search_memories_lexical('TypeScript', 5)`);
+    expect(lexical.map((row) => row.id)).toEqual([memoryA]);
+    const lexicalHidden = await asUser(userB, (tx) => tx`select id from public.search_memories_lexical('TypeScript', 5)`);
+    expect(lexicalHidden).toHaveLength(0);
   });
 
   it("keeps export and delete-all inside the caller, cascades messages, and leaves the account and preferences", async () => {

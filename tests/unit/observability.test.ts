@@ -83,6 +83,9 @@ describe("structured logger", () => {
       instructions: "room instructions",
       pins: ["secret project decision"],
       profile: "about the user",
+      memory: "I prefer TypeScript forever",
+      memories: ["hidden memory content"],
+      memoryContent: "do not log this memory",
       note: "reach me at person@example.com",
       tokenValue: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.doNotLogThisSignature",
       pinCount: 3,
@@ -96,6 +99,8 @@ describe("structured logger", () => {
     expect(serialized).not.toContain("private assistant");
     expect(serialized).not.toContain("hidden prompt");
     expect(serialized).not.toContain("secret project");
+    expect(serialized).not.toContain("TypeScript forever");
+    expect(serialized).not.toContain("hidden memory");
     expect(serialized).not.toContain("eyJhbGciOi");
   });
 
