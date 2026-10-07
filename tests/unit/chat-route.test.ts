@@ -27,7 +27,23 @@ const { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc
       update: (...args: unknown[]) => (from("messages") as Table).update(...args),
       insert: (...args: unknown[]) => (from("messages") as Table).insert(...args),
     });
-    return { ...value, from: (table: string) => table === "message_attachments" ? none() : table === "messages" ? messages() : from(table) };
+    const messageSources = () => {
+      const builder: Record<string, unknown> = {};
+      builder.insert = () => builder;
+      builder.select = () => builder;
+      builder.eq = () => builder;
+      builder.order = () => builder;
+      builder.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data: [], error: null }).then(resolve);
+      return builder;
+    };
+    return {
+      ...value,
+      from: (table: string) =>
+        table === "message_attachments" ? none()
+          : table === "message_sources" ? messageSources()
+            : table === "messages" ? messages()
+              : from(table),
+    };
   };
   return { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc, modelOptions: vi.fn(), contextCapabilities: vi.fn(() => ({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 })), withoutAttachments, attachmentState, stopState };
 });
@@ -1030,9 +1046,12 @@ describe("POST /api/chat", () => {
       webMocks.decideWebSearch.mockReturnValue({ search: false, reason: "conceptual" });
       const response = await POST(validRequest());
       expect(response.status).toBe(200);
-      await response.text();
+      const events = await Array.fromAsync(readChatSse(response.body!));
       expect(webMocks.runWebSearchPipeline).not.toHaveBeenCalled();
       expect(webMocks.getWebSearchConfig).not.toHaveBeenCalled();
+      expect(events[0]).toMatchObject({ type: "start" });
+      expect(events[0]).not.toHaveProperty("sources");
+      expect(events.filter((event) => event.type === "delta").map((event) => event.type === "delta" ? event.text : "").join("")).not.toMatch(/\[SOURCE:|Sources/i);
     });
 
     it("grounds the reply in web sources when search is configured", async () => {
@@ -1065,6 +1084,12 @@ describe("POST /api/chat", () => {
         expect(webMocks.runWebSearchPipeline).toHaveBeenCalledOnce();
         expect(info.mock.calls.some(([line]) => String(line).includes("web.route.decided"))).toBe(true);
         expect(info.mock.calls.some(([line]) => String(line).includes("web.context.included"))).toBe(true);
+        expect(info.mock.calls.some(([line]) => String(line).includes("citation.sources.prepared"))).toBe(true);
+        expect(events[0]).toMatchObject({
+          type: "start",
+          sources: [{ ordinal: 1, kind: "web", title: "Node.js", domain: "nodejs.org", url: "https://nodejs.org/en" }],
+        });
+        expect(prompt[1].content).toContain("cite_as: [SOURCE:web:1]");
         expect(JSON.stringify(info.mock.calls)).not.toContain("test-key");
         expect(JSON.stringify(info.mock.calls)).not.toContain("Node.js 22 is the current release line");
       } finally {
@@ -1109,9 +1134,38 @@ describe("POST /api/chat", () => {
             ]),
           },
         });
+        expect(events[0]).not.toHaveProperty("sources");
         expect(warn.mock.calls.some(([line]) => String(line).includes("web.search.failed"))).toBe(true);
       } finally {
         warn.mockRestore();
+      }
+    });
+
+    it("transforms citation handles in the stream and rejects unknown ids", async () => {
+      readyClient([]);
+      stream.mockResolvedValue(providerChunks(["Node 22 [SOURCE:web:1] and fake [SOURCE:web:9]."], "stop"));
+      webMocks.decideWebSearch.mockReturnValue({ search: true, reason: "releases_versions" });
+      webMocks.getWebSearchConfig.mockReturnValue({ providerId: "tavily", apiKey: "test-key", maxResults: 8, maxPages: 4, maxSources: 5 });
+      webMocks.getWebSearchProvider.mockReturnValue({ id: "tavily", searchWeb: vi.fn() });
+      webMocks.runWebSearchPipeline.mockResolvedValue({
+        sources: [webSource],
+        degraded: false,
+        searchResultCount: 1,
+        pagesFetched: 1,
+      });
+      const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+      try {
+        const response = await POST(validRequest());
+        expect(response.status).toBe(200);
+        const events = await Array.fromAsync(readChatSse(response.body!));
+        const shown = events.filter((event) => event.type === "delta").map((event) => event.type === "delta" ? event.text : "").join("");
+        expect(shown).toContain("[1]");
+        expect(shown).not.toContain("[SOURCE:");
+        expect(shown).not.toContain("[9]");
+        expect(info.mock.calls.some(([line]) => String(line).includes("citation.references.parsed"))).toBe(true);
+        expect(info.mock.calls.some(([line]) => String(line).includes("citation.references.invalid"))).toBe(true);
+      } finally {
+        info.mockRestore();
       }
     });
 

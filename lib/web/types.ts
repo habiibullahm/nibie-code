@@ -14,6 +14,8 @@ export type WebContextInput = {
   retrieval: "web_search" | "web_snippet_only";
   publishedAt?: string | null;
   text: string;
+  /** Deterministic citation handle id (e.g. `web:1`) when Citations V1 prepared this source. */
+  citationHandle?: string;
 };
 
 /** Stable route reasons for logs and tests. Search reasons first, then no-search. */

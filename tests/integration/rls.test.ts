@@ -64,6 +64,8 @@ describe("Supabase row-level security", () => {
     await sql`drop table if exists public.weekly_usage_reservations cascade`;
     await sql`drop table if exists public.weekly_ai_usage cascade`;
     await sql`drop type if exists public.weekly_usage_mode cascade`;
+    await sql`drop table if exists public.message_sources cascade`;
+    await sql`drop type if exists public.citation_source_kind cascade`;
     await sql`drop table if exists public.message_attachments cascade`;
     await sql`drop table if exists public.workbench_documents cascade`;
     await sql`drop table if exists public.room_files cascade`;

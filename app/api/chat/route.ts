@@ -10,6 +10,10 @@ import { toProviderMessages } from "@/lib/ai/provider-messages";
 import { contextCapabilitiesFor, getModelOptions, providerFor } from "@/lib/ai/registry";
 import { createReasoningStreamFilter, sanitizeModelOutput } from "@/lib/ai/sanitize-model-output";
 import { ProviderStreamError, readOpenAiSse } from "@/lib/ai/sse";
+import { attachWebCitationHandles } from "@/lib/citations/attach";
+import { createCitationStreamFilter } from "@/lib/citations/parse";
+import { citationViewsFromPrepared, persistMessageSources } from "@/lib/citations/persist";
+import type { SourceReference } from "@/lib/citations/types";
 import { stopPollMs, stoppedPlaceholder } from "@/lib/chat/stop";
 import { buildContext } from "@/lib/context/build-context";
 import { CONTEXT_POLICY_VERSION } from "@/lib/context/context-policy";
@@ -227,6 +231,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   // Failures never block the reply: empty web context continues as normal chat, with an authoritative
   // "verification unavailable" instruction when routing wanted search but sources were empty.
   let web: WebContextInput[] | undefined;
+  let citationSources: SourceReference[] = [];
   let webVerificationUnavailable = false;
   const webDecision = decideWebSearch(userMessage.content, { hasRoomFileContext: Boolean(files?.length) });
   logInfo("web.route.decided", { requestId, search: webDecision.search, reason: webDecision.reason });
@@ -252,8 +257,10 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
         });
         const webDurationMs = Date.now() - webStartedAt;
         if (pipeline.sources.length) {
-          web = pipeline.sources;
-          const snippetOnlyCount = pipeline.sources.filter((source) => source.retrieval === "web_snippet_only").length;
+          const attached = attachWebCitationHandles(pipeline.sources);
+          web = attached.web.length ? attached.web : undefined;
+          citationSources = attached.sources;
+          const snippetOnlyCount = (web ?? []).filter((source) => source.retrieval === "web_snippet_only").length;
           logInfo("web.search.succeeded", {
             requestId,
             resultCount: pipeline.searchResultCount,
@@ -267,9 +274,14 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
           });
           logInfo("web.context.included", {
             requestId,
-            sourceCount: pipeline.sources.length,
+            sourceCount: web?.length ?? 0,
             snippetOnlyCount,
           });
+          logInfo("citation.sources.prepared", {
+            requestId,
+            sourceCount: citationSources.length,
+          });
+          if (!web?.length) webVerificationUnavailable = true;
         } else {
           webVerificationUnavailable = true;
           if (pipeline.degraded) {
@@ -298,6 +310,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       }
     }
   }
+  const citationViews = citationViewsFromPrepared(citationSources);
 
   // Every save of this generation only applies while its row is still streaming. An explicit Stop has already written the
   // text the user saw and marked the row interrupted, so a late finish, error or disconnect save can never replace it.
@@ -308,7 +321,21 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   const persist = async (content: string, status: "complete" | "interrupted" | "error"): Promise<"saved" | "stopped" | "failed"> => {
     try {
       const { data, error } = await supabase.from("messages").update({ content, status }).eq("id", assistant.id).eq("status", "streaming").select("id").maybeSingle();
-      if (!error && data) return "saved";
+      if (!error && data) {
+        if ((status === "complete" || status === "interrupted") && citationSources.length) {
+          const savedSources = await persistMessageSources({
+            supabase: supabase as Parameters<typeof persistMessageSources>[0]["supabase"],
+            userId: user.id,
+            conversationId: conversation.id,
+            messageId: assistant.id,
+            sources: citationSources,
+          });
+          if (!savedSources.ok) {
+            logWarn("citation.sources.persist_failed", { requestId, sourceCount: citationSources.length });
+          }
+        }
+        return "saved";
+      }
       if (!error && await replyStopped()) return "stopped";
     } catch { /* reported below */ }
     logError("chat.persistence.failed", { requestId, code: operationalCodes.assistantPersistFailed, stage: "persist", status });
@@ -501,7 +528,8 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   const summaryMaintenance = deferThreadSummaryMaintenance({ supabase, conversationId: conversation.id, requestId });
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      const filter = createReasoningStreamFilter();
+      const reasoningFilter = createReasoningStreamFilter();
+      const citationFilter = createCitationStreamFilter(citationSources);
       let output = ""; let completed = false; let sealed = false;
       let interruptedSave: Promise<"saved" | "stopped" | "failed"> | undefined;
       const publish = (text: string) => {
@@ -510,15 +538,36 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
         output += text;
         if (!clientCancelled) controller.enqueue(encoder.encode(event("delta", { text })));
       };
+      const feedModelText = (chunk: string) => {
+        if (!chunk) return;
+        publish(citationFilter.push(reasoningFilter.push(chunk)));
+      };
+      const logCitationStats = () => {
+        logInfo("citation.references.parsed", {
+          requestId,
+          sourceCount: citationSources.length,
+          citationCount: citationFilter.citationCount,
+        });
+        if (citationFilter.invalidCitationCount > 0) {
+          logInfo("citation.references.invalid", {
+            requestId,
+            sourceCount: citationSources.length,
+            invalidCitationCount: citationFilter.invalidCitationCount,
+          });
+        }
+      };
       const seal = () => {
         if (sealed) return;
         sealed = true;
-        publish(filter.finish());
-        if (filter.reasoningBlockCount > 0) {
+        const afterReasoning = reasoningFilter.finish();
+        if (afterReasoning) publish(citationFilter.push(afterReasoning));
+        publish(citationFilter.finish());
+        logCitationStats();
+        if (reasoningFilter.reasoningBlockCount > 0) {
           console.info(JSON.stringify({
             event: "ai.reasoning.filtered",
             requestId: assistant.id,
-            reasoningBlockCount: filter.reasoningBlockCount,
+            reasoningBlockCount: reasoningFilter.reasoningBlockCount,
           }));
         }
       };
@@ -536,10 +585,15 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       };
       try {
         if (clientCancelled) throw new Error("Response aborted.");
-        controller.enqueue(encoder.encode(event("start", { id: assistant.id, position: assistant.position, context })));
+        controller.enqueue(encoder.encode(event("start", {
+          id: assistant.id,
+          position: assistant.position,
+          context,
+          ...(citationViews.length ? { sources: citationViews } : {}),
+        })));
         for await (const item of readOpenAiSse(responseStream, aborter.signal)) {
           if (item.type === "done") { completed = true; finishReason = item.finishReason ?? "unspecified"; break; }
-          publish(filter.push(item.text));
+          feedModelText(item.text);
         }
         seal();
         if (userStopped || clientCancelled || request.signal.aborted) {
