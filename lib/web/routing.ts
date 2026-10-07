@@ -16,13 +16,13 @@ export const WEB_SEARCH_RULES: readonly WebSearchRule[] = [
     reason: "explicit_request",
     search: true,
     pattern:
-      /\b(?:search(?:\s+the)?\s+web|look\s+up\s+online|find\s+online|google|browse\s+(?:the\s+)?web|web\s+search|look\s+this\s+up|check\s+online)\b/i,
+      /\b(?:search(?:\s+the)?\s+web|look\s+up\s+online|find\s+online|google|browse\s+(?:the\s+)?web|web\s+search|look\s+this\s+up|check\s+online|(?:coba\s+)?cari(?:\s+di)?\s+(?:web|online|internet)|(?:coba\s+)?cek(?:\s+di)?\s+(?:web|online|internet)|lihat\s+di\s+web|telusuri\s+web)\b/i,
   },
   {
     reason: "temporal_currency",
     search: true,
     pattern:
-      /\b(?:latest|current|today|recent(?:ly)?|this\s+week|right\s+now|as\s+of|up[- ]to[- ]date)\b/i,
+      /\b(?:latest|current|today|recent(?:ly)?|this\s+week|right\s+now|as\s+of|up[- ]to[- ]date|saat\s+ini|sekarang|hari\s+ini|terbaru|terkini|baru[- ]baru\s+ini|minggu\s+ini|update\s+terbaru|update\s+terkini)\b/i,
   },
   {
     reason: "news",
@@ -74,7 +74,8 @@ export const WEB_SEARCH_RULES: readonly WebSearchRule[] = [
 ] as const;
 
 /**
- * Weak tokens that historically over-triggered on conceptual/coding asks.
+ * Weak tokens that historically over-triggered on conceptual/coding asks, plus
+ * Indonesian market topic cues (IHSG, saham, …) that must not search alone.
  * Only search when a currency cue is also present (and suppressors did not win).
  */
 export const WEAK_CURRENCY_SEARCH_RULES: readonly WebSearchRule[] = [
@@ -82,6 +83,13 @@ export const WEAK_CURRENCY_SEARCH_RULES: readonly WebSearchRule[] = [
     reason: "prices_markets",
     search: true,
     pattern: /\b(?:price|prices)\b/i,
+  },
+  {
+    reason: "prices_markets",
+    search: true,
+    // Indonesian market topic cues — never alone; need a currency cue (or explicit web intent).
+    pattern:
+      /\b(?:ihsg|idx|jci|bei|saham|harga\s+saham|pasar\s+saham|indeks\s+saham|indeks\s+pasar)\b/i,
   },
   {
     reason: "releases_versions",
@@ -99,7 +107,7 @@ const ROOM_SUFFICIENT_PATTERN =
   /\b(?:based\s+on\s+this\s+file|based\s+on\s+the\s+(?:attached|room)\s+file|in\s+this\s+room|from\s+(?:the\s+)?(?:attached|room)\s+file|using\s+(?:only\s+)?(?:this|the)\s+(?:file|attachment|room)|summarize\s+(?:this|the)\s+(?:file|attachment|document)|according\s+to\s+(?:this|the)\s+file)\b/i;
 
 const CONCEPTUAL_PATTERN =
-  /\b(?:explain|how\s+does|how\s+do|what\s+is|what\s+are|teach\s+me|why\s+(?:is|are|do|does)|concept\s+of|difference\s+between)\b/i;
+  /\b(?:explain|how\s+does|how\s+do|what\s+is|what\s+are|teach\s+me|why\s+(?:is|are|do|does)|concept\s+of|difference\s+between|jelaskan|apa\s+itu|bagaimana\s+cara|cara\s+kerja|ajarkan|mengapa|kenapa|perbedaan\s+antara)\b/i;
 
 const PURE_WRITING_PATTERN =
   /\b(?:rewrite|rephrase|draft|edit|proofread|tone|make\s+(?:this|it)\s+(?:shorter|longer|clearer|more\s+formal|more\s+casual)|polish\s+(?:this|my))\b/i;
@@ -108,7 +116,7 @@ const GENERIC_CODING_PATTERN =
   /\b(?:bug|fix|refactor|implement|function|typescript|javascript|python|code\s+review|unit\s+test|compile\s+error|type\s+error)\b/i;
 
 const CURRENCY_CUE_PATTERN =
-  /\b(?:latest|current|today|recent(?:ly)?|this\s+week|right\s+now|as\s+of|up[- ]to[- ]date)\b/i;
+  /\b(?:latest|current|today|recent(?:ly)?|this\s+week|right\s+now|as\s+of|up[- ]to[- ]date|saat\s+ini|sekarang|hari\s+ini|terbaru|terkini|baru[- ]baru\s+ini|minggu\s+ini|update\s+terbaru|update\s+terkini)\b/i;
 
 export type DecideWebSearchOpts = {
   hasRoomFileContext?: boolean;

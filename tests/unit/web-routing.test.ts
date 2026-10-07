@@ -76,6 +76,25 @@ describe("decideWebSearch", () => {
         reason: "conceptual",
       });
     });
+
+    it("skips Indonesian conceptual market asks without freshness or explicit web intent", () => {
+      expect(decideWebSearch("apa itu IHSG?")).toEqual({
+        search: false,
+        reason: "conceptual",
+      });
+      expect(decideWebSearch("jelaskan IHSG")).toEqual({
+        search: false,
+        reason: "conceptual",
+      });
+      expect(decideWebSearch("jelaskan cara kerja pasar saham")).toEqual({
+        search: false,
+        reason: "conceptual",
+      });
+      expect(decideWebSearch("apa itu indeks saham?")).toEqual({
+        search: false,
+        reason: "conceptual",
+      });
+    });
   });
 
   describe("search cases (brief eval)", () => {
@@ -128,6 +147,48 @@ describe("decideWebSearch", () => {
       expect(decideWebSearch("Look up online whether TypeScript 5.7 is out")).toEqual({
         search: true,
         reason: "explicit_request",
+      });
+    });
+
+    it("searches on Indonesian explicit web intent", () => {
+      expect(decideWebSearch("coba cari web soal IHSG")).toEqual({
+        search: true,
+        reason: "explicit_request",
+      });
+      expect(decideWebSearch("cari di web harga IHSG")).toEqual({
+        search: true,
+        reason: "explicit_request",
+      });
+      expect(decideWebSearch("cek online berita pasar")).toEqual({
+        search: true,
+        reason: "explicit_request",
+      });
+      expect(decideWebSearch("telusuri web soal BBCA")).toEqual({
+        search: true,
+        reason: "explicit_request",
+      });
+    });
+
+    it("searches Indonesian market asks with freshness cues", () => {
+      expect(decideWebSearch("analisa IHSG hari ini")).toEqual({
+        search: true,
+        reason: "temporal_currency",
+      });
+      expect(decideWebSearch("arah IHSG saat ini")).toEqual({
+        search: true,
+        reason: "temporal_currency",
+      });
+      expect(decideWebSearch("IHSG terbaru gimana?")).toEqual({
+        search: true,
+        reason: "temporal_currency",
+      });
+      expect(decideWebSearch("harga saham BBCA sekarang")).toEqual({
+        search: true,
+        reason: "temporal_currency",
+      });
+      expect(decideWebSearch("update pasar saham terkini")).toEqual({
+        search: true,
+        reason: "temporal_currency",
       });
     });
 

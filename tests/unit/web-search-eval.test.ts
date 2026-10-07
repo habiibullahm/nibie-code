@@ -58,7 +58,7 @@ describe("web search eval (brief §12)", () => {
       const searchWeb = vi.fn(async () => [...WEB_EVAL_SEARCH_RESULTS]);
       const provider = { id: "tavily" as const, searchWeb };
       const noWebQueries = WEB_EVAL_ROUTE_CASES.filter(
-        (c) => c.id === "no_web" || c.id === "no_web_weak_token",
+        (c) => c.id === "no_web" || c.id === "no_web_weak_token" || c.id === "no_web_id_market",
       );
 
       for (const { query, opts, expected } of noWebQueries) {

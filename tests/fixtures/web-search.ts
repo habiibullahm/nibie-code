@@ -10,10 +10,13 @@ import type { WebSearchProvider } from "@/lib/web/provider";
 export type WebEvalCaseId =
   | "no_web"
   | "no_web_weak_token"
+  | "no_web_id_market"
   | "current_version"
   | "news"
   | "ceo"
   | "explicit_search"
+  | "id_explicit_search"
+  | "id_market_currency"
   | "room_only"
   | "room_plus_web"
   | "prompt_injection"
@@ -89,6 +92,61 @@ export const WEB_EVAL_ROUTE_CASES: readonly WebEvalRouteCase[] = [
     id: "explicit_search",
     query: "Search the web for best espresso machines",
     expected: { search: true, reason: "explicit_request" },
+  },
+  {
+    id: "id_explicit_search",
+    query: "coba cari web soal IHSG",
+    expected: { search: true, reason: "explicit_request" },
+  },
+  {
+    id: "id_explicit_search",
+    query: "cari di web harga IHSG",
+    expected: { search: true, reason: "explicit_request" },
+  },
+  {
+    id: "id_market_currency",
+    query: "analisa IHSG hari ini",
+    expected: { search: true, reason: "temporal_currency" },
+  },
+  {
+    id: "id_market_currency",
+    query: "arah IHSG saat ini",
+    expected: { search: true, reason: "temporal_currency" },
+  },
+  {
+    id: "id_market_currency",
+    query: "IHSG terbaru gimana?",
+    expected: { search: true, reason: "temporal_currency" },
+  },
+  {
+    id: "id_market_currency",
+    query: "harga saham BBCA sekarang",
+    expected: { search: true, reason: "temporal_currency" },
+  },
+  {
+    id: "id_market_currency",
+    query: "update pasar saham terkini",
+    expected: { search: true, reason: "temporal_currency" },
+  },
+  {
+    id: "no_web_id_market",
+    query: "apa itu IHSG?",
+    expected: { search: false, reason: "conceptual" },
+  },
+  {
+    id: "no_web_id_market",
+    query: "jelaskan IHSG",
+    expected: { search: false, reason: "conceptual" },
+  },
+  {
+    id: "no_web_id_market",
+    query: "jelaskan cara kerja pasar saham",
+    expected: { search: false, reason: "conceptual" },
+  },
+  {
+    id: "no_web_id_market",
+    query: "apa itu indeks saham?",
+    expected: { search: false, reason: "conceptual" },
   },
   {
     id: "room_only",
