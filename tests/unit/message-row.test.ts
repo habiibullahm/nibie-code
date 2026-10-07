@@ -12,25 +12,26 @@ const render = (message: Partial<PersistedMessage>) => renderToStaticMarkup(crea
 }));
 
 describe("assistant MessageRow", () => {
-  it("shows only the animated mark while Nibie is thinking", () => {
+  it("shows only the thinking dash before the first token", () => {
     const html = render({ status: "streaming", content: "" });
-    expect(html).toContain('class="response-thinking"');
-    expect(html).toContain('data-activity="thinking"');
+    expect(html).toContain('<span class="response-thinking" aria-hidden="true"></span>');
+    expect(html).not.toContain("brand-mark");
     expect(html).toContain('role="status">Nibie is responding<');
     expect(html).not.toContain("message-author");
     expect(html).not.toMatch(/>Nibie</);
   });
 
-  it("drops the mark once text streams in and uses the caret instead", () => {
+  it("removes the indicator as soon as text arrives and renders it without any streaming decoration", () => {
     const html = render({ status: "streaming", content: "Partial answer" });
+    expect(html).not.toContain("response-thinking");
     expect(html).not.toContain("brand-mark");
-    expect(html).toContain("markdown has-caret");
+    expect(html).toContain('<div class="markdown"><p>Partial answer</p></div>');
     expect(html).toContain('role="status">Nibie is responding<');
   });
 
   it("renders a completed reply as text only, with no author header", () => {
     const html = render({ status: "complete", content: "Done." });
-    expect(html).not.toContain("brand-mark");
+    expect(html).not.toContain("response-thinking");
     expect(html).not.toContain("message-author");
     expect(html).not.toContain('role="status"');
   });

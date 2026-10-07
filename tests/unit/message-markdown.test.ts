@@ -6,12 +6,6 @@ import { MessageMarkdown } from "../../components/message-markdown";
 const render = (content: string) => renderToStaticMarkup(createElement(MessageMarkdown, { content }));
 
 describe("MessageMarkdown", () => {
-  it("adds the streaming caret hook only while a reply is streaming", () => {
-    expect(renderToStaticMarkup(createElement(MessageMarkdown, { content: "partial", streaming: true }))).toContain('class="markdown has-caret"');
-    expect(render("done")).toContain('class="markdown"');
-    expect(render("done")).not.toContain("has-caret");
-  });
-
   it("never renders raw HTML from model output", () => {
     const html = render('<script>alert(1)</script><img src=x onerror="alert(2)"><iframe src="https://evil.test"></iframe>\n\nvisible text');
     expect(html).not.toMatch(/<script|<iframe|<img|onerror/i);

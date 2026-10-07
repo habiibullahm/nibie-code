@@ -88,13 +88,10 @@ const components = buildComponents();
 export const MessageMarkdown = memo(function MessageMarkdown({
   content,
   sources,
-  streaming = false,
 }: {
   content: string;
   sources?: CitationSourceView[];
-  // Shows a quiet caret after the last text block while the reply is still arriving.
-  streaming?: boolean;
 }) {
   const rendered = useMemo(() => linkCitationMarkers(content, sources), [content, sources]);
-  return <div className={`markdown${streaming ? " has-caret" : ""}`}><ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml urlTransform={urlTransform} components={components}>{rendered}</ReactMarkdown></div>;
+  return <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml urlTransform={urlTransform} components={components}>{rendered}</ReactMarkdown></div>;
 });

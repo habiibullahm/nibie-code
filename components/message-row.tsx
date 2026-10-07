@@ -4,7 +4,6 @@ import { memo, useState, type KeyboardEvent } from "react";
 import { FileText, Pencil, RefreshCw } from "lucide-react";
 import { attachmentTypeLabel, formatBytes } from "@/lib/attachments/limits";
 import type { AttachmentSummary } from "@/lib/attachments/types";
-import { BrandMark } from "@/components/brand";
 import { CopyButton } from "@/components/copy-button";
 import { MessageMarkdown } from "@/components/message-markdown";
 import { MessageSources } from "@/components/message-sources";
@@ -71,7 +70,7 @@ export const MessageRow = memo(function MessageRow({ message, initial, isLast, i
     const canRegenerate = canMutate && isLast && message.status === "complete" && canCopy;
     const canRetry = canMutate && isLast && (message.status === "error" || message.status === "interrupted");
     const responseStatus = message.researchStage ? `Nibie is ${RESEARCH_STAGE_LABELS[message.researchStage].toLowerCase()}` : "Nibie is responding";
-    // No author header: the animated mark appears only while Nibie is thinking, and the caret covers streaming.
+    // No author header. Before the first token a single pulsing dash shows; once text arrives it renders as-is, without motion.
     // Status labels (Deep Research, Stopped, errors) and the optional timestamp keep a small meta line.
     const statuses = [
       message.research ? `Deep Research${message.research.status === "incomplete" ? " · Incomplete" : message.research.status === "failed" ? " · Failed" : ""}` : null,
@@ -87,8 +86,8 @@ export const MessageRow = memo(function MessageRow({ message, initial, isLast, i
           <MessageTime value={message.created_at} />
         </div> : null}
         {waiting
-          ? <div className="response-thinking"><BrandMark activity="thinking" />{message.researchStage ? <span className="research-stage">{RESEARCH_STAGE_LABELS[message.researchStage]}</span> : null}</div>
-          : <MessageMarkdown content={message.content} sources={message.sources} streaming={message.status === "streaming"} />}
+          ? <div className="response-waiting"><span className="response-thinking" aria-hidden="true" />{message.researchStage ? <span className="research-stage">{RESEARCH_STAGE_LABELS[message.researchStage]}</span> : null}</div>
+          : <MessageMarkdown content={message.content} sources={message.sources} />}
         {message.sources?.length && !waiting ? <MessageSources sources={message.sources} /> : null}
         {(canCopy || canRegenerate || canRetry) && <div className="message-actions">
           {canCopy && <CopyButton text={message.content} label="Copy response" />}
