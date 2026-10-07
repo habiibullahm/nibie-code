@@ -17,6 +17,7 @@ export type WebEvalCaseId =
   | "explicit_search"
   | "id_explicit_search"
   | "id_market_currency"
+  | "id_market_condition"
   | "room_only"
   | "room_plus_web"
   | "prompt_injection"
