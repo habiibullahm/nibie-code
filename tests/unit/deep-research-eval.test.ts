@@ -7,6 +7,8 @@ import { researchSynthesisInstruction } from "@/lib/research/synthesize";
 import { attachWebCitationHandles } from "@/lib/citations/attach";
 import { MAX_RESEARCH_PREPARED_SOURCES } from "@/lib/citations/prepare";
 import { evidenceToWebContext } from "@/lib/research/evidence";
+import { isLikelyPrimarySource, selectResearchUrlsToFetch } from "@/lib/research/select";
+import type { WebSearchResult } from "@/lib/web/types";
 
 describe("deep research eval set", () => {
   it("covers required acceptance scenarios", () => {
@@ -97,5 +99,54 @@ describe("deep research eval set", () => {
       incompleteNotice: null,
     });
     expect(instruction).toMatch(/not primarily time-sensitive|do not over-weight recency/i);
+  });
+
+  it("current-facts selection prefers fresher publishedAt when timeSensitive", () => {
+    const plan = fallbackResearchPlan(DEEP_RESEARCH_EVAL_CASES.find((c) => c.id === "current-facts")!.question);
+    expect(plan.timeSensitive).toBe(true);
+    const candidates: WebSearchResult[] = [
+      {
+        title: "Old",
+        url: "https://archive.example/node",
+        snippet: "old",
+        rank: 1,
+        domain: "archive.example",
+        publishedAt: "2019-01-01",
+      },
+      {
+        title: "Fresh",
+        url: "https://nodejs.org/en/about/previous-releases",
+        snippet: "current",
+        rank: 2,
+        domain: "nodejs.org",
+        publishedAt: "2026-04-01",
+      },
+    ];
+    const selected = selectResearchUrlsToFetch(candidates, 1, { timeSensitive: true });
+    expect(selected[0]!.domain).toBe("nodejs.org");
+  });
+
+  it("official-docs selection prefers primary/docs domains", () => {
+    const question = DEEP_RESEARCH_EVAL_CASES.find((c) => c.id === "official-docs")!.question;
+    expect(question).toMatch(/official/i);
+    expect(isLikelyPrimarySource(MOCK_RESEARCH_PAGES.postgresDocs.url, MOCK_RESEARCH_PAGES.postgresDocs.domain)).toBe(true);
+    const candidates: WebSearchResult[] = [
+      {
+        title: "Random blog",
+        url: "https://medium.com/some-post",
+        snippet: "opinion",
+        rank: 1,
+        domain: "medium.com",
+      },
+      {
+        title: MOCK_RESEARCH_PAGES.postgresDocs.title,
+        url: MOCK_RESEARCH_PAGES.postgresDocs.url,
+        snippet: "jsonb",
+        rank: 2,
+        domain: MOCK_RESEARCH_PAGES.postgresDocs.domain,
+      },
+    ];
+    const selected = selectResearchUrlsToFetch(candidates, 1, { preferPrimary: true });
+    expect(selected[0]!.domain).toBe(MOCK_RESEARCH_PAGES.postgresDocs.domain);
   });
 });

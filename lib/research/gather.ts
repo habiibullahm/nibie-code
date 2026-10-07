@@ -18,6 +18,8 @@ export type ResearchGatherOptions = {
   provider: WebSearchProvider;
   fetchPage?: typeof fetchWebPage;
   resultsPerQuery?: number;
+  timeSensitive?: boolean;
+  preferPrimary?: boolean;
 };
 
 export type ResearchGatherResult = {
@@ -85,8 +87,12 @@ export async function gatherResearchSources(
     }
   }
 
-  const candidates = mergeResearchCandidates(perQuery);
-  const toFetch = selectResearchUrlsToFetch(candidates);
+  const selectOpts = {
+    timeSensitive: Boolean(opts.timeSensitive),
+    preferPrimary: Boolean(opts.preferPrimary),
+  };
+  const candidates = mergeResearchCandidates(perQuery, undefined, selectOpts);
+  const toFetch = selectResearchUrlsToFetch(candidates, undefined, selectOpts);
 
   const outcomes = await mapWithConcurrency(toFetch, Math.min(4, toFetch.length || 1), async (result): Promise<FetchOutcome> => {
     if (opts.signal.aborted) {
@@ -165,7 +171,7 @@ export async function gatherResearchSources(
     }
   }
 
-  const sources = selectResearchFinalSources(fetched);
+  const sources = selectResearchFinalSources(fetched, undefined, selectOpts);
   return {
     sources,
     searchQueryCount,

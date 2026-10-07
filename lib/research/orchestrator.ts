@@ -13,6 +13,7 @@ import {
   generateResearchPlan,
   ResearchPlanError,
 } from "@/lib/research/plan";
+import { RESEARCH_GATHER_DEADLINE_MS, RESEARCH_MAX_ROUNDS } from "@/lib/research/budgets";
 import { selectResearchFinalSources } from "@/lib/research/select";
 import type {
   ResearchOrchestratorResult,
@@ -21,6 +22,30 @@ import type {
 } from "@/lib/research/types";
 import { RESEARCH_USAGE_POLICY } from "@/lib/research/usage-policy";
 import type { WebContextInput } from "@/lib/web/types";
+
+function linkGatherDeadline(parent: AbortSignal, deadlineMs: number): { signal: AbortSignal; clear: () => void; timedOut: () => boolean } {
+  const local = new AbortController();
+  let timedOut = false;
+  const onParent = () => local.abort();
+  if (parent.aborted) local.abort();
+  else parent.addEventListener("abort", onParent, { once: true });
+  const timer = setTimeout(() => {
+    timedOut = true;
+    local.abort();
+  }, deadlineMs);
+  return {
+    signal: local.signal,
+    timedOut: () => timedOut,
+    clear: () => {
+      clearTimeout(timer);
+      parent.removeEventListener("abort", onParent);
+    },
+  };
+}
+
+function prefersPrimarySources(question: string, planNotes: string): boolean {
+  return /\b(official|primary|documentation|docs)\b/i.test(`${question} ${planNotes}`);
+}
 
 export type RunDeepResearchOptions = {
   question: string;
@@ -97,6 +122,10 @@ export async function runDeepResearch(
     };
   }
 
+  // Wall-clock gather deadline so plan+search+fetch fit under route maxDuration with room for synthesis.
+  const gatherGate = linkGatherDeadline(opts.signal, RESEARCH_GATHER_DEADLINE_MS);
+  const gatherSignal = gatherGate.signal;
+
   progress("planning");
   let modelCallCount = 0;
   let plan;
@@ -105,16 +134,23 @@ export async function runDeepResearch(
       provider: opts.chatProvider,
       mode: opts.planMode,
       question: opts.question,
-      signal: opts.signal,
+      signal: gatherSignal,
     });
     modelCallCount += 1;
   } catch (error) {
-    if (opts.signal.aborted || (error instanceof ResearchPlanError && error.reason === "aborted")) {
+    if (opts.signal.aborted || gatherSignal.aborted || (error instanceof ResearchPlanError && error.reason === "aborted")) {
+      gatherGate.clear();
       return {
         ...base(),
         status: "interrupted",
-        incompleteNotice: "Research was stopped during planning.",
-        metrics: emptyMetrics({ modelCallCount, durationMs: Date.now() - startedAt }),
+        incompleteNotice: gatherGate.timedOut()
+          ? "Deep Research ran out of time while planning."
+          : "Research was stopped during planning.",
+        metrics: emptyMetrics({
+          modelCallCount,
+          durationMs: Date.now() - startedAt,
+          incompleteReason: gatherGate.timedOut() ? "gather_deadline" : undefined,
+        }),
       };
     }
     // Planner failure → bounded fallback, never an uncontrolled loop.
@@ -122,33 +158,46 @@ export async function runDeepResearch(
     modelCallCount += 1;
   }
 
-  if (opts.signal.aborted) {
+  if (gatherSignal.aborted) {
+    gatherGate.clear();
     return {
       ...base(),
       status: "interrupted",
       plan,
-      incompleteNotice: "Research was stopped after planning.",
+      incompleteNotice: gatherGate.timedOut()
+        ? "Deep Research ran out of time after planning."
+        : "Research was stopped after planning.",
       metrics: emptyMetrics({
         modelCallCount,
         timeSensitive: plan.timeSensitive,
         durationMs: Date.now() - startedAt,
+        incompleteReason: gatherGate.timedOut() ? "gather_deadline" : undefined,
       }),
     };
   }
 
+  const selectOpts = {
+    timeSensitive: plan.timeSensitive,
+    preferPrimary: prefersPrimarySources(opts.question, plan.notes),
+  };
+
   progress("searching");
   const initial = await gatherResearchSources(plan.initialQueries, {
-    signal: opts.signal,
+    signal: gatherSignal,
     provider: opts.searchProvider,
     fetchPage: opts.fetchPage,
+    ...selectOpts,
   });
 
-  if (opts.signal.aborted) {
+  if (gatherSignal.aborted) {
+    gatherGate.clear();
     return {
       ...base(),
       status: "interrupted",
       plan,
-      incompleteNotice: "Research was stopped while searching.",
+      incompleteNotice: gatherGate.timedOut()
+        ? "Deep Research ran out of time while searching."
+        : "Research was stopped while searching.",
       metrics: emptyMetrics({
         modelCallCount,
         searchQueryCount: initial.searchQueryCount,
@@ -158,6 +207,7 @@ export async function runDeepResearch(
         candidateUrlCount: initial.candidateUrlCount,
         timeSensitive: plan.timeSensitive,
         durationMs: Date.now() - startedAt,
+        incompleteReason: gatherGate.timedOut() ? "gather_deadline" : undefined,
       }),
     };
   }
@@ -165,20 +215,23 @@ export async function runDeepResearch(
   progress("reading");
   let gathered = initial;
   let followUpUsed = false;
+  let rounds = 1;
 
   const initialEvidence = gathered.sources.map((s) => extractEvidenceChunk(s));
   const gap = detectResearchGaps(plan, initialEvidence);
 
-  if (gap.needsFollowUp && gap.followUpQueries.length && !opts.signal.aborted) {
+  if (gap.needsFollowUp && gap.followUpQueries.length && !gatherSignal.aborted && rounds < RESEARCH_MAX_ROUNDS) {
     followUpUsed = true;
+    rounds += 1;
     progress("searching");
     const followUp = await gatherResearchSources(gap.followUpQueries, {
-      signal: opts.signal,
+      signal: gatherSignal,
       provider: opts.searchProvider,
       fetchPage: opts.fetchPage,
+      ...selectOpts,
     });
     // Merge sources; final select again via combining then re-extract.
-    const mergedSources = selectMerged(gathered.sources, followUp.sources);
+    const mergedSources = selectMerged(gathered.sources, followUp.sources, selectOpts);
     gathered = {
       sources: mergedSources,
       searchQueryCount: gathered.searchQueryCount + followUp.searchQueryCount,
@@ -190,7 +243,9 @@ export async function runDeepResearch(
     };
   }
 
-  if (opts.signal.aborted) {
+  gatherGate.clear();
+
+  if (opts.signal.aborted || gatherGate.timedOut()) {
     const evidence = gathered.sources.map((s) => extractEvidenceChunk(s));
     return {
       ...base(),
@@ -199,7 +254,9 @@ export async function runDeepResearch(
       evidence,
       web: evidenceToWebContext(evidence),
       contradictions: detectContradictions(evidence),
-      incompleteNotice: "Research was stopped before synthesis.",
+      incompleteNotice: gatherGate.timedOut()
+        ? "Deep Research ran out of time before synthesis."
+        : "Research was stopped before synthesis.",
       metrics: emptyMetrics({
         modelCallCount,
         searchQueryCount: gathered.searchQueryCount,
@@ -211,29 +268,48 @@ export async function runDeepResearch(
         followUpUsed,
         timeSensitive: plan.timeSensitive,
         durationMs: Date.now() - startedAt,
+        incompleteReason: gatherGate.timedOut() ? "gather_deadline" : undefined,
+      }),
+    };
+  }
+
+  const evidence = gathered.sources.map((s) => extractEvidenceChunk(s));
+  const contradictions = detectContradictions(evidence);
+
+  // Empty collection is a hard failure — never synthesize or charge as completed research.
+  if (evidence.length === 0) {
+    return {
+      ...base(),
+      status: "failed",
+      plan,
+      evidence: [],
+      web: [],
+      contradictions: [],
+      incompleteNotice: "Deep Research could not collect usable sources. Please try again later or switch to Normal.",
+      metrics: emptyMetrics({
+        modelCallCount,
+        searchQueryCount: gathered.searchQueryCount,
+        searchResultCount: gathered.searchResultCount,
+        pagesFetched: gathered.pagesFetched,
+        pagesFailed: gathered.pagesFailed,
+        candidateUrlCount: gathered.candidateUrlCount,
+        evidenceCount: 0,
+        followUpUsed,
+        timeSensitive: plan.timeSensitive,
+        durationMs: Date.now() - startedAt,
+        incompleteReason: gathered.failureCategory ?? "empty",
       }),
     };
   }
 
   progress("synthesizing");
-  const evidence = gathered.sources.map((s) => extractEvidenceChunk(s));
-  const contradictions = detectContradictions(evidence);
   const incompleteNotice =
-    evidence.length === 0
-      ? "Deep Research could not collect usable sources. The answer may be incomplete."
-      : gathered.pagesFailed > 0 && evidence.length < 3
-        ? "Some sources could not be read; evidence is partial."
-        : null;
-
-  const status =
-    evidence.length === 0
-      ? "incomplete"
-      : incompleteNotice
-        ? "incomplete"
-        : "complete";
+    gathered.pagesFailed > 0 && evidence.length < 3
+      ? "Some sources could not be read; evidence is partial."
+      : null;
 
   return {
-    status,
+    status: incompleteNotice ? "incomplete" : "complete",
     plan,
     evidence,
     web: evidenceToWebContext(evidence),
@@ -251,11 +327,15 @@ export async function runDeepResearch(
       followUpUsed,
       durationMs: Date.now() - startedAt,
       timeSensitive: plan.timeSensitive,
-      incompleteReason: evidence.length === 0 ? (gathered.failureCategory ?? "empty") : incompleteNotice ? "partial" : undefined,
+      incompleteReason: incompleteNotice ? "partial" : undefined,
     },
   };
 }
 
-function selectMerged(a: WebContextInput[], b: WebContextInput[]) {
-  return selectResearchFinalSources([...a, ...b]);
+function selectMerged(
+  a: WebContextInput[],
+  b: WebContextInput[],
+  opts: { timeSensitive?: boolean; preferPrimary?: boolean } = {},
+) {
+  return selectResearchFinalSources([...a, ...b], undefined, opts);
 }

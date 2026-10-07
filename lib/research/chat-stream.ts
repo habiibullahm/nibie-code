@@ -24,6 +24,7 @@ import type { ThreadSummary } from "@/lib/context/context-types";
 import { operationalCodes } from "@/lib/observability/codes";
 import { logError, logInfo, logWarn } from "@/lib/observability/logger";
 import type { UserPreferences } from "@/lib/preferences/types";
+import { RESEARCH_ROUTE_BUDGET_MS, RESEARCH_SYNTHESIS_TIMEOUT_MS } from "@/lib/research/budgets";
 import { runDeepResearch } from "@/lib/research/orchestrator";
 import { persistMessageResearch } from "@/lib/research/persist";
 import { researchSynthesisInstruction } from "@/lib/research/synthesize";
@@ -277,8 +278,8 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
           return;
         }
 
-        if (research.status === "failed" && research.evidence.length === 0 && !research.web.length) {
-          // Transparent failure — do not hallucinate completed research.
+        // Empty collection: hard-fail. Never reserve credits or synthesize a "research" answer.
+        if (research.evidence.length === 0 || research.web.length === 0) {
           const message =
             research.incompleteNotice ??
             "Deep Research could not gather sources. Please try again later or switch to Normal.";
@@ -286,7 +287,7 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
           researchStatus = "failed";
           logWarn("research.failed", {
             requestId,
-            category: research.metrics.incompleteReason ?? "failed",
+            category: research.metrics.incompleteReason ?? "empty",
             durationMs: durationMs(),
             code: operationalCodes.deepResearchFailed,
             ...researchUsagePolicyFields(),
@@ -462,11 +463,14 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
         enqueue("progress", { stage: "synthesizing" });
 
         let providerTimedOut = false;
+        const elapsedBeforeSynthesis = Date.now() - responseStartedAt;
+        const remainingBudget = Math.max(15_000, RESEARCH_ROUTE_BUDGET_MS - elapsedBeforeSynthesis);
+        const synthesisTimeoutMs = Math.min(RESEARCH_SYNTHESIS_TIMEOUT_MS, remainingBudget);
         const timeout = setTimeout(() => {
           providerTimedOut = true;
           providerTimedOutRef.value = true;
           aborter.abort();
-        }, 120_000);
+        }, synthesisTimeoutMs);
         providerStartedAt = Date.now();
 
         let responseStream: ReadableStream<Uint8Array>;

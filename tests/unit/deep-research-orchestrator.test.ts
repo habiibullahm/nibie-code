@@ -162,4 +162,30 @@ describe("deep research orchestrator", () => {
     expect(result.incompleteNotice).toMatch(/not configured/i);
     expect(result.web).toHaveLength(0);
   });
+
+  it("marks empty collection as failed (not incomplete) so synthesis must not run", async () => {
+    const planJson = JSON.stringify({
+      normalizedQuestion: "Obscure share",
+      subquestions: ["share"],
+      initialQueries: ["obscure saas market share"],
+      timeSensitive: true,
+    });
+    const chatProvider: ChatProvider = { stream: vi.fn(async () => sseBody(planJson)) };
+    const searchProvider: WebSearchProvider = {
+      id: "tavily",
+      searchWeb: vi.fn(async () => []),
+    };
+    const result = await runDeepResearch({
+      question: "What is the exact market share of an obscure regional SaaS tool in 2026?",
+      signal: new AbortController().signal,
+      chatProvider,
+      planMode: "Fast",
+      searchProvider,
+      fetchPage: vi.fn() as never,
+    });
+    expect(result.status).toBe("failed");
+    expect(result.evidence).toHaveLength(0);
+    expect(result.web).toHaveLength(0);
+    expect(result.incompleteNotice).toMatch(/could not collect usable sources/i);
+  });
 });

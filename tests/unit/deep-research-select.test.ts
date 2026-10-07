@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isLikelyPrimarySource,
   mergeResearchCandidates,
   selectResearchFinalSources,
   selectResearchQueryResults,
@@ -64,5 +65,24 @@ describe("deep research select budgets", () => {
       text: "body",
     }));
     expect(selectResearchFinalSources(sources).length).toBeLessThanOrEqual(RESEARCH_FINAL_CITED_MAX);
+  });
+
+  it("prefers fresher sources when time-sensitive", () => {
+    const candidates = [
+      hit({ url: "https://old.example/a", domain: "old.example", rank: 1, publishedAt: "2020-01-01" }),
+      hit({ url: "https://new.example/a", domain: "new.example", rank: 2, publishedAt: "2026-06-01" }),
+    ];
+    const selected = selectResearchUrlsToFetch(candidates, 1, { timeSensitive: true });
+    expect(selected[0]!.domain).toBe("new.example");
+  });
+
+  it("prefers official/docs primary sources when preferPrimary", () => {
+    expect(isLikelyPrimarySource("https://docs.example.com/guide", "docs.example.com")).toBe(true);
+    const candidates = [
+      hit({ url: "https://blog.random.com/post", domain: "blog.random.com", rank: 1 }),
+      hit({ url: "https://docs.example.com/guide", domain: "docs.example.com", rank: 2 }),
+    ];
+    const selected = selectResearchUrlsToFetch(candidates, 1, { preferPrimary: true });
+    expect(selected[0]!.domain).toBe("docs.example.com");
   });
 });

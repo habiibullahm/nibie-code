@@ -18,5 +18,11 @@ export const RESEARCH_MAX_PAGES_PER_DOMAIN = 2;
 
 export { RESEARCH_WEB_TOKEN_CAP } from "@/lib/context/token-budget";
 
-export const RESEARCH_PLAN_TIMEOUT_MS = 45_000;
+/** Route maxDuration is 180s — keep research wall-clock under that with headroom. */
+export const RESEARCH_ROUTE_BUDGET_MS = 165_000;
+/** Plan + search + fetch must finish within this window from orchestrator start. */
+export const RESEARCH_GATHER_DEADLINE_MS = 70_000;
+export const RESEARCH_PLAN_TIMEOUT_MS = 30_000;
+/** Synthesis provider timeout (also capped by remaining route budget). */
+export const RESEARCH_SYNTHESIS_TIMEOUT_MS = 90_000;
 export const RESEARCH_PLAN_MAX_OUTPUT_CHARS = 8_000;
