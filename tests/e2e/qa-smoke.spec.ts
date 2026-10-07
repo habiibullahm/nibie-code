@@ -2,6 +2,12 @@ import type { Page } from "@playwright/test";
 import { test, expect } from "./qa-fixture";
 import { conversationIdFromUrl } from "./remove-conversation";
 
+const email = process.env.E2E_USER_EMAIL?.trim();
+const password = process.env.E2E_USER_PASSWORD;
+// Included by default `npm run test:e2e`; skip when credentials are absent.
+// Dedicated `npm run test:qa:smoke` fails earlier via scripts/qa-smoke.mjs.
+test.skip(!email || !password, "E2E_USER_EMAIL and E2E_USER_PASSWORD are required.");
+
 async function archiveConversation(page: Page, url: string | undefined) {
   const id = conversationIdFromUrl(url);
   if (!id) return;

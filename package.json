@@ -12,7 +12,7 @@
     "test:response-quality": "vitest run tests/unit/response-quality.test.ts",
     "test:integration": "vitest run --config vitest.integration.config.mts",
     "test:e2e": "playwright test",
-    "test:qa:smoke": "playwright test tests/e2e/qa-smoke.spec.ts --workers=1",
+    "test:qa:smoke": "node scripts/qa-smoke.mjs",
     "test:chat:e2e": "node scripts/chat-e2e.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
