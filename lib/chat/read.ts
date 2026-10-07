@@ -62,6 +62,9 @@ export type PersistedMessage = {
   research?: MessageResearchView;
   /** Live progress stage while Deep Research is running (client-only). */
   researchStage?: "planning" | "searching" | "reading" | "synthesizing";
+  /** Live / completed Action status label (client-only; minimal UX). */
+  actionLabel?: string | null;
+  actionId?: string | null;
 };
 
 export async function getChatWorkspaceData(conversationId: unknown) {

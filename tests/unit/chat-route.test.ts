@@ -46,14 +46,25 @@ const { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc
       builder.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data: null, error: null }).then(resolve);
       return builder;
     };
+    const actionRuns = () => {
+      const builder: Record<string, unknown> = {};
+      builder.insert = () => builder;
+      builder.update = () => builder;
+      builder.select = () => builder;
+      builder.eq = () => builder;
+      builder.maybeSingle = async () => ({ data: { id: "a1111111-1111-4111-8111-111111111111", status: "running", started_at: new Date().toISOString() }, error: null });
+      builder.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data: { id: "a1111111-1111-4111-8111-111111111111", status: "running", started_at: new Date().toISOString() }, error: null }).then(resolve);
+      return builder;
+    };
     return {
       ...value,
       from: (table: string) =>
         table === "message_attachments" ? none()
           : table === "message_sources" ? messageSources()
             : table === "message_research" ? messageResearch()
-              : table === "messages" ? messages()
-                : from(table),
+              : table === "action_runs" ? actionRuns()
+                : table === "messages" ? messages()
+                  : from(table),
     };
   };
   return { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc, modelOptions: vi.fn(), contextCapabilities: vi.fn(() => ({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 })), withoutAttachments, attachmentState, stopState, messageSourceInserts };
@@ -1112,10 +1123,10 @@ describe("POST /api/chat", () => {
         const response = await POST(validRequest());
         expect(response.status).toBe(200);
         const events = await Array.fromAsync(readChatSse(response.body!));
-        expect(events[0]).toMatchObject({
-          type: "start",
-          context: { sources: expect.arrayContaining([{ type: "web", label: "Web sources", state: "included", reason: "A public web source" }]) },
-        });
+        expect(events[0]).toMatchObject({ type: "start", id: assistantId });
+        expect(events.some((event) => event.type === "action_start" && event.actionId === "web.search")).toBe(true);
+        expect(events.some((event) => event.type === "action_result" && event.status === "completed")).toBe(true);
+        expect(events.some((event) => event.type === "sources" && event.sources?.[0]?.domain === "nodejs.org")).toBe(true);
         const prompt = stream.mock.calls[0][1] as { role: string; content: string }[];
         expect(prompt[0].content).not.toContain("Node.js 22 is the current release line");
         expect(prompt[0].content).not.toMatch(/No browsing/i);
@@ -1125,11 +1136,7 @@ describe("POST /api/chat", () => {
         expect(webMocks.runWebSearchPipeline).toHaveBeenCalledOnce();
         expect(info.mock.calls.some(([line]) => String(line).includes("web.route.decided"))).toBe(true);
         expect(info.mock.calls.some(([line]) => String(line).includes("web.context.included"))).toBe(true);
-        expect(info.mock.calls.some(([line]) => String(line).includes("citation.sources.prepared"))).toBe(true);
-        expect(events[0]).toMatchObject({
-          type: "start",
-          sources: [{ ordinal: 1, kind: "web", title: "Node.js", domain: "nodejs.org", url: "https://nodejs.org/en" }],
-        });
+        expect(info.mock.calls.some(([line]) => String(line).includes("action.completed"))).toBe(true);
         expect(prompt[1].content).toContain("cite_as: [SOURCE:web:1]");
         // Authoritative citation rules live on the core system message, not only the untrusted web block.
         expect(prompt[0].content).toMatch(/Citation rules for this reply/);
@@ -1178,21 +1185,11 @@ describe("POST /api/chat", () => {
         expect(prompt.some((message) => message.content.includes("<untrusted_web_content>"))).toBe(false);
         expect(prompt[0].content).toMatch(/Web verification was unavailable/i);
         expect(prompt[0].content).toMatch(/Do not present unverified current public facts/i);
-        expect(events[0]).toMatchObject({
-          type: "start",
-          context: {
-            sources: expect.arrayContaining([
-              {
-                type: "web",
-                label: "Web sources",
-                state: "not_used",
-                reason: "Web verification was unavailable for this reply.",
-              },
-            ]),
-          },
-        });
+        expect(prompt[0].content).toMatch(/do not claim that you searched the web/i);
+        expect(events[0]).toMatchObject({ type: "start" });
+        expect(events.some((event) => event.type === "action_error")).toBe(true);
         expect(events[0]).not.toHaveProperty("sources");
-        expect(warn.mock.calls.some(([line]) => String(line).includes("web.search.failed"))).toBe(true);
+        expect(warn.mock.calls.some(([line]) => String(line).includes("web.search.failed") || String(line).includes("action.failed"))).toBe(true);
       } finally {
         warn.mockRestore();
       }
@@ -1268,9 +1265,15 @@ describe("POST /api/chat", () => {
       const response = await POST(validRequest());
       expect(response.status).toBe(200);
       const reader = response.body!.getReader();
-      // Consume start + first delta so generation output is non-empty before Stop.
-      await reader.read();
-      await reader.read();
+      const decoder = new TextDecoder();
+      let seen = "";
+      // Wait until the Action path has started provider deltas, then Stop (do not over-read — the provider stream stays open).
+      while (!seen.includes("event: delta")) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        seen += decoder.decode(value, { stream: true });
+      }
+      expect(seen).toContain("event: delta");
       stopState.status = "interrupted";
       await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce(), { timeout: 5_000 });
       while (true) {
@@ -1305,21 +1308,11 @@ describe("POST /api/chat", () => {
         expect(webMocks.runWebSearchPipeline).not.toHaveBeenCalled();
         const prompt = stream.mock.calls[0][1] as { role: string; content: string }[];
         expect(prompt[0].content).toMatch(/Web verification was unavailable/i);
-        expect(events[0]).toMatchObject({
-          type: "start",
-          context: {
-            sources: expect.arrayContaining([
-              expect.objectContaining({
-                type: "web",
-                state: "not_used",
-                reason: "Web verification was unavailable for this reply.",
-              }),
-            ]),
-          },
-        });
+        expect(events[0]).toMatchObject({ type: "start" });
+        expect(events.some((event) => event.type === "action_error")).toBe(true);
         expect(events[0]).not.toHaveProperty("sources");
         expect(JSON.stringify(warn.mock.calls)).toContain("provider_unconfigured");
-        expect(warn.mock.calls.some(([line]) => String(line).includes("web.search.failed"))).toBe(true);
+        expect(warn.mock.calls.some(([line]) => String(line).includes("web.search.failed") || String(line).includes("action.failed"))).toBe(true);
       } finally {
         warn.mockRestore();
       }
@@ -1340,9 +1333,18 @@ describe("POST /api/chat", () => {
         if (table === "room_briefs") return query({ data: null, error: null });
         if (table === "pins") return query({ data: [], error: null });
         if (table === "room_files") return query({ data: [{ id: fileId, original_name: "runbook.md", extracted_text: "deploy pipeline uses Node LTS", extracted_truncated: false }], error: null });
+        if (table === "action_runs") {
+          const builder: Record<string, unknown> = {};
+          builder.insert = () => builder;
+          builder.update = () => builder;
+          builder.select = () => builder;
+          builder.eq = () => builder;
+          builder.maybeSingle = async () => ({ data: { id: "a1111111-1111-4111-8111-111111111111", status: "running", started_at: new Date().toISOString() }, error: null });
+          return builder;
+        }
         return query(outcomes.shift());
       });
-      createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc });
+      createClient.mockResolvedValue(withoutAttachments({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc }));
       webMocks.decideWebSearch.mockReturnValue({ search: true, reason: "releases_versions" });
       webMocks.getWebSearchConfig.mockReturnValue({ providerId: "tavily", apiKey: "test-key", maxResults: 8, maxPages: 4, maxSources: 5 });
       webMocks.getWebSearchProvider.mockReturnValue({ id: "tavily", searchWeb: vi.fn() });

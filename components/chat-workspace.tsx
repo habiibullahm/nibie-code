@@ -525,11 +525,22 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
         if (data.type === "progress" && assistantId) {
           setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId ? { ...message, researchStage: data.stage, research: message.research ?? { status: "running", followUpUsed: false, searchQueryCount: 0, pagesFetched: 0, evidenceCount: 0, durationMs: 0, usagePolicy: "temporary_undercount_v1" } } : message) }));
         }
+        if (data.type === "action_start" && assistantId) {
+          const label = data.actionId === "web.search" ? "Searching the web…" : "Running Action…";
+          setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId ? { ...message, actionId: data.actionId, actionLabel: label } : message) }));
+        }
+        if (data.type === "action_result" && assistantId) {
+          const label = data.actionId === "web.search" ? "Used Web Search" : "Used Action";
+          setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId ? { ...message, actionId: data.actionId, actionLabel: label } : message) }));
+        }
+        if (data.type === "action_error" && assistantId) {
+          setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId ? { ...message, actionId: data.actionId, actionLabel: data.status === "cancelled" ? "Action stopped" : null } : message) }));
+        }
         if (data.type === "sources" && assistantId) {
           setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId ? { ...message, sources: data.sources } : message) }));
         }
         if (data.type === "delta") { setAssistantActivity("streaming"); buffer += data.text; received += data.text; if (!shown) flush(); else if (!flushTimer) flushTimer = setTimeout(flush, streamFlushMs); }
-        if (data.type === "status") { flush(); setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId ? { ...message, content: message.content || "Response stopped.", status: data.status, researchStage: undefined } : message) })); }
+        if (data.type === "status") { flush(); setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId ? { ...message, content: message.content || "Response stopped.", status: data.status, researchStage: undefined, ...(data.status === "interrupted" ? {} : {}) } : message) })); }
       }
       flush();
       router.refresh();

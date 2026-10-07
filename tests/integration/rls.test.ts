@@ -64,6 +64,7 @@ describe("Supabase row-level security", () => {
     await sql`drop table if exists public.weekly_usage_reservations cascade`;
     await sql`drop table if exists public.weekly_ai_usage cascade`;
     await sql`drop type if exists public.weekly_usage_mode cascade`;
+    await sql`drop table if exists public.action_runs cascade`;
     await sql`drop table if exists public.message_research cascade`;
     await sql`drop table if exists public.message_sources cascade`;
     await sql`drop type if exists public.citation_source_kind cascade`;
@@ -1045,5 +1046,74 @@ describe("Supabase row-level security", () => {
     await asUser(owner, (tx) => tx`delete from public.messages where id = ${assistantOwn}`);
     expect(await sql`select message_id from public.message_research where message_id = ${assistantOwn}`).toHaveLength(0);
     expect(await sql`select message_id from public.message_research where message_id = ${assistantStranger}`).toHaveLength(1);
+  });
+
+  it("keeps action_runs owner-scoped; persists success/failed/cancelled; stores no secrets", async () => {
+    const owner = randomUUID();
+    const stranger = randomUUID();
+    const thread = randomUUID();
+    const strangerThread = randomUUID();
+    const assistantOwn = randomUUID();
+    const runCompleted = randomUUID();
+    const runFailed = randomUUID();
+    const runCancelled = randomUUID();
+    const runStranger = randomUUID();
+
+    expect(await sql`select relrowsecurity, relforcerowsecurity from pg_class where oid = 'public.action_runs'::regclass`).toEqual([
+      { relrowsecurity: true, relforcerowsecurity: true },
+    ]);
+
+    await sql`insert into auth.users (id) values (${owner}), (${stranger})`;
+    await sql`insert into public.conversations (id, user_id, title) values
+      (${thread}, ${owner}, 'Actions owner'),
+      (${strangerThread}, ${stranger}, 'Actions stranger')`;
+    await sql`insert into public.messages (id, conversation_id, user_id, role, content, status, position) values
+      (${assistantOwn}, ${thread}, ${owner}, 'assistant', 'reply', 'complete', 1)`;
+
+    await asUser(owner, (tx) => tx`
+      insert into public.action_runs (
+        id, user_id, conversation_id, message_id, action_id, capability, input_summary, status, started_at, completed_at
+      ) values
+        (${runCompleted}, ${owner}, ${thread}, ${assistantOwn}, 'web.search', 'read', '{"query":"latest Node.js"}', 'completed', now(), now()),
+        (${runFailed}, ${owner}, ${thread}, ${assistantOwn}, 'web.search', 'read', '{"query":"news"}', 'failed', now(), now()),
+        (${runCancelled}, ${owner}, ${thread}, ${assistantOwn}, 'web.search', 'read', '{"query":"stopped"}', 'cancelled', now(), now())
+    `);
+    await sql`
+      insert into public.action_runs (
+        id, user_id, conversation_id, action_id, capability, input_summary, status, started_at, completed_at
+      ) values (
+        ${runStranger}, ${stranger}, ${strangerThread}, 'web.search', 'read', '{"query":"private"}', 'completed', now(), now()
+      )
+    `;
+
+    const visible = await asUser(owner, (tx) => tx`
+      select id, status, input_summary from public.action_runs where conversation_id = ${thread} order by status
+    `);
+    expect(visible).toHaveLength(3);
+    expect(visible.map((row) => row.status).sort()).toEqual(["cancelled", "completed", "failed"]);
+    expect(JSON.stringify(visible)).not.toMatch(/sk-|Bearer|api[_-]?key|cookie/i);
+
+    const hidden = await asUser(owner, (tx) => tx`
+      select id from public.action_runs where id = ${runStranger}
+    `);
+    expect(hidden).toHaveLength(0);
+
+    await expect(asUser(owner, (tx) => tx`
+      insert into public.action_runs (
+        user_id, conversation_id, action_id, capability, input_summary, status
+      ) values (${stranger}, ${strangerThread}, 'web.search', 'read', 'x', 'completed')
+    `)).rejects.toThrow();
+
+    const stolen = await asUser(owner, (tx) => tx`
+      update public.action_runs set status = 'failed' where id = ${runStranger} returning id
+    `);
+    expect(stolen).toHaveLength(0);
+
+    // Reject overlong / secret-looking summaries at the DB check when over 240 chars.
+    await expect(asUser(owner, (tx) => tx`
+      insert into public.action_runs (
+        user_id, conversation_id, action_id, capability, input_summary, status
+      ) values (${owner}, ${thread}, 'web.search', 'read', ${"x".repeat(241)}, 'running')
+    `)).rejects.toThrow();
   });
 });

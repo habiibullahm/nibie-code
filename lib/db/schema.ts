@@ -6,6 +6,7 @@ import {
   foreignKey,
   index,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   text,
@@ -522,6 +523,46 @@ export const messageSources = pgTable(
     check(
       "message_sources_web_requires_url",
       sql`${table.kind} <> 'web' OR (${table.url} IS NOT NULL AND ${table.domain} IS NOT NULL)`,
+    ),
+  ],
+);
+
+// Actions / Tools V1 audit (sanitized summaries only — no secrets).
+export const actionRuns = pgTable(
+  "action_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    roomId: uuid("room_id").references(() => rooms.id, { onDelete: "set null" }),
+    conversationId: uuid("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
+    messageId: uuid("message_id").references(() => messages.id, { onDelete: "set null" }),
+    actionId: text("action_id").notNull(),
+    capability: text("capability").notNull(),
+    inputSummary: text("input_summary").notNull(),
+    status: text("status").notNull(),
+    errorCode: text("error_code"),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true, mode: "date" }),
+    metadata: jsonb("metadata").$type<Record<string, unknown> | null>(),
+  },
+  (table) => [
+    index("action_runs_user_started_idx").on(table.userId, table.startedAt, table.id),
+    index("action_runs_conversation_idx").on(table.conversationId, table.startedAt),
+    check(
+      "action_runs_capability_check",
+      sql`${table.capability} IN ('read', 'create', 'update', 'delete', 'execute')`,
+    ),
+    check(
+      "action_runs_status_check",
+      sql`${table.status} IN ('requested', 'running', 'completed', 'failed', 'cancelled', 'waiting_for_confirmation')`,
+    ),
+    check(
+      "action_runs_action_id_len",
+      sql`char_length(${table.actionId}) between 1 and 120 and ${table.actionId} = btrim(${table.actionId})`,
+    ),
+    check(
+      "action_runs_input_summary_len",
+      sql`char_length(${table.inputSummary}) between 1 and 240`,
     ),
   ],
 );

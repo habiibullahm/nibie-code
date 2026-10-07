@@ -10,7 +10,6 @@ import { toProviderMessages } from "@/lib/ai/provider-messages";
 import { contextCapabilitiesFor, getModelOptions, providerFor } from "@/lib/ai/registry";
 import { createReasoningStreamFilter, sanitizeModelOutput } from "@/lib/ai/sanitize-model-output";
 import { ProviderStreamError, readOpenAiSse } from "@/lib/ai/sse";
-import { attachWebCitationHandles } from "@/lib/citations/attach";
 import { citationSourcesIncludedInContext } from "@/lib/citations/included";
 import { createCitationStreamFilter } from "@/lib/citations/parse";
 import { citationViewsFromPrepared, persistMessageSources } from "@/lib/citations/persist";
@@ -37,9 +36,7 @@ import { logError, logInfo, logWarn } from "@/lib/observability/logger";
 import { requestIdFrom } from "@/lib/observability/request-id";
 import { weeklyCreditCost, WEEKLY_FREE_CREDIT_LIMIT } from "@/lib/usage/policy";
 import { createDeepResearchChatResponse } from "@/lib/research/chat-stream";
-import { getWebSearchConfig } from "@/lib/web/config";
-import { getWebSearchProvider } from "@/lib/web/provider";
-import { runWebSearchPipeline } from "@/lib/web/pipeline";
+import { createAutoWebActionChatResponse } from "@/lib/actions/auto-web-response";
 import { decideWebSearch } from "@/lib/web/routing";
 import type { WebContextInput } from "@/lib/web/types";
 
@@ -260,87 +257,41 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
     });
   }
 
-  // Web search runs after Room hybrid retrieval and only for a fresh generation (replay already returned).
-  // Failures never block the reply: empty web context continues as normal chat, with an authoritative
-  // "verification unavailable" instruction when routing wanted search but sources were empty.
+  // Automatic Web Search V1 runs through Action Runtime (web.search) — allowlisted, audited, stoppable.
+  // Deterministic routing decides; no extra LLM round for the Action decision. Fast path (no search) is unchanged.
+  const webDecision = decideWebSearch(userMessage.content, { hasRoomFileContext: Boolean(files?.length) });
+  if (webDecision.search) {
+    return createAutoWebActionChatResponse({
+      request,
+      requestId,
+      requestStartedAt,
+      supabase,
+      userId: user.id,
+      conversationId: conversation.id,
+      roomId: conversation.room_id ?? null,
+      assistant: { id: assistant.id, position: assistant.position },
+      userMessage: { id: userMessage.id, content: userMessage.content, position: userMessage.position },
+      mode,
+      preferences: preferenceState.preferences,
+      preferenceReadFailed: Boolean(preferenceState.error),
+      summary,
+      room,
+      files,
+      attachments,
+      memories,
+      recallOperation,
+      rows,
+      webRouteReason: webDecision.reason,
+    });
+  }
+  logInfo("web.route.decided", { requestId, search: false, reason: webDecision.reason });
+
+  // No-action path: no web sources; chat continues as before Actions V1.
   let web: WebContextInput[] | undefined;
   let preparedCitationSources: SourceReference[] = [];
   let citationSources: SourceReference[] = [];
   let citationViews: ReturnType<typeof citationViewsFromPrepared> = [];
-  let webVerificationUnavailable = false;
-  const webDecision = decideWebSearch(userMessage.content, { hasRoomFileContext: Boolean(files?.length) });
-  logInfo("web.route.decided", { requestId, search: webDecision.search, reason: webDecision.reason });
-  if (webDecision.search) {
-    const webConfig = getWebSearchConfig();
-    const webProvider = getWebSearchProvider();
-    if (!webConfig || !webProvider) {
-      webVerificationUnavailable = true;
-      logWarn("web.search.failed", {
-        requestId,
-        category: "provider_unconfigured",
-        durationMs: 0,
-        code: operationalCodes.webSearchFailed,
-      });
-    } else {
-      const webStartedAt = Date.now();
-      logInfo("web.search.started", { requestId, maxResults: webConfig.maxResults });
-      try {
-        const pipeline = await runWebSearchPipeline(userMessage.content, {
-          signal: request.signal,
-          provider: webProvider,
-          config: webConfig,
-        });
-        const webDurationMs = Date.now() - webStartedAt;
-        if (pipeline.sources.length) {
-          const attached = attachWebCitationHandles(pipeline.sources);
-          web = attached.web.length ? attached.web : undefined;
-          preparedCitationSources = attached.sources;
-          const snippetOnlyCount = (web ?? []).filter((source) => source.retrieval === "web_snippet_only").length;
-          logInfo("web.search.succeeded", {
-            requestId,
-            resultCount: pipeline.searchResultCount,
-            durationMs: webDurationMs,
-          });
-          logInfo("web.fetch.completed", {
-            requestId,
-            fetchedCount: pipeline.pagesFetched,
-            failedCount: snippetOnlyCount,
-            durationMs: webDurationMs,
-          });
-          logInfo("web.context.included", {
-            requestId,
-            sourceCount: web?.length ?? 0,
-            snippetOnlyCount,
-          });
-          if (!web?.length) webVerificationUnavailable = true;
-        } else {
-          webVerificationUnavailable = true;
-          if (pipeline.degraded) {
-            logWarn("web.search.failed", {
-              requestId,
-              category: pipeline.failureCategory ?? "empty",
-              durationMs: webDurationMs,
-              code: operationalCodes.webSearchFailed,
-            });
-          } else {
-            logInfo("web.search.succeeded", {
-              requestId,
-              resultCount: pipeline.searchResultCount,
-              durationMs: webDurationMs,
-            });
-          }
-        }
-      } catch {
-        webVerificationUnavailable = true;
-        logWarn("web.search.failed", {
-          requestId,
-          category: "provider_error",
-          durationMs: Date.now() - webStartedAt,
-          code: operationalCodes.webSearchFailed,
-        });
-      }
-    }
-  }
+  const webVerificationUnavailable = false;
 
   // Every save of this generation only applies while its row is still streaming. An explicit Stop has already written the
   // text the user saw and marked the row interrupted, so a late finish, error or disconnect save can never replace it.

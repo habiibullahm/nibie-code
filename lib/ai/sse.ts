@@ -96,6 +96,26 @@ const chatEventSchema = z.discriminatedUnion("type", [
     stage: researchStageSchema,
   }),
   z.strictObject({
+    type: z.literal("action_start"),
+    actionId: z.string().min(1).max(120),
+    runId: z.string().uuid().nullable(),
+    title: z.string().min(1).max(120),
+  }),
+  z.strictObject({
+    type: z.literal("action_result"),
+    actionId: z.string().min(1).max(120),
+    runId: z.string().uuid(),
+    status: z.literal("completed"),
+    summary: z.string().max(400),
+  }),
+  z.strictObject({
+    type: z.literal("action_error"),
+    actionId: z.string().min(1).max(120),
+    runId: z.string().uuid().nullable(),
+    status: z.enum(["failed", "cancelled", "waiting_for_confirmation"]),
+    errorCode: z.string().min(1).max(64),
+  }),
+  z.strictObject({
     type: z.literal("sources"),
     sources: z.array(citationSourceSchema).max(20),
   }),
