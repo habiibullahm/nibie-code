@@ -17,6 +17,7 @@ export type WebEvalCaseId =
   | "explicit_search"
   | "id_explicit_search"
   | "id_market_currency"
+  | "id_market_condition"
   | "room_only"
   | "room_plus_web"
   | "prompt_injection"
@@ -127,6 +128,21 @@ export const WEB_EVAL_ROUTE_CASES: readonly WebEvalRouteCase[] = [
     id: "id_market_currency",
     query: "update pasar saham terkini",
     expected: { search: true, reason: "temporal_currency" },
+  },
+  {
+    id: "id_market_condition",
+    query: "bagaimana kondisi IHSG dan arah pasar saham?",
+    expected: { search: true, reason: "prices_markets" },
+  },
+  {
+    id: "id_market_condition",
+    query: "kondisi IHSG",
+    expected: { search: true, reason: "prices_markets" },
+  },
+  {
+    id: "id_market_condition",
+    query: "IHSG anjlok kenapa?",
+    expected: { search: true, reason: "prices_markets" },
   },
   {
     id: "no_web_id_market",
