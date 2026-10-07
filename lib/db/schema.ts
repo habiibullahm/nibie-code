@@ -25,6 +25,7 @@ export const responseLength = pgEnum("response_length", ["concise", "balanced", 
 export const responseStyle = pgEnum("response_style", ["natural", "professional", "direct"]);
 export const weeklyUsageMode = pgEnum("weekly_usage_mode", ["Fast", "Balanced", "High"]);
 export const memoryType = pgEnum("memory_type", ["preference", "project", "instruction", "fact"]);
+export const citationSourceKind = pgEnum("citation_source_kind", ["web", "room_file", "attachment"]);
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey(),
@@ -293,7 +294,7 @@ export const weeklyAiUsage = pgTable(
   },
   (table) => [
     unique("weekly_ai_usage_user_week_key").on(table.userId, table.weekStart),
-    check("weekly_ai_usage_credits_nonnegative", sql`${table.creditsUsed} between 0 and 100`),
+    check("weekly_ai_usage_credits_nonnegative", sql`${table.creditsUsed} between 0 and 500`),
     check("weekly_ai_usage_fast_nonnegative", sql`${table.fastRequests} >= 0`),
     check("weekly_ai_usage_balanced_nonnegative", sql`${table.balancedRequests} >= 0`),
     check("weekly_ai_usage_high_nonnegative", sql`${table.highRequests} >= 0`),
@@ -426,5 +427,101 @@ export const messageAttachments = pgTable(
     check("message_attachments_size_bounds", sql`${table.sizeBytes} between 1 and 4194304`),
     check("message_attachments_text_bounds", sql`char_length(${table.extractedText}) between 1 and 24000`),
     check("message_attachments_page_bounds", sql`${table.pageCount} IS NULL OR ${table.pageCount} between 1 and 100000`),
+  ],
+);
+
+// Deep Research V1 run metadata (counts/status only — no CoT or page text).
+export const messageResearch = pgTable(
+  "message_research",
+  {
+    messageId: uuid("message_id").primaryKey(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id").notNull(),
+    status: text("status").notNull(),
+    followUpUsed: boolean("follow_up_used").notNull().default(false),
+    searchQueryCount: integer("search_query_count").notNull().default(0),
+    searchResultCount: integer("search_result_count").notNull().default(0),
+    pagesFetched: integer("pages_fetched").notNull().default(0),
+    pagesFailed: integer("pages_failed").notNull().default(0),
+    evidenceCount: integer("evidence_count").notNull().default(0),
+    modelCallCount: integer("model_call_count").notNull().default(0),
+    durationMs: integer("duration_ms").notNull().default(0),
+    timeSensitive: boolean("time_sensitive").notNull().default(false),
+    usagePolicy: text("usage_policy").notNull().default("temporary_undercount_v1"),
+    incompleteReason: text("incomplete_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "message_research_message_owner_fk",
+      columns: [table.messageId, table.conversationId, table.userId],
+      foreignColumns: [messages.id, messages.conversationId, messages.userId],
+    }).onDelete("cascade"),
+    index("message_research_conversation_idx").on(table.conversationId, table.messageId),
+    check(
+      "message_research_status_check",
+      sql`${table.status} IN ('complete', 'interrupted', 'failed', 'incomplete')`,
+    ),
+  ],
+);
+
+// Citation metadata for an assistant message. Server-owned SourceReference rows so reload
+// does not re-run web search. Memory is never a citation source.
+export const messageSources = pgTable(
+  "message_sources",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id").notNull(),
+    messageId: uuid("message_id").notNull(),
+    ordinal: integer("ordinal").notNull(),
+    kind: citationSourceKind("kind").notNull(),
+    handle: text("handle").notNull(),
+    title: text("title").notNull(),
+    url: text("url"),
+    domain: text("domain"),
+    excerpt: text("excerpt"),
+    retrievedAt: timestamp("retrieved_at", { withTimezone: true, mode: "date" }),
+    sourceId: text("source_id"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "message_sources_message_owner_fk",
+      columns: [table.messageId, table.conversationId, table.userId],
+      foreignColumns: [messages.id, messages.conversationId, messages.userId],
+    }).onDelete("cascade"),
+    unique("message_sources_message_ordinal_key").on(table.messageId, table.ordinal),
+    unique("message_sources_message_handle_key").on(table.messageId, table.handle),
+    index("message_sources_conversation_idx").on(table.conversationId, table.messageId),
+    check("message_sources_ordinal_positive", sql`${table.ordinal} >= 1 AND ${table.ordinal} <= 20`),
+    check(
+      "message_sources_handle_format",
+      sql`${table.handle} ~ '^(web|room_file|attachment):[1-9][0-9]*$'`,
+    ),
+    check(
+      "message_sources_title_length",
+      sql`char_length(${table.title}) between 1 and 200 and ${table.title} = btrim(${table.title})`,
+    ),
+    check(
+      "message_sources_url_safe",
+      sql`${table.url} IS NULL OR (char_length(${table.url}) between 1 and 2048 AND ${table.url} ~ '^https?://' AND position('@' in split_part(substr(${table.url}, 1, 64), '/', 3)) = 0)`,
+    ),
+    check(
+      "message_sources_domain_length",
+      sql`${table.domain} IS NULL OR (char_length(${table.domain}) between 1 and 253 AND ${table.domain} = btrim(${table.domain}))`,
+    ),
+    check(
+      "message_sources_excerpt_length",
+      sql`${table.excerpt} IS NULL OR char_length(${table.excerpt}) between 1 and 480`,
+    ),
+    check(
+      "message_sources_source_id_length",
+      sql`${table.sourceId} IS NULL OR (char_length(${table.sourceId}) between 1 and 200 AND ${table.sourceId} = btrim(${table.sourceId}))`,
+    ),
+    check(
+      "message_sources_web_requires_url",
+      sql`${table.kind} <> 'web' OR (${table.url} IS NOT NULL AND ${table.domain} IS NOT NULL)`,
+    ),
   ],
 );

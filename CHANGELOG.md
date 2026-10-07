@@ -8,16 +8,19 @@ What's new in Nibie.
 
 ### Added
 
+- Choose Deep Research from the Research menu for a bounded multi-source researched answer with citations, progress stages, and Incomplete/Failed labels when collection is partial or fails.
+- When a reply uses web sources, Nibie shows clickable citation markers and a Sources list with title and domain, kept with the message so they survive reload.
 - Ask Nibie to remember a preference or project fact across conversations, and manage or turn off Memory in Settings. Your current request always wins over what was saved.
 - When a question needs current public information, Nibie can search the web and ground the reply in labelled sources while keeping Room files and your request in charge.
 - Give long prompts a larger editing space while keeping short messages compact.
-- Track your 100-credit weekly AI allowance and next reset in Settings; each response mode uses a different amount.
+- Track your 500-credit weekly AI allowance and next reset in Settings; each response mode uses a different amount.
 - Attach up to three text-based files—text, Markdown, CSV, JSON, source code, or text-based PDFs—to a conversation. Nibie can answer follow-up questions from their contents, and the files stay with that conversation.
 - Add private Room files including DOCX and source formats; Nibie can find relevant text excerpts in the current Room when answering a question.
 - Long conversations keep their thread: Nibie maintains a short summary of earlier messages in the background, so replies stay grounded in older context while recent messages are still used word for word.
 
 ### Changed
 
+- Weekly AI allowance is now 500 credits per week (was 100); Fast, Balanced, and High still cost 1, 3, and 6.
 - In a Room, Nibie finds relevant file excerpts from both keywords and meaning, so paraphrased questions still pull the right context while exact symbols stay preferred.
 - Nibie's answers are now substantive by default, with enough explanation, steps, examples, or trade-offs to understand or act without asking again, and no padding. Short follow-ups like a company name or tech stack refine your current question, and Nibie won't start a quiz or mock interview unless you ask for one. Settings → Response depth offers Concise, Default, and Detailed, and a request in your message always wins.
 - Nibie answers are easier to scan, with headings, steps, comparison tables, or code when they help.

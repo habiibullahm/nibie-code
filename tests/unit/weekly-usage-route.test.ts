@@ -9,7 +9,7 @@ describe("GET /api/usage", () => {
     createClient.mockReset(); auth.mockReset(); rpc.mockReset();
     auth.mockResolvedValue({ data: { claims: { sub: "owner" } }, error: null });
     rpc.mockReturnValue({ maybeSingle: vi.fn().mockResolvedValue({
-      data: { credits_used: 28, credits_remaining: 72, reset_at: "2026-10-05T00:00:00.000Z" }, error: null,
+      data: { credits_used: 28, credits_remaining: 472, reset_at: "2026-10-05T00:00:00.000Z" }, error: null,
     }) });
     createClient.mockResolvedValue({ auth: { getClaims: auth }, rpc });
   });
@@ -18,7 +18,7 @@ describe("GET /api/usage", () => {
     const response = await GET();
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("private, no-store");
-    await expect(response.json()).resolves.toEqual({ creditsUsed: 28, creditsRemaining: 72, resetAt: "2026-10-05T00:00:00.000Z" });
+    await expect(response.json()).resolves.toEqual({ creditsUsed: 28, creditsRemaining: 472, resetAt: "2026-10-05T00:00:00.000Z" });
     expect(rpc).toHaveBeenCalledWith("get_current_weekly_ai_usage");
   });
 
@@ -31,7 +31,7 @@ describe("GET /api/usage", () => {
 
   it("fails closed on missing, invalid, or impossible database usage data", async () => {
     rpc.mockReturnValue({ maybeSingle: vi.fn().mockResolvedValue({
-      data: { credits_used: 101, credits_remaining: -1, reset_at: "not a date" }, error: null,
+      data: { credits_used: 501, credits_remaining: -1, reset_at: "not a date" }, error: null,
     }) });
     const response = await GET();
     expect(response.status).toBe(503);

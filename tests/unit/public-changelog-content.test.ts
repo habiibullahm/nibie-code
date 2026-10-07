@@ -48,6 +48,6 @@ describe("public changelog copy", () => {
     expect(releaseChecklist).toContain("technical changes, migrations, verification");
     expect(observability).toContain("requestId");
     expect(attachments).toContain("drizzle/0009_chat_attachments.sql");
-    expect(weeklyUsage).toContain("100 credits per UTC week");
+    expect(weeklyUsage).toContain("500 credits per UTC week");
   });
 });

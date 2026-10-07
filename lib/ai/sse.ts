@@ -72,12 +72,32 @@ const contextDiagnosticSchema = z.strictObject({
   reason: z.string(),
 });
 
+const citationSourceSchema = z.strictObject({
+  ordinal: z.number().int().positive(),
+  kind: z.enum(["web", "room_file", "attachment"]),
+  title: z.string().min(1).max(200),
+  url: z.string().url().nullable(),
+  domain: z.string().min(1).max(253).nullable(),
+});
+
+const researchStageSchema = z.enum(["planning", "searching", "reading", "synthesizing"]);
+
 const chatEventSchema = z.discriminatedUnion("type", [
   z.strictObject({
     type: z.literal("start"),
     id: z.string().uuid(),
     position: z.number().int().positive(),
     context: z.strictObject({ sources: z.array(contextDiagnosticSchema), recentMessageCount: z.number().int().nonnegative() }).optional(),
+    sources: z.array(citationSourceSchema).max(20).optional(),
+    research: z.boolean().optional(),
+  }),
+  z.strictObject({
+    type: z.literal("progress"),
+    stage: researchStageSchema,
+  }),
+  z.strictObject({
+    type: z.literal("sources"),
+    sources: z.array(citationSourceSchema).max(20),
   }),
   z.strictObject({ type: z.literal("delta"), text: z.string() }),
   z.strictObject({ type: z.literal("status"), status: z.enum(["complete", "interrupted"]) }),

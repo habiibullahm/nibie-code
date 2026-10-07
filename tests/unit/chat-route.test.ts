@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc, modelOptions, contextCapabilities, withoutAttachments, attachmentState, stopState } = vi.hoisted(() => {
+const { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc, modelOptions, contextCapabilities, withoutAttachments, attachmentState, stopState, messageSourceInserts } = vi.hoisted(() => {
   const createClient = vi.fn(); const stream = vi.fn(); const claim = vi.fn(); const usageReserve = vi.fn(); const usageStart = vi.fn(); const usageRelease = vi.fn();
   const rpc = vi.fn((name: string, args: unknown) => name === "search_room_file_chunks" ? Promise.resolve({ data: [], error: null }) : name === "reserve_weekly_ai_usage" ? usageReserve(args) : name === "start_weekly_ai_usage" ? usageStart(args) : name === "release_weekly_ai_usage" ? usageRelease(args) : claim(name, args));
   const attachmentState: { result: { data: unknown; error: unknown }; reads: unknown[][] } = { result: { data: [], error: null }, reads: [] };
   const stopState = { status: "streaming" as string | null, reads: 0 };
+  const messageSourceInserts: unknown[] = [];
   const statusRead = () => {
     const builder: Record<string, unknown> = {};
     builder.eq = () => builder;
@@ -27,10 +28,39 @@ const { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc
       update: (...args: unknown[]) => (from("messages") as Table).update(...args),
       insert: (...args: unknown[]) => (from("messages") as Table).insert(...args),
     });
-    return { ...value, from: (table: string) => table === "message_attachments" ? none() : table === "messages" ? messages() : from(table) };
+    const messageSources = () => {
+      const builder: Record<string, unknown> = {};
+      builder.insert = (rows: unknown) => { messageSourceInserts.push(rows); return builder; };
+      builder.select = () => builder;
+      builder.eq = () => builder;
+      builder.order = () => builder;
+      builder.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data: null, error: null }).then(resolve);
+      return builder;
+    };
+    const messageResearch = () => {
+      const builder: Record<string, unknown> = {};
+      builder.upsert = () => builder;
+      builder.insert = () => builder;
+      builder.select = () => builder;
+      builder.eq = () => builder;
+      builder.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data: null, error: null }).then(resolve);
+      return builder;
+    };
+    return {
+      ...value,
+      from: (table: string) =>
+        table === "message_attachments" ? none()
+          : table === "message_sources" ? messageSources()
+            : table === "message_research" ? messageResearch()
+              : table === "messages" ? messages()
+                : from(table),
+    };
   };
-  return { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc, modelOptions: vi.fn(), contextCapabilities: vi.fn(() => ({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 })), withoutAttachments, attachmentState, stopState };
+  return { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc, modelOptions: vi.fn(), contextCapabilities: vi.fn(() => ({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 })), withoutAttachments, attachmentState, stopState, messageSourceInserts };
 });
+const researchMocks = vi.hoisted(() => ({
+  runDeepResearch: vi.fn(),
+}));
 const webMocks = vi.hoisted(() => {
   type WebSource = {
     url: string;
@@ -70,6 +100,7 @@ vi.mock("@/lib/web/routing", () => ({ decideWebSearch: webMocks.decideWebSearch 
 vi.mock("@/lib/web/config", () => ({ getWebSearchConfig: webMocks.getWebSearchConfig }));
 vi.mock("@/lib/web/provider", () => ({ getWebSearchProvider: webMocks.getWebSearchProvider }));
 vi.mock("@/lib/web/pipeline", () => ({ runWebSearchPipeline: webMocks.runWebSearchPipeline }));
+vi.mock("@/lib/research/orchestrator", () => ({ runDeepResearch: researchMocks.runDeepResearch }));
 const recallMocks = vi.hoisted(() => ({
   handleRecallTurn: vi.fn(async (): Promise<{ status: string; wrote: boolean; forgot: number; degraded: boolean }> => ({ status: "none", wrote: false, forgot: 0, degraded: false })),
   retrieveRelevantMemories: vi.fn(async (): Promise<{ memories: Array<Record<string, unknown>>; degraded: boolean }> => ({ memories: [], degraded: false })),
@@ -90,13 +121,14 @@ const assistant = { id: assistantId, position: 3, content: "…", status: "strea
 describe("POST /api/chat", () => {
   beforeEach(() => {
     attachmentState.result = { data: [], error: null }; attachmentState.reads = []; stopState.status = "streaming"; stopState.reads = 0;
+    messageSourceInserts.length = 0;
     preferenceResult = { data: null, error: null };
     createClient.mockReset(); stream.mockReset(); modelOptions.mockReset().mockReturnValue(allModes);
     contextCapabilities.mockReset().mockReturnValue({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 });
     claim.mockReset().mockReturnValue(query({ data: assistant, error: null }));
     usageReserve.mockReset().mockImplementation(({ p_logical_mode }: { p_logical_mode: "Fast" | "Balanced" | "High" }) => {
       const credits_charged = { Fast: 1, Balanced: 3, High: 6 }[p_logical_mode];
-      return query({ data: { accepted: true, credits_charged, credits_used: credits_charged, credits_remaining: 100 - credits_charged, reset_at: "2026-10-05T00:00:00.000Z" }, error: null });
+      return query({ data: { accepted: true, credits_charged, credits_used: credits_charged, credits_remaining: 500 - credits_charged, reset_at: "2026-10-05T00:00:00.000Z" }, error: null });
     });
     usageRelease.mockReset().mockImplementation(() => query({ data: true, error: null }));
     usageStart.mockReset().mockImplementation(() => query({ data: true, error: null }));
@@ -110,6 +142,7 @@ describe("POST /api/chat", () => {
     webMocks.runWebSearchPipeline.mockReset().mockResolvedValue({ sources: [], degraded: false, searchResultCount: 0, pagesFetched: 0 });
     recallMocks.handleRecallTurn.mockReset().mockResolvedValue({ status: "none", wrote: false, forgot: 0, degraded: false });
     recallMocks.retrieveRelevantMemories.mockReset().mockResolvedValue({ memories: [], degraded: false });
+    researchMocks.runDeepResearch.mockReset();
   });
   afterEach(() => vi.useRealTimers());
 
@@ -255,7 +288,7 @@ describe("POST /api/chat", () => {
   it("rejects an exhausted allowance with a stable code and never calls the provider", async () => {
     const writes: unknown[] = [];
     readyClient(writes);
-    usageReserve.mockReturnValue(query({ data: { accepted: false, credits_charged: 0, credits_used: 100, credits_remaining: 0, reset_at: "2026-10-05T00:00:00.000Z" }, error: null }));
+    usageReserve.mockReturnValue(query({ data: { accepted: false, credits_charged: 0, credits_used: 500, credits_remaining: 0, reset_at: "2026-10-05T00:00:00.000Z" }, error: null }));
     const response = await POST(validRequest());
     expect(response.status).toBe(429);
     expect(await response.json()).toEqual({
@@ -1030,9 +1063,12 @@ describe("POST /api/chat", () => {
       webMocks.decideWebSearch.mockReturnValue({ search: false, reason: "conceptual" });
       const response = await POST(validRequest());
       expect(response.status).toBe(200);
-      await response.text();
+      const events = await Array.fromAsync(readChatSse(response.body!));
       expect(webMocks.runWebSearchPipeline).not.toHaveBeenCalled();
       expect(webMocks.getWebSearchConfig).not.toHaveBeenCalled();
+      expect(events[0]).toMatchObject({ type: "start" });
+      expect(events[0]).not.toHaveProperty("sources");
+      expect(events.filter((event) => event.type === "delta").map((event) => event.type === "delta" ? event.text : "").join("")).not.toMatch(/\[SOURCE:|Sources/i);
     });
 
     it("grounds the reply in web sources when search is configured", async () => {
@@ -1065,6 +1101,28 @@ describe("POST /api/chat", () => {
         expect(webMocks.runWebSearchPipeline).toHaveBeenCalledOnce();
         expect(info.mock.calls.some(([line]) => String(line).includes("web.route.decided"))).toBe(true);
         expect(info.mock.calls.some(([line]) => String(line).includes("web.context.included"))).toBe(true);
+        expect(info.mock.calls.some(([line]) => String(line).includes("citation.sources.prepared"))).toBe(true);
+        expect(events[0]).toMatchObject({
+          type: "start",
+          sources: [{ ordinal: 1, kind: "web", title: "Node.js", domain: "nodejs.org", url: "https://nodejs.org/en" }],
+        });
+        expect(prompt[1].content).toContain("cite_as: [SOURCE:web:1]");
+        // Authoritative citation rules live on the core system message, not only the untrusted web block.
+        expect(prompt[0].content).toMatch(/Citation rules for this reply/);
+        expect(prompt[0].content).toContain("[SOURCE:web:1]");
+        expect(prompt[0].content).toMatch(/never with prose source lists/i);
+        expect(messageSourceInserts).toHaveLength(1);
+        expect(messageSourceInserts[0]).toEqual([
+          expect.objectContaining({
+            message_id: assistantId,
+            ordinal: 1,
+            kind: "web",
+            handle: "web:1",
+            title: "Node.js",
+            url: "https://nodejs.org/en",
+            domain: "nodejs.org",
+          }),
+        ]);
         expect(JSON.stringify(info.mock.calls)).not.toContain("test-key");
         expect(JSON.stringify(info.mock.calls)).not.toContain("Node.js 22 is the current release line");
       } finally {
@@ -1109,10 +1167,103 @@ describe("POST /api/chat", () => {
             ]),
           },
         });
+        expect(events[0]).not.toHaveProperty("sources");
         expect(warn.mock.calls.some(([line]) => String(line).includes("web.search.failed"))).toBe(true);
       } finally {
         warn.mockRestore();
       }
+    });
+
+    it("transforms citation handles in the stream and rejects unknown ids", async () => {
+      readyClient([]);
+      stream.mockResolvedValue(providerChunks(["Node 22 [SOURCE:web:1] and fake [SOURCE:web:9]."], "stop"));
+      webMocks.decideWebSearch.mockReturnValue({ search: true, reason: "releases_versions" });
+      webMocks.getWebSearchConfig.mockReturnValue({ providerId: "tavily", apiKey: "test-key", maxResults: 8, maxPages: 4, maxSources: 5 });
+      webMocks.getWebSearchProvider.mockReturnValue({ id: "tavily", searchWeb: vi.fn() });
+      webMocks.runWebSearchPipeline.mockResolvedValue({
+        sources: [webSource],
+        degraded: false,
+        searchResultCount: 1,
+        pagesFetched: 1,
+      });
+      const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+      try {
+        const response = await POST(validRequest());
+        expect(response.status).toBe(200);
+        const events = await Array.fromAsync(readChatSse(response.body!));
+        const shown = events.filter((event) => event.type === "delta").map((event) => event.type === "delta" ? event.text : "").join("");
+        expect(shown).toContain("[1]");
+        expect(shown).not.toContain("[SOURCE:");
+        expect(shown).not.toContain("[9]");
+        expect(info.mock.calls.some(([line]) => String(line).includes("citation.references.parsed"))).toBe(true);
+        expect(info.mock.calls.some(([line]) => String(line).includes("citation.references.invalid"))).toBe(true);
+      } finally {
+        info.mockRestore();
+      }
+    });
+
+    it("drops a stuck SOURCE prefix when the provider stream ends mid-handle", async () => {
+      readyClient([]);
+      stream.mockResolvedValue(providerChunks(["Partial cite [SOURCE:web:1"], "stop"));
+      webMocks.decideWebSearch.mockReturnValue({ search: true, reason: "releases_versions" });
+      webMocks.getWebSearchConfig.mockReturnValue({ providerId: "tavily", apiKey: "test-key", maxResults: 8, maxPages: 4, maxSources: 5 });
+      webMocks.getWebSearchProvider.mockReturnValue({ id: "tavily", searchWeb: vi.fn() });
+      webMocks.runWebSearchPipeline.mockResolvedValue({
+        sources: [webSource],
+        degraded: false,
+        searchResultCount: 1,
+        pagesFetched: 1,
+      });
+      const response = await POST(validRequest());
+      expect(response.status).toBe(200);
+      const events = await Array.fromAsync(readChatSse(response.body!));
+      const shown = events.filter((event) => event.type === "delta").map((event) => event.type === "delta" ? event.text : "").join("");
+      expect(shown).toContain("Partial cite");
+      expect(shown).not.toContain("[SOURCE:");
+      expect(shown).not.toMatch(/\[SOURCE:web:1(?!\])/);
+    });
+
+    it("persists message_sources when Stop keeps a partial web-grounded reply", async () => {
+      const cancel = vi.fn();
+      readyClient([]);
+      webMocks.decideWebSearch.mockReturnValue({ search: true, reason: "temporal_currency" });
+      webMocks.getWebSearchConfig.mockReturnValue({ providerId: "tavily", apiKey: "test-key", maxResults: 8, maxPages: 4, maxSources: 5 });
+      webMocks.getWebSearchProvider.mockReturnValue({ id: "tavily", searchWeb: vi.fn() });
+      webMocks.runWebSearchPipeline.mockResolvedValue({
+        sources: [webSource],
+        degraded: false,
+        searchResultCount: 2,
+        pagesFetched: 1,
+      });
+      stream.mockResolvedValue(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: "IHSG naik [SOURCE:web:1]." } }] })}\n\n`));
+        },
+        cancel,
+      }));
+      const response = await POST(validRequest());
+      expect(response.status).toBe(200);
+      const reader = response.body!.getReader();
+      // Consume start + first delta so generation output is non-empty before Stop.
+      await reader.read();
+      await reader.read();
+      stopState.status = "interrupted";
+      await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce(), { timeout: 5_000 });
+      while (true) {
+        const { done } = await reader.read();
+        if (done) break;
+      }
+      expect(messageSourceInserts).toHaveLength(1);
+      expect(messageSourceInserts[0]).toEqual([
+        expect.objectContaining({
+          message_id: assistantId,
+          ordinal: 1,
+          kind: "web",
+          handle: "web:1",
+          title: "Node.js",
+          url: "https://nodejs.org/en",
+        }),
+      ]);
     });
 
     it("injects verification-unavailable guidance when web is unconfigured but routing wants search", async () => {
@@ -1142,6 +1293,7 @@ describe("POST /api/chat", () => {
             ]),
           },
         });
+        expect(events[0]).not.toHaveProperty("sources");
         expect(JSON.stringify(warn.mock.calls)).toContain("provider_unconfigured");
         expect(warn.mock.calls.some(([line]) => String(line).includes("web.search.failed"))).toBe(true);
       } finally {
@@ -1186,6 +1338,156 @@ describe("POST /api/chat", () => {
       expect(prompt[1].content).toContain("<untrusted_web_content>");
       expect(prompt[1].content.indexOf("deploy pipeline uses Node LTS")).toBeLessThan(prompt[1].content.indexOf("<untrusted_web_content>"));
       expect(webMocks.decideWebSearch).toHaveBeenCalledWith(question, { hasRoomFileContext: true });
+    });
+  });
+
+  describe("deep research", () => {
+    const researchWeb = {
+      url: "https://docs.example.com/guide",
+      title: "Official guide",
+      domain: "docs.example.com",
+      retrieval: "web_search" as const,
+      publishedAt: "2026-01-01",
+      text: "Official documented behavior for the feature.",
+    };
+
+    function deepRequest() {
+      return new Request("http://localhost/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          conversationId: "5e9bdcca-9205-4fea-a773-13952bb78c44",
+          userMessageId: "b79e56e1-b479-46f4-97d3-30b2e22be90e",
+          deepResearch: true,
+        }),
+      });
+    }
+
+    it("emits progress stages and cited sources when Deep Research succeeds", async () => {
+      readyClient([]);
+      webMocks.getWebSearchProvider.mockReturnValue({ id: "tavily", searchWeb: vi.fn() });
+      researchMocks.runDeepResearch.mockResolvedValue({
+        status: "complete",
+        plan: {
+          normalizedQuestion: "Compare options",
+          subquestions: ["a", "b"],
+          initialQueries: ["a", "b"],
+          timeSensitive: false,
+          notes: "",
+        },
+        evidence: [{ ...researchWeb }],
+        web: [researchWeb],
+        contradictions: [],
+        incompleteNotice: null,
+        usagePolicy: { id: "temporary_undercount_v1", summary: "test" },
+        metrics: {
+          modelCallCount: 1,
+          searchQueryCount: 2,
+          searchResultCount: 4,
+          pagesFetched: 1,
+          pagesFailed: 0,
+          candidateUrlCount: 2,
+          evidenceCount: 1,
+          followUpUsed: false,
+          durationMs: 100,
+          timeSensitive: false,
+        },
+      });
+      stream.mockResolvedValue(providerChunks(["Findings with [SOURCE:web:1]."], "stop"));
+      const response = await POST(deepRequest());
+      expect(response.status).toBe(200);
+      const events = await Array.fromAsync(readChatSse(response.body!));
+      expect(events[0]).toMatchObject({ type: "start", research: true });
+      expect(events.some((e) => e.type === "sources")).toBe(true);
+      expect(events.some((e) => e.type === "progress" && e.stage === "synthesizing")).toBe(true);
+      expect(events.slice(-2)).toEqual([{ type: "status", status: "complete" }, { type: "done" }]);
+      expect(webMocks.decideWebSearch).not.toHaveBeenCalled();
+      expect(webMocks.runWebSearchPipeline).not.toHaveBeenCalled();
+      expect(researchMocks.runDeepResearch).toHaveBeenCalledOnce();
+      expect(usageReserve).toHaveBeenCalled();
+      expect(stream).toHaveBeenCalledOnce();
+    });
+
+    it("hard-fails empty collection without reserving credits or synthesizing", async () => {
+      readyClient([]);
+      webMocks.getWebSearchProvider.mockReturnValue({ id: "tavily", searchWeb: vi.fn() });
+      researchMocks.runDeepResearch.mockResolvedValue({
+        status: "failed",
+        plan: {
+          normalizedQuestion: "Obscure market share",
+          subquestions: [],
+          initialQueries: ["obscure saas"],
+          timeSensitive: true,
+          notes: "",
+        },
+        evidence: [],
+        web: [],
+        contradictions: [],
+        incompleteNotice: "Deep Research could not collect usable sources. Please try again later or switch to Normal.",
+        usagePolicy: { id: "temporary_undercount_v1", summary: "test" },
+        metrics: {
+          modelCallCount: 1,
+          searchQueryCount: 1,
+          searchResultCount: 0,
+          pagesFetched: 0,
+          pagesFailed: 0,
+          candidateUrlCount: 0,
+          evidenceCount: 0,
+          followUpUsed: true,
+          durationMs: 50,
+          timeSensitive: true,
+          incompleteReason: "empty",
+        },
+      });
+      const response = await POST(deepRequest());
+      expect(response.status).toBe(200);
+      await expect(Array.fromAsync(readChatSse(response.body!))).rejects.toThrow(/could not collect usable sources/i);
+      expect(usageReserve).not.toHaveBeenCalled();
+      expect(stream).not.toHaveBeenCalled();
+      expect(researchMocks.runDeepResearch).toHaveBeenCalledOnce();
+    });
+
+    it("synthesizes as incomplete on gather_deadline with evidence (not Stopped)", async () => {
+      const writes: unknown[] = [];
+      readyClient(writes);
+      webMocks.getWebSearchProvider.mockReturnValue({ id: "tavily", searchWeb: vi.fn() });
+      researchMocks.runDeepResearch.mockResolvedValue({
+        status: "interrupted",
+        plan: {
+          normalizedQuestion: "Compare options",
+          subquestions: ["a"],
+          initialQueries: ["a"],
+          timeSensitive: false,
+          notes: "",
+        },
+        evidence: [{ ...researchWeb }],
+        web: [researchWeb],
+        contradictions: [],
+        incompleteNotice: "Deep Research ran out of time before synthesis.",
+        usagePolicy: { id: "temporary_undercount_v1", summary: "test" },
+        metrics: {
+          modelCallCount: 1,
+          searchQueryCount: 2,
+          searchResultCount: 3,
+          pagesFetched: 1,
+          pagesFailed: 0,
+          candidateUrlCount: 2,
+          evidenceCount: 1,
+          followUpUsed: false,
+          durationMs: 70_000,
+          timeSensitive: false,
+          incompleteReason: "gather_deadline",
+        },
+      });
+      stream.mockResolvedValue(providerChunks(["Partial findings [SOURCE:web:1]."], "stop"));
+      const response = await POST(deepRequest());
+      expect(response.status).toBe(200);
+      const events = await Array.fromAsync(readChatSse(response.body!));
+      expect(events.slice(-2)).toEqual([{ type: "status", status: "complete" }, { type: "done" }]);
+      expect(usageReserve).toHaveBeenCalled();
+      expect(stream).toHaveBeenCalledOnce();
+      expect(writes).toContainEqual(expect.objectContaining({ content: "Partial findings [1].", status: "complete" }));
+      expect(writes).not.toContainEqual(expect.objectContaining({ content: "Response stopped.", status: "interrupted" }));
     });
   });
 

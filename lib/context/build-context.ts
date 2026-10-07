@@ -50,10 +50,12 @@ export function buildContext(input: BuildContextInput): ContextPlan {
   const basePolicyText = contextPolicyFor(input.responseMode, input.preferenceReadFailed ? "balanced" : input.preferences.responseLength);
   const webVerificationUnavailable = Boolean(input.webVerificationUnavailable) && !(input.web?.length);
   const recallOpText = recallOperationInstruction(input.recallOperation);
+  const extraPolicy = input.extraPolicyInstruction?.trim() || null;
   const corePolicyText = [
     basePolicyText,
     webVerificationUnavailable ? WEB_VERIFICATION_UNAVAILABLE_INSTRUCTION : null,
     recallOpText,
+    extraPolicy,
   ].filter(Boolean).join("\n\n");
   const coreTokens = estimateTokens(corePolicyText);
   const currentTokens = estimateTokens(current.content);
@@ -111,7 +113,10 @@ export function buildContext(input: BuildContextInput): ContextPlan {
 
   // Public web sources: after files/attachments, before summary and older history. Never invented here.
   const requestedWeb = input.web?.length ? input.web : null;
-  const renderedWeb = requestedWeb ? renderWebContext(requestedWeb, Math.min(WEB_TOKEN_CAP, remaining.value)) : null;
+  const webCap = Number.isFinite(input.webTokenCap) && (input.webTokenCap as number) > 0
+    ? Math.trunc(input.webTokenCap as number)
+    : WEB_TOKEN_CAP;
+  const renderedWeb = requestedWeb ? renderWebContext(requestedWeb, Math.min(webCap, remaining.value)) : null;
   if (renderedWeb?.text) remaining.value -= estimateTokens(renderedWeb.text);
 
   // Explicit saved memories: after web, before thread summary. Untrusted user data.
@@ -254,5 +259,6 @@ export function buildContext(input: BuildContextInput): ContextPlan {
     blocks,
     diagnostics,
     budget: { inputBudgetTokens, outputReserveTokens, estimatedTokens, truncated },
+    includedCitationHandles: renderedWeb?.includedHandles ?? [],
   };
 }

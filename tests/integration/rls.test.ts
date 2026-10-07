@@ -64,10 +64,17 @@ describe("Supabase row-level security", () => {
     await sql`drop table if exists public.weekly_usage_reservations cascade`;
     await sql`drop table if exists public.weekly_ai_usage cascade`;
     await sql`drop type if exists public.weekly_usage_mode cascade`;
+    await sql`drop table if exists public.message_research cascade`;
+    await sql`drop table if exists public.message_sources cascade`;
+    await sql`drop type if exists public.citation_source_kind cascade`;
     await sql`drop table if exists public.message_attachments cascade`;
     await sql`drop table if exists public.workbench_documents cascade`;
+    // Chunks reference room_files; drop them first so a re-migrate after incomplete cleanup cannot hit 42P07.
+    await sql`drop table if exists public.room_file_chunks cascade`;
     await sql`drop table if exists public.room_files cascade`;
     await sql`drop function if exists public.set_room_files_updated_at() cascade`;
+    await sql`drop function if exists public.search_room_file_chunks cascade`;
+    await sql`drop function if exists public.search_room_file_chunks_semantic cascade`;
     await sql`drop table if exists public.pins cascade`;
     await sql`drop function if exists public.set_pins_updated_at() cascade`;
     await sql`drop table if exists public.room_briefs cascade`;
@@ -124,16 +131,36 @@ describe("Supabase row-level security", () => {
     expect(rows[0]).toEqual({ credits_used: 10, fast_requests: 1, balanced_requests: 1, high_requests: 1 });
   });
 
-  it("rejects a 105-request concurrent race at exactly 100 credits", async () => {
+  it("rejects a concurrent race at exactly 500 credits without resetting counters", async () => {
     const owner = await createUsageUser();
-    const generationIds = await Promise.all(Array.from({ length: 105 }, () => createGeneration(owner)));
+    const utcMonday = new Date();
+    utcMonday.setUTCHours(0, 0, 0, 0);
+    utcMonday.setUTCDate(utcMonday.getUTCDate() - ((utcMonday.getUTCDay() + 6) % 7));
+    const weekStart = utcMonday.toISOString().slice(0, 10);
+    // Seed near the new ceiling so the race stays small but still proves the hard cap and concurrency safety.
+    await sql`insert into public.weekly_ai_usage (user_id, week_start, credits_used, fast_requests) values (${owner}, ${weekStart}::date, 495, 495)`;
+    const generationIds = await Promise.all(Array.from({ length: 10 }, () => createGeneration(owner)));
     const results = await Promise.all(generationIds.map((id) => reserveUsage(owner, id, "Fast")));
     const reservations = results.map(([row]) => row);
-    expect(reservations.filter((row) => row.accepted)).toHaveLength(100);
+    expect(reservations.filter((row) => row.accepted)).toHaveLength(5);
     expect(reservations.filter((row) => !row.accepted)).toHaveLength(5);
     const [usage] = await asUser(owner, (tx) => tx`select credits_used, fast_requests from public.weekly_ai_usage`);
-    expect(usage).toEqual({ credits_used: 100, fast_requests: 100 });
+    expect(usage).toEqual({ credits_used: 500, fast_requests: 500 });
   }, 30_000);
+
+  it("gives accounts already at 100 credits 400 remaining under the raised ceiling", async () => {
+    const owner = await createUsageUser();
+    const utcMonday = new Date();
+    utcMonday.setUTCHours(0, 0, 0, 0);
+    utcMonday.setUTCDate(utcMonday.getUTCDate() - ((utcMonday.getUTCDay() + 6) % 7));
+    const weekStart = utcMonday.toISOString().slice(0, 10);
+    await sql`insert into public.weekly_ai_usage (user_id, week_start, credits_used, fast_requests) values (${owner}, ${weekStart}::date, 100, 100)`;
+    const [usage] = await asUser(owner, (tx) => tx`select * from public.get_current_weekly_ai_usage()`);
+    expect(usage).toMatchObject({ credits_used: 100, credits_remaining: 400 });
+    const generation = await createGeneration(owner);
+    const [reserved] = await reserveUsage(owner, generation, "Fast");
+    expect(reserved).toMatchObject({ accepted: true, credits_charged: 1, credits_used: 101, credits_remaining: 399 });
+  });
 
   it("isolates usage by owner and denies direct client writes", async () => {
     const ownerA = await createUsageUser();
@@ -163,7 +190,7 @@ describe("Supabase row-level security", () => {
     expect(usage.credits_used).toBe(0);
     expect(Date.parse(usage.reset_at as string)).toBeGreaterThan(Date.now());
     const [reserved] = await reserveUsage(owner, generation, "Fast");
-    expect(reserved).toMatchObject({ accepted: true, credits_charged: 1, credits_used: 1, credits_remaining: 99 });
+    expect(reserved).toMatchObject({ accepted: true, credits_charged: 1, credits_used: 1, credits_remaining: 499 });
   });
 
   it("makes pre-stream reservation release atomic and idempotent without negative usage", async () => {
@@ -950,5 +977,73 @@ describe("Supabase row-level security", () => {
       expect(await stored(thread)).toEqual([]);
       expect(await stored(strangerThread)).toHaveLength(1);
     });
+  });
+
+  it("keeps message_research owner-scoped and rejects cross-user reads and writes", async () => {
+    // Fresh conversations — suite conversationA may already be gone after export/delete-all.
+    const owner = randomUUID();
+    const stranger = randomUUID();
+    const thread = randomUUID();
+    const strangerThread = randomUUID();
+    const assistantOwn = randomUUID();
+    const assistantStranger = randomUUID();
+
+    expect(await sql`select relrowsecurity, relforcerowsecurity from pg_class where oid = 'public.message_research'::regclass`).toEqual([
+      { relrowsecurity: true, relforcerowsecurity: true },
+    ]);
+
+    await sql`insert into auth.users (id) values (${owner}), (${stranger})`;
+    await sql`insert into public.conversations (id, user_id, title) values
+      (${thread}, ${owner}, 'Research owner'),
+      (${strangerThread}, ${stranger}, 'Research stranger')`;
+    await sql`insert into public.messages (id, conversation_id, user_id, role, content, status, position) values
+      (${assistantOwn}, ${thread}, ${owner}, 'assistant', 'research a', 'complete', 1),
+      (${assistantStranger}, ${strangerThread}, ${stranger}, 'assistant', 'research b', 'complete', 1)`;
+
+    await asUser(owner, (tx) => tx`
+      insert into public.message_research (
+        message_id, user_id, conversation_id, status, follow_up_used,
+        search_query_count, pages_fetched, evidence_count, model_call_count, duration_ms, usage_policy
+      ) values (
+        ${assistantOwn}, ${owner}, ${thread}, 'complete', false,
+        2, 1, 2, 2, 1200, 'temporary_undercount_v1'
+      )
+    `);
+    await sql`
+      insert into public.message_research (
+        message_id, user_id, conversation_id, status, follow_up_used,
+        search_query_count, pages_fetched, evidence_count, model_call_count, duration_ms, usage_policy
+      ) values (
+        ${assistantStranger}, ${stranger}, ${strangerThread}, 'complete', true,
+        3, 2, 3, 2, 2400, 'temporary_undercount_v1'
+      )
+    `;
+
+    const visible = await asUser(owner, (tx) => tx`
+      select message_id, status, evidence_count from public.message_research where conversation_id = ${thread}
+    `);
+    expect(visible).toEqual([{ message_id: assistantOwn, status: "complete", evidence_count: 2 }]);
+
+    await expect(asUser(owner, (tx) => tx`
+      insert into public.message_research (
+        message_id, user_id, conversation_id, status
+      ) values (${assistantStranger}, ${owner}, ${strangerThread}, 'failed')
+    `)).rejects.toThrow();
+
+    const hiddenUpdate = await asUser(owner, (tx) => tx`
+      update public.message_research set status = 'failed' where message_id = ${assistantStranger} returning message_id
+    `);
+    const hiddenDelete = await asUser(owner, (tx) => tx`
+      delete from public.message_research where message_id = ${assistantStranger} returning message_id
+    `);
+    expect(hiddenUpdate).toHaveLength(0);
+    expect(hiddenDelete).toHaveLength(0);
+
+    const [stillPrivate] = await sql`select status, evidence_count from public.message_research where message_id = ${assistantStranger}`;
+    expect(stillPrivate).toEqual({ status: "complete", evidence_count: 3 });
+
+    await asUser(owner, (tx) => tx`delete from public.messages where id = ${assistantOwn}`);
+    expect(await sql`select message_id from public.message_research where message_id = ${assistantOwn}`).toHaveLength(0);
+    expect(await sql`select message_id from public.message_research where message_id = ${assistantStranger}`).toHaveLength(1);
   });
 });

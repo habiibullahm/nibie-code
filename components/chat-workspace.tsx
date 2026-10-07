@@ -139,6 +139,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const movePending = useRef(false);
   const [streaming, setStreaming] = useState(false);
   const [assistantActivity, setAssistantActivity] = useState<BrandActivity>("idle");
+  const [researchMode, setResearchMode] = useState<"normal" | "deep">("normal");
   const busy = useRef(false);
   const submission = useRef<{ id: string; content: string; conversationId: string | null; attachmentIds: string } | null>(null);
   const streamController = useRef<AbortController | null>(null);
@@ -495,7 +496,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     };
     stopGeneration.current = stopOwnedGeneration;
     try {
-      const response = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: id, userMessageId, model: mode, ...(options.regenerate ? { regenerate: true } : {}), ...(options.fileIds?.length ? { fileIds: options.fileIds } : {}) }), signal: controller.signal });
+      const response = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: id, userMessageId, model: mode, ...(researchMode === "deep" ? { deepResearch: true } : {}), ...(options.regenerate ? { regenerate: true } : {}), ...(options.fileIds?.length ? { fileIds: options.fileIds } : {}) }), signal: controller.signal });
       if (!response.ok || !response.body) {
         if (!response.ok) httpStatus = response.status;
         const payload = await response.json().catch(() => null);
@@ -509,11 +510,26 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
           if (data.context) setContextDiagnostics(data.context);
           // The server has replaced the previous reply once it announces the new one, so hide the old row only now.
           if (options.replaceIds?.length) setRemovedIds((ids) => [...ids, ...options.replaceIds!]);
-          const reply: PersistedMessage = { id: data.id, role: "assistant", content: "", position: data.position, status: "streaming", created_at: new Date().toISOString() };
+          const reply: PersistedMessage = {
+            id: data.id,
+            role: "assistant",
+            content: "",
+            position: data.position,
+            status: "streaming",
+            created_at: new Date().toISOString(),
+            ...(data.sources?.length ? { sources: data.sources } : {}),
+            ...(data.research ? { research: { status: "running", followUpUsed: false, searchQueryCount: 0, pagesFetched: 0, evidenceCount: 0, durationMs: 0, usagePolicy: "temporary_undercount_v1" } } : {}),
+          };
           setLocalMessages((items) => { const rows = items[id] ?? []; return { ...items, [id]: options.placeholderId && rows.some((row) => row.id === options.placeholderId) ? rows.map((row) => row.id === options.placeholderId ? reply : row) : [...rows, reply] }; });
         }
+        if (data.type === "progress" && assistantId) {
+          setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId ? { ...message, researchStage: data.stage, research: message.research ?? { status: "running", followUpUsed: false, searchQueryCount: 0, pagesFetched: 0, evidenceCount: 0, durationMs: 0, usagePolicy: "temporary_undercount_v1" } } : message) }));
+        }
+        if (data.type === "sources" && assistantId) {
+          setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId ? { ...message, sources: data.sources } : message) }));
+        }
         if (data.type === "delta") { setAssistantActivity("streaming"); buffer += data.text; received += data.text; if (!shown) flush(); else if (!flushTimer) flushTimer = setTimeout(flush, streamFlushMs); }
-        if (data.type === "status") { flush(); setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId ? { ...message, content: message.content || "Response stopped.", status: data.status } : message) })); }
+        if (data.type === "status") { flush(); setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId ? { ...message, content: message.content || "Response stopped.", status: data.status, researchStage: undefined } : message) })); }
       }
       flush();
       router.refresh();
@@ -902,7 +918,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const headerRoomName = (showRoom ? activeRoom?.name : threadRoom?.name) ?? null;
   const roomThreads = activeRoom ? shownConversations.filter((item) => item.room_id === activeRoom.id) : [];
   const sidebarProps = { conversations: shownConversations, archivedConversations, rooms, activeId: history, activeRoomId: showRoom ? selectedRoomId : threadRoom?.id ?? null, busy: controlsDisabled || recovering, activity: assistantActivity, preview, email, name: accountName, releasePreview, renderedAt, settingsActive: settingsOpen, onClose: closeDrawer, onOpen: openConversation, onOpenRoom: openRoom, onNewThreadInRoom: newThreadInRoom, onDeleteRoom: deleteRoomFromSidebar, onCreateRoom: openRoomSetup, onNewChat: newChat, onOpenSettings: openSettings, onRename: rename, onArchive: archive, onRestore: restore, onMove: moveThread };
-  const composerProps = { ref: composerRef, dockRef: composerDockRef, sending: sending || recovering || movingThread !== null, streaming, mode, models, onModelChange: changeModel, savingMode, caption, diagnostics: contextDiagnostics ?? contextPreview, onEditProfile: editProfile, onSubmit: submitMessage, onStop: stopStream, onAttach: attach, attachmentsEnabled: !preview, onRoomFiles: threadRoom && !preview ? toggleRoomFiles : undefined, roomItems, roomId: threadRoomId ?? "", roomLabel, roomSelectionNotice, roomsLoading, onRoomChange: activeId ? rooms.length ? changeComposerRoom : undefined : chooseDraftRoom, attachmentPanel: filePickerOpen && threadRoom ? <RoomFilePicker roomId={threadRoom.id} selectedIds={selectedFileIds} disabled={controlsDisabled || sending || streaming} onChange={setSelectedFileIds} /> : null };
+  const composerProps = { ref: composerRef, dockRef: composerDockRef, sending: sending || recovering || movingThread !== null, streaming, mode, models, onModelChange: changeModel, researchMode, onResearchModeChange: setResearchMode, savingMode, caption, diagnostics: contextDiagnostics ?? contextPreview, onEditProfile: editProfile, onSubmit: submitMessage, onStop: stopStream, onAttach: attach, attachmentsEnabled: !preview, onRoomFiles: threadRoom && !preview ? toggleRoomFiles : undefined, roomItems, roomId: threadRoomId ?? "", roomLabel, roomSelectionNotice, roomsLoading, onRoomChange: activeId ? rooms.length ? changeComposerRoom : undefined : chooseDraftRoom, attachmentPanel: filePickerOpen && threadRoom ? <RoomFilePicker roomId={threadRoom.id} selectedIds={selectedFileIds} disabled={controlsDisabled || sending || streaming} onChange={setSelectedFileIds} /> : null };
 
   return <main className="chat-workspace">
     <ChatSidebar {...sidebarProps} collapsed={desktopSidebarCollapsed} desktopToggleRef={desktopCollapseButtonRef} desktopExpandRef={desktopExpandButtonRef} onCollapse={collapseDesktopSidebar} onExpand={expandDesktopSidebar} />

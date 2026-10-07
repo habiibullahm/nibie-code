@@ -93,6 +93,18 @@ Open one `requestId` and read the earlier lines for that id.
 | `thread_summary.refresh.completed` | A new summary was saved. Includes `kind`, `coversThroughPosition`, `durationMs` |
 | `thread_summary.refresh.skipped` | Maintenance did not run or was discarded. `reason` is a lifecycle code such as `below_threshold`, `gap_below_threshold`, `superseded`, or `after_unavailable` |
 | `thread_summary.refresh.failed` | Maintenance failed; the completed reply and any stored summary are unchanged. `stage` and `reason` (for example `timeout`, `provider_failed`, `malformed_output`, `invalid_shape`, `oversize`, `persist_failed`) |
+| `citation.sources.prepared` | Web (or future) sources were prepared as server-owned `SourceReference` rows. Fields: `sourceCount`, `requestId`. Never titles, URLs, or excerpts. |
+| `citation.references.parsed` | Stream/batch citation parse finished. Fields: `sourceCount`, `citationCount`, `requestId`. |
+| `citation.references.invalid` | Unknown or invented citation handles were dropped. Fields: `sourceCount`, `invalidCitationCount`, `requestId`. |
+| `research.started` | Explicit Deep Research run began. Fields: `requestId`, `researchUsagePolicy`. Never question text. |
+| `research.plan.completed` | Planner finished (or fallback). Fields: `subquestionCount`, `queryCount`, `timeSensitive`, `durationMs`. |
+| `research.search.completed` | Search round finished. Fields: `searchQueryCount`, `searchResultCount`, `candidateUrlCount`. |
+| `research.fetch.completed` | Page fetch round finished. Fields: `pagesFetched`, `pagesFailed`, `evidenceCount`. |
+| `research.followup.started` | Optional single follow-up round began. Fields: `followUpUsed`. |
+| `research.synthesis.started` | Cited synthesis stream began. Fields: `sourceCount`, `modelCallCount`, `researchUsagePolicy`. |
+| `research.completed` | Deep Research reply saved complete. Counts + `durationMs` + usage policy only. |
+| `research.interrupted` | User Stop / abort during research. |
+| `research.failed` | Transparent research failure. Fields: `category`, `code` `DEEP_RESEARCH_FAILED`. |
 
 Thread summary events never include message, summary, or provider text.
 

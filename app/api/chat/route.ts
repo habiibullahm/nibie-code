@@ -10,6 +10,12 @@ import { toProviderMessages } from "@/lib/ai/provider-messages";
 import { contextCapabilitiesFor, getModelOptions, providerFor } from "@/lib/ai/registry";
 import { createReasoningStreamFilter, sanitizeModelOutput } from "@/lib/ai/sanitize-model-output";
 import { ProviderStreamError, readOpenAiSse } from "@/lib/ai/sse";
+import { attachWebCitationHandles } from "@/lib/citations/attach";
+import { citationSourcesIncludedInContext } from "@/lib/citations/included";
+import { createCitationStreamFilter } from "@/lib/citations/parse";
+import { citationViewsFromPrepared, persistMessageSources } from "@/lib/citations/persist";
+import { citationInstructionFor } from "@/lib/citations/prepare";
+import type { SourceReference } from "@/lib/citations/types";
 import { stopPollMs, stoppedPlaceholder } from "@/lib/chat/stop";
 import { buildContext } from "@/lib/context/build-context";
 import { CONTEXT_POLICY_VERSION } from "@/lib/context/context-policy";
@@ -30,6 +36,7 @@ import { operationalCodes } from "@/lib/observability/codes";
 import { logError, logInfo, logWarn } from "@/lib/observability/logger";
 import { requestIdFrom } from "@/lib/observability/request-id";
 import { weeklyCreditCost, WEEKLY_FREE_CREDIT_LIMIT } from "@/lib/usage/policy";
+import { createDeepResearchChatResponse } from "@/lib/research/chat-stream";
 import { getWebSearchConfig } from "@/lib/web/config";
 import { getWebSearchProvider } from "@/lib/web/provider";
 import { runWebSearchPipeline } from "@/lib/web/pipeline";
@@ -65,15 +72,17 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
 
   let body: unknown;
   try { body = await request.json(); } catch { return NextResponse.json({ error: "Invalid request." }, { status: 400 }); }
-  const value = body as { conversationId?: unknown; userMessageId?: unknown; regenerate?: unknown; model?: unknown; fileIds?: unknown };
+  const value = body as { conversationId?: unknown; userMessageId?: unknown; regenerate?: unknown; model?: unknown; fileIds?: unknown; deepResearch?: unknown };
   const parsedId = validateConversationId(value?.conversationId);
   const parsedMessageId = validateConversationId(value?.userMessageId);
   const selectedFiles = parseSelectedFileIds(value?.fileIds, MAX_FILES_PER_MESSAGE);
   // The client may name a mode from a fixed vocabulary; it is never a provider model id. Reasoning is server-side routing config,
   // so a stale client's `reasoning` field is simply ignored.
   const requestedModel = value?.model === undefined ? undefined : modelChoiceInputSchema.safeParse(value.model);
-  if (!selectedFiles.ok || !parsedId.success || !parsedMessageId.success || (value.regenerate !== undefined && typeof value.regenerate !== "boolean") || requestedModel?.success === false) return NextResponse.json({ error: "Invalid request." }, { status: 400 });
+  if (!selectedFiles.ok || !parsedId.success || !parsedMessageId.success || (value.regenerate !== undefined && typeof value.regenerate !== "boolean") || (value.deepResearch !== undefined && typeof value.deepResearch !== "boolean") || requestedModel?.success === false) return NextResponse.json({ error: "Invalid request." }, { status: 400 });
   const regenerate = value.regenerate === true;
+  // Explicit Deep Research only — never auto-triggered from question phrasing or Fast/Balanced/High.
+  const deepResearch = value.deepResearch === true;
   // Only modes that are configured on the server can be used, whether the client asked for one or the conversation has one saved.
   const { models: availableModels } = getModelOptions();
   const availableModes = availableModels.map((option) => option.id);
@@ -165,7 +174,8 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
 
   const responseStartedAt = Date.now();
   const durationMs = () => Date.now() - responseStartedAt;
-  logInfo("chat.response.started", { requestId, regenerate, mode });
+  // Deep Research logs chat.response.started inside its own stream path.
+  if (!deepResearch) logInfo("chat.response.started", { requestId, regenerate, mode });
 
   // Explicit recall: save/forget intent and retrieval never block the reply.
   // Fail closed when preferences could not be read so a disabled user is not briefly re-enabled.
@@ -223,10 +233,40 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
     }
   }
 
+  // Deep Research is an explicit alternate path: bounded multi-source orchestrator + cited synthesis.
+  // It does not use auto web routing and must not overload Fast/Balanced/High.
+  if (deepResearch) {
+    const planMode = (availableModes.includes("Fast") ? "Fast" : mode) as typeof mode;
+    return createDeepResearchChatResponse({
+      request,
+      requestId,
+      requestStartedAt,
+      supabase,
+      userId: user.id,
+      conversationId: conversation.id,
+      assistant: { id: assistant.id, position: assistant.position },
+      userMessage: { id: userMessage.id, content: userMessage.content, position: userMessage.position },
+      mode,
+      availablePlanMode: planMode,
+      preferences: preferenceState.preferences,
+      preferenceReadFailed: Boolean(preferenceState.error),
+      summary,
+      room,
+      files,
+      attachments,
+      memories,
+      recallOperation,
+      rows,
+    });
+  }
+
   // Web search runs after Room hybrid retrieval and only for a fresh generation (replay already returned).
   // Failures never block the reply: empty web context continues as normal chat, with an authoritative
   // "verification unavailable" instruction when routing wanted search but sources were empty.
   let web: WebContextInput[] | undefined;
+  let preparedCitationSources: SourceReference[] = [];
+  let citationSources: SourceReference[] = [];
+  let citationViews: ReturnType<typeof citationViewsFromPrepared> = [];
   let webVerificationUnavailable = false;
   const webDecision = decideWebSearch(userMessage.content, { hasRoomFileContext: Boolean(files?.length) });
   logInfo("web.route.decided", { requestId, search: webDecision.search, reason: webDecision.reason });
@@ -252,8 +292,10 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
         });
         const webDurationMs = Date.now() - webStartedAt;
         if (pipeline.sources.length) {
-          web = pipeline.sources;
-          const snippetOnlyCount = pipeline.sources.filter((source) => source.retrieval === "web_snippet_only").length;
+          const attached = attachWebCitationHandles(pipeline.sources);
+          web = attached.web.length ? attached.web : undefined;
+          preparedCitationSources = attached.sources;
+          const snippetOnlyCount = (web ?? []).filter((source) => source.retrieval === "web_snippet_only").length;
           logInfo("web.search.succeeded", {
             requestId,
             resultCount: pipeline.searchResultCount,
@@ -267,9 +309,10 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
           });
           logInfo("web.context.included", {
             requestId,
-            sourceCount: pipeline.sources.length,
+            sourceCount: web?.length ?? 0,
             snippetOnlyCount,
           });
+          if (!web?.length) webVerificationUnavailable = true;
         } else {
           webVerificationUnavailable = true;
           if (pipeline.degraded) {
@@ -305,11 +348,39 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
     const { data, error } = await supabase.from("messages").select("status").eq("id", assistant.id).maybeSingle();
     return !error && data?.status === "interrupted";
   };
+  // Citations are advertised on SSE start; if Stop wins the content write, still attach message_sources so reload
+  // keeps Sources alongside any [n] markers in the kept partial. Once-only: Stop + generation race must not double-insert.
+  let citationSourcesPersisted = false;
+  const persistCitationSourcesForKeptReply = async (keptContent: string) => {
+    if (citationSourcesPersisted || !citationSources.length) return;
+    if (!keptContent.trim() || keptContent === stoppedPlaceholder) return;
+    citationSourcesPersisted = true;
+    const savedSources = await persistMessageSources({
+      supabase,
+      userId: user.id,
+      conversationId: conversation.id,
+      messageId: assistant.id,
+      sources: citationSources,
+    });
+    if (!savedSources.ok) {
+      citationSourcesPersisted = false;
+      logWarn("citation.sources.persist_failed", { requestId, sourceCount: citationSources.length });
+    }
+  };
   const persist = async (content: string, status: "complete" | "interrupted" | "error"): Promise<"saved" | "stopped" | "failed"> => {
     try {
       const { data, error } = await supabase.from("messages").update({ content, status }).eq("id", assistant.id).eq("status", "streaming").select("id").maybeSingle();
-      if (!error && data) return "saved";
-      if (!error && await replyStopped()) return "stopped";
+      if (!error && data) {
+        if (status === "complete" || status === "interrupted") {
+          await persistCitationSourcesForKeptReply(content);
+        }
+        return "saved";
+      }
+      if (!error && await replyStopped()) {
+        // Stop already saved the visible text; still persist Sources for that kept partial.
+        await persistCitationSourcesForKeptReply(content);
+        return "stopped";
+      }
     } catch { /* reported below */ }
     logError("chat.persistence.failed", { requestId, code: operationalCodes.assistantPersistFailed, stage: "persist", status });
     return "failed";
@@ -336,6 +407,23 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
     });
     prompt = toProviderMessages(plan);
     context = plan.diagnostics;
+    // Citation allowlist is only handles that made it into the rendered web block.
+    citationSources = citationSourcesIncludedInContext(preparedCitationSources, plan.includedCitationHandles);
+    citationViews = citationViewsFromPrepared(citationSources);
+    // Put citation rules in the authoritative system message — not only the untrusted web preface —
+    // so the model emits [SOURCE:web:n] instead of inventing a prose Sources list.
+    if (citationSources.length && prompt[0]?.role === "system") {
+      const citationRules = citationInstructionFor(citationSources);
+      if (citationRules) {
+        prompt = [{ role: "system", content: `${prompt[0].content}\n\n${citationRules}` }, ...prompt.slice(1)];
+      }
+    }
+    if (preparedCitationSources.length || citationSources.length) {
+      logInfo("citation.sources.prepared", {
+        requestId,
+        sourceCount: citationSources.length,
+      });
+    }
     const profileIncluded = plan.blocks.some((block) => block.id === "profile" && block.included);
     const roomIncluded = plan.blocks.some((block) => block.id === "room" && block.included);
     const pinsIncluded = plan.blocks.some((block) => block.id === "pins" && block.included);
@@ -501,7 +589,8 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   const summaryMaintenance = deferThreadSummaryMaintenance({ supabase, conversationId: conversation.id, requestId });
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      const filter = createReasoningStreamFilter();
+      const reasoningFilter = createReasoningStreamFilter();
+      const citationFilter = createCitationStreamFilter(citationSources);
       let output = ""; let completed = false; let sealed = false;
       let interruptedSave: Promise<"saved" | "stopped" | "failed"> | undefined;
       const publish = (text: string) => {
@@ -510,22 +599,46 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
         output += text;
         if (!clientCancelled) controller.enqueue(encoder.encode(event("delta", { text })));
       };
+      const feedModelText = (chunk: string) => {
+        if (!chunk) return;
+        publish(citationFilter.push(reasoningFilter.push(chunk)));
+      };
+      const logCitationStats = () => {
+        logInfo("citation.references.parsed", {
+          requestId,
+          sourceCount: citationSources.length,
+          citationCount: citationFilter.citationCount,
+        });
+        if (citationFilter.invalidCitationCount > 0) {
+          logInfo("citation.references.invalid", {
+            requestId,
+            sourceCount: citationSources.length,
+            invalidCitationCount: citationFilter.invalidCitationCount,
+          });
+        }
+      };
       const seal = () => {
         if (sealed) return;
         sealed = true;
-        publish(filter.finish());
-        if (filter.reasoningBlockCount > 0) {
+        const afterReasoning = reasoningFilter.finish();
+        if (afterReasoning) publish(citationFilter.push(afterReasoning));
+        publish(citationFilter.finish());
+        logCitationStats();
+        if (reasoningFilter.reasoningBlockCount > 0) {
           console.info(JSON.stringify({
             event: "ai.reasoning.filtered",
             requestId: assistant.id,
-            reasoningBlockCount: filter.reasoningBlockCount,
+            reasoningBlockCount: reasoningFilter.reasoningBlockCount,
           }));
         }
       };
       const save = async (status: "complete" | "interrupted" | "error") => {
         seal();
         // An explicit Stop already saved the text its user saw; the generation's own output is never written over it.
-        if (userStopped) return "stopped" as const;
+        if (userStopped) {
+          await persistCitationSourcesForKeptReply(output);
+          return "stopped" as const;
+        }
         const content = output || (status === "interrupted" ? stoppedPlaceholder : "Response unavailable.");
         if (status === "interrupted") return interruptedSave ??= persist(content, status);
         return persist(content, status);
@@ -536,10 +649,15 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       };
       try {
         if (clientCancelled) throw new Error("Response aborted.");
-        controller.enqueue(encoder.encode(event("start", { id: assistant.id, position: assistant.position, context })));
+        controller.enqueue(encoder.encode(event("start", {
+          id: assistant.id,
+          position: assistant.position,
+          context,
+          ...(citationViews.length ? { sources: citationViews } : {}),
+        })));
         for await (const item of readOpenAiSse(responseStream, aborter.signal)) {
           if (item.type === "done") { completed = true; finishReason = item.finishReason ?? "unspecified"; break; }
-          publish(filter.push(item.text));
+          feedModelText(item.text);
         }
         seal();
         if (userStopped || clientCancelled || request.signal.aborted) {
