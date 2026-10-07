@@ -4,58 +4,59 @@
  * Theme tokens. Dark is the default experience; light is selected with data-theme="light" (see lib/theme.ts and the
  * inline script in app/layout.tsx, which sets the attribute before first paint).
  *
- * 90% warm neutral surfaces, 10% identity: restrained terracotta for selection, focus, and primary actions.
- * Warm sand stays available for links. Status colors remain separate. Static icons repeat the dark values in lib/theme/palette.ts.
+ * Neutral graphite surfaces keep long chat sessions calm. Cool blue is reserved for interaction, focus, and selection.
+ * Terracotta remains a brand-mark detail rather than an app-wide UI color. Static icons repeat dark values in lib/theme/palette.ts.
  */
 :root, :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg-app: #11100f;
-  --bg-sidebar: #141210;
-  --bg-raised: #181614;
-  --bg-subtle: #1b1816;
-  --bg-muted: #201d1a;
-  --bg-code: #171513;
-  --hover: #201d1a;
-  --accent-soft: #2a211c;
-  --active: #201d1a;
-  --border: #302b27;
-  --border-soft: #26221e;
-  --border-strong: #51473f;
-  --text: #f5f2ed;
-  --text-2: #ded8d1;
-  --text-3: #b8b0a7;
-  --text-4: #777069;
-  --accent: #d97757;
-  --accent-hover: #e18768;
-  --accent-fg: #11100f;
-  --disabled-bg: #302c28;
-  --disabled-fg: #777069;
-  --primary-bg: #f5f2ed;
-  --primary-bg-hover: #ffffff;
-  --primary-fg: #151311;
+  --bg-app: #181818;
+  --bg-sidebar: #151515;
+  --bg-raised: #212121;
+  --bg-subtle: #1d1d1d;
+  --bg-muted: #252525;
+  --bg-code: #1c1c1c;
+  --hover: #2a2a2a;
+  --accent-soft: #202a3a;
+  --active: #232323;
+  --border: #333333;
+  --border-soft: #292929;
+  --border-strong: #484848;
+  --text: #e8e8e8;
+  --text-2: #c8c8c8;
+  --text-3: #a6a6a6;
+  --text-4: #858585;
+  --accent: #6f95e8;
+  --accent-hover: #7da1ee;
+  --accent-fg: #10131a;
+  --disabled-bg: #303030;
+  --disabled-fg: #7f7f7f;
+  --primary-bg: #e8e8e8;
+  --primary-bg-hover: #f3f3f3;
+  --primary-fg: #171717;
   --brand-terracotta: #d97757;
-  --brand-sand: #c9ad85;
-  --link: #d8ba8d;
-  --focus: #d97757;
-  --scrim: #11100fcc;
-  --skeleton-a: #1b1816;
-  --skeleton-b: #25211e;
-  --avatar-bg: #292521;
-  --avatar-fg: #d8d2ca;
-  --mark-bg: var(--accent);
-  --mark-fg: var(--accent-fg);
-  --logo-body: #f5f2ed;
+  --brand-sand: #bda982;
+  --link: #91b1f2;
+  --focus: #6f95e8;
+  --scrim: #101010cc;
+  --skeleton-a: #222222;
+  --skeleton-b: #2b2b2b;
+  --avatar-bg: #2a2a2a;
+  --avatar-fg: #cfcfcf;
+  --user-bubble: #202633;
+  --mark-bg: var(--brand-terracotta);
+  --mark-fg: #17120f;
+  --logo-body: #f0efec;
   --logo-fold: var(--brand-terracotta);
-  --shadow-sm: 0 1px 2px #00000040;
-  --shadow-composer: 0 10px 30px #00000038, 0 1px 2px #0000004d;
-  --shadow-composer-focus: 0 10px 32px #00000045, 0 0 0 3px #d977571a;
-  --shadow-drawer: 12px 0 35px #00000070;
-  --shadow-menu: 0 14px 36px #00000099, 0 2px 8px #00000066;
-  --shadow-frame: 0 28px 70px #00000073;
-  --danger: #e06c75;
-  --success: #7faf83;
-  --warning: #d7a15e;
-  --info: #b8b0a7;
+  --shadow-sm: 0 1px 2px #00000033;
+  --shadow-composer: 0 8px 24px #0000002e, 0 1px 2px #00000040;
+  --shadow-composer-focus: 0 8px 26px #00000038, 0 0 0 3px #6f95e81f;
+  --shadow-drawer: 12px 0 35px #00000066;
+  --shadow-menu: 0 14px 36px #0000008c, 0 2px 8px #00000059;
+  --shadow-frame: 0 28px 70px #00000066;
+  --danger: #d97b82;
+  --success: #7fa884;
+  --warning: #c99a5b;
+  --info: #a6a6a6;
 }
 :root[data-theme="light"] {
   color-scheme: light;
@@ -92,6 +93,7 @@
   --skeleton-b: #f7f5f0;
   --avatar-bg: #dedbd2;
   --avatar-fg: #55554b;
+  --user-bubble: #edf2fb;
   --mark-bg: #59614b;
   --mark-fg: #fcfbf9;
   --logo-body: #2a2823;
@@ -364,7 +366,7 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .message-time { margin-left: 8px; color: var(--text-4); font-size: 10px; font-weight: 500; letter-spacing: .01em; white-space: nowrap; }
 .message-column.user .message-time { display: block; margin: 2px 2px 0 0; text-align: right; }
 .message-content p { margin: 0; color: var(--text-2); font-size: 15px; line-height: 1.72; overflow-wrap: anywhere; white-space: pre-wrap; }
-.message-content.user { max-width: 100%; padding: 11px 15px; border: 1px solid var(--border); border-radius: 14px 4px 14px 14px; background: var(--bg-raised); }
+.message-content.user { max-width: 100%; padding: 11px 15px; border: 1px solid var(--border); border-radius: 14px 4px 14px 14px; background: var(--user-bubble); }
 .message-column.user { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; min-width: 0; max-width: min(78%, 540px); }
 .message-content.user p { color: var(--text); font-size: 13.5px; line-height: 1.65; }
 .user-avatar { width: 27px; height: 27px; margin-top: 2px; }
