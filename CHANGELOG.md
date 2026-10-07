@@ -20,6 +20,7 @@ What's new in Nibie.
 
 ### Changed
 
+- Nibie's dark workspace now uses higher-contrast warm neutrals, clearer message typography, restrained terracotta interaction states, and a more distinct composer for easier reading.
 - Weekly AI allowance is now 500 credits per week (was 100); Fast, Balanced, and High still cost 1, 3, and 6.
 - In a Room, Nibie finds relevant file excerpts from both keywords and meaning, so paraphrased questions still pull the right context while exact symbols stay preferred.
 - Nibie's answers are now substantive by default, with enough explanation, steps, examples, or trade-offs to understand or act without asking again, and no padding. Short follow-ups like a company name or tech stack refine your current question, and Nibie won't start a quiz or mock interview unless you ask for one. Settings → Response depth offers Concise, Default, and Detailed, and a request in your message always wins.
