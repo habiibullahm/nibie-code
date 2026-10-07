@@ -12,9 +12,9 @@ const render = (message: Partial<PersistedMessage>) => renderToStaticMarkup(crea
 }));
 
 describe("assistant MessageRow", () => {
-  it("shows only the thinking dots before the first token", () => {
+  it("shows only the Thinking… status before the first token", () => {
     const html = render({ status: "streaming", content: "" });
-    expect(html).toContain('<span class="response-thinking" aria-hidden="true">...</span>');
+    expect(html).toContain('<span class="response-thinking" aria-hidden="true">Thinking…</span>');
     expect(html).not.toContain("brand-mark");
     expect(html).toContain('role="status">Nibie is responding<');
     expect(html).not.toContain("message-author");
