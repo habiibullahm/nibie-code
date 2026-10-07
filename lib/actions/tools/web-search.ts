@@ -1,13 +1,14 @@
 import "server-only";
 
 import { z } from "zod";
+import { WEB_SEARCH_ACTION_ID } from "@/lib/actions/ids";
 import type { ActionDefinition, ActionResult, ActionResultItem } from "@/lib/actions/types";
 import { getWebSearchConfig } from "@/lib/web/config";
 import { getWebSearchProvider } from "@/lib/web/provider";
 import { runWebSearchPipeline } from "@/lib/web/pipeline";
 import type { WebContextInput } from "@/lib/web/types";
 
-export const WEB_SEARCH_ACTION_ID = "web.search" as const;
+export { WEB_SEARCH_ACTION_ID };
 
 export const webSearchInputSchema = z.strictObject({
   query: z.string().trim().min(1).max(2000),

@@ -1,4 +1,4 @@
-import { WEB_SEARCH_ACTION_ID } from "@/lib/actions/tools/web-search";
+import { WEB_SEARCH_ACTION_ID } from "@/lib/actions/ids";
 import type { ActionRunStatus } from "@/lib/actions/types";
 
 /** Minimal user-facing Action status copy — no agent dashboard. */

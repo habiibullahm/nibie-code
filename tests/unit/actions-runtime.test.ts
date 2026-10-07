@@ -66,7 +66,7 @@ describe("Actions permissions", () => {
     expect(evaluateActionPermission(readAction)).toEqual({ allowed: true });
   });
 
-  it("denies create/update/delete/execute in V1 with confirmation metadata", () => {
+  it("denies create/update/delete/execute in V1 even when confirmed", () => {
     for (const capability of ["create", "update", "delete", "execute"] as const) {
       const fake: ActionDefinition = {
         ...readAction,
@@ -75,11 +75,10 @@ describe("Actions permissions", () => {
         requiresConfirmation: true,
         execute: async () => ({ ok: true, items: [], summary: "no" }),
       };
-      const decision = evaluateActionPermission(fake);
+      const decision = evaluateActionPermission(fake, { confirmed: true });
       expect(decision.allowed).toBe(false);
       if (!decision.allowed) {
-        expect(decision.code).toBe("confirmation_required");
-        expect(decision.requiresConfirmation).toBe(true);
+        expect(decision.code).toBe("permission_denied");
       }
     }
   });
@@ -278,7 +277,6 @@ describe("Actions runtime", () => {
   });
 
   it("denies mutating capability even if somehow registered input is valid", async () => {
-    // Permission path for a hypothetical create Action definition.
     const createAction: ActionDefinition = {
       id: "pin.create",
       title: "Create pin",
@@ -288,8 +286,46 @@ describe("Actions runtime", () => {
       inputSchema: z.strictObject({ title: z.string().min(1) }),
       execute: async () => ({ ok: true, items: [], summary: "created" }),
     };
-    // Simulate registry miss + direct permission check (runtime uses registry only).
-    const decision = evaluateActionPermission(createAction, { confirmed: false });
+    const decision = evaluateActionPermission(createAction, { confirmed: true });
     expect(decision.allowed).toBe(false);
+    if (!decision.allowed) expect(decision.code).toBe("permission_denied");
+  });
+});
+
+describe("Actions message hydration", () => {
+  it("maps completed action_runs to Used Web Search labels", async () => {
+    const { loadMessageActionsByConversation } = await import("@/lib/actions/persist");
+    const rows = [
+      {
+        message_id: "33333333-3333-4333-8333-333333333333",
+        action_id: WEB_SEARCH_ACTION_ID,
+        status: "completed",
+        started_at: "2026-10-07T12:00:00.000Z",
+      },
+      {
+        message_id: "33333333-3333-4333-8333-333333333333",
+        action_id: WEB_SEARCH_ACTION_ID,
+        status: "completed",
+        started_at: "2026-10-07T11:00:00.000Z",
+      },
+    ];
+    const supabase = {
+      from: () => {
+        const builder: Record<string, unknown> = {};
+        builder.select = () => builder;
+        builder.eq = () => builder;
+        builder.not = () => builder;
+        builder.order = () => builder;
+        builder.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data: rows, error: null }).then(resolve);
+        return builder;
+      },
+    };
+    const result = await loadMessageActionsByConversation(supabase as never, "22222222-2222-4222-8222-222222222222");
+    expect(result.error).toBe(false);
+    expect(result.byMessage.get("33333333-3333-4333-8333-333333333333")).toEqual({
+      actionId: WEB_SEARCH_ACTION_ID,
+      status: "completed",
+      label: "Used Web Search",
+    });
   });
 });

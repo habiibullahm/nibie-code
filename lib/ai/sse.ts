@@ -115,6 +115,11 @@ const chatEventSchema = z.discriminatedUnion("type", [
     status: z.enum(["failed", "cancelled", "waiting_for_confirmation"]),
     errorCode: z.string().min(1).max(64),
   }),
+  // Follow-up diagnostics when start was emitted early (Action path) before buildContext.
+  z.strictObject({
+    type: z.literal("context"),
+    context: z.strictObject({ sources: z.array(contextDiagnosticSchema), recentMessageCount: z.number().int().nonnegative() }),
+  }),
   z.strictObject({
     type: z.literal("sources"),
     sources: z.array(citationSourceSchema).max(20),

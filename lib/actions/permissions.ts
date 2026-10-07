@@ -6,7 +6,7 @@ export type PermissionDecision =
 
 /**
  * V1 policy: only `read` is generally enabled.
- * create/update/delete/execute are denied (confirmation metadata reserved for later).
+ * create/update/delete/execute are denied until a real confirm gate ships.
  * The model cannot self-authorize — this check is server-side only.
  */
 export function evaluateActionPermission(
@@ -25,13 +25,12 @@ export function evaluateActionPermission(
     return { allowed: true };
   }
 
-  // Future mutations: design confirmation gate without enabling them in V1.
-  if (action.requiresConfirmation || MUTATING_CAPABILITIES.has(action.capability)) {
+  // Mutating capabilities are not enabled in V1 — deny even if a client claims confirmation.
+  if (MUTATING_CAPABILITIES.has(action.capability)) {
     return {
       allowed: false,
-      code: "confirmation_required",
+      code: "permission_denied",
       reason: `Capability "${action.capability}" is not enabled in Actions V1.`,
-      requiresConfirmation: true,
     };
   }
 

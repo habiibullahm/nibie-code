@@ -1115,5 +1115,22 @@ describe("Supabase row-level security", () => {
         user_id, conversation_id, action_id, capability, input_summary, status
       ) values (${owner}, ${thread}, 'web.search', 'read', ${"x".repeat(241)}, 'running')
     `)).rejects.toThrow();
+
+    // Foreign room_id / message_id must fail INSERT WITH CHECK after 0020.
+    const foreignRoom = randomUUID();
+    const foreignMessage = randomUUID();
+    await sql`insert into public.rooms (id, user_id, name) values (${foreignRoom}, ${stranger}, 'Other room')`;
+    await sql`insert into public.messages (id, conversation_id, user_id, role, content, status, position) values
+      (${foreignMessage}, ${strangerThread}, ${stranger}, 'assistant', 'x', 'complete', 1)`;
+    await expect(asUser(owner, (tx) => tx`
+      insert into public.action_runs (
+        user_id, conversation_id, room_id, action_id, capability, input_summary, status
+      ) values (${owner}, ${thread}, ${foreignRoom}, 'web.search', 'read', '{"query":"x"}', 'completed')
+    `)).rejects.toThrow();
+    await expect(asUser(owner, (tx) => tx`
+      insert into public.action_runs (
+        user_id, conversation_id, message_id, action_id, capability, input_summary, status
+      ) values (${owner}, ${thread}, ${foreignMessage}, 'web.search', 'read', '{"query":"x"}', 'completed')
+    `)).rejects.toThrow();
   });
 });

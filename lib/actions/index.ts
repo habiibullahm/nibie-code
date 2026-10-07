@@ -46,8 +46,14 @@ export {
   actionUsedLabel,
 } from "@/lib/actions/labels";
 
+export { WEB_SEARCH_ACTION_ID } from "@/lib/actions/ids";
+
 export {
-  WEB_SEARCH_ACTION_ID,
+  loadMessageActionsByConversation,
+  type MessageActionView,
+} from "@/lib/actions/persist";
+
+export {
   webSearchAction,
   webSearchInputSchema,
   webSourcesFromActionResult,

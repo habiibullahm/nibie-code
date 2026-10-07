@@ -92,7 +92,7 @@ const webMocks = vi.hoisted(() => {
     decideWebSearch: vi.fn((): { search: boolean; reason: string } => ({ search: false, reason: "default_no_search" })),
     getWebSearchConfig: vi.fn((): null | { providerId: "tavily"; apiKey: string; maxResults: number; maxPages: number; maxSources: number } => null),
     getWebSearchProvider: vi.fn((): null | { id: "tavily"; searchWeb: ReturnType<typeof vi.fn> } => null),
-    runWebSearchPipeline: vi.fn(async (): Promise<PipelineResult> => ({
+    runWebSearchPipeline: vi.fn<(query: string, opts: { signal: AbortSignal }) => Promise<PipelineResult>>(async () => ({
       sources: [],
       degraded: false,
       searchResultCount: 0,
@@ -1126,6 +1126,10 @@ describe("POST /api/chat", () => {
         expect(events[0]).toMatchObject({ type: "start", id: assistantId });
         expect(events.some((event) => event.type === "action_start" && event.actionId === "web.search")).toBe(true);
         expect(events.some((event) => event.type === "action_result" && event.status === "completed")).toBe(true);
+        expect(events.some((event) =>
+          event.type === "context"
+          && event.context.sources.some((source) => source.type === "web" && source.state === "included"),
+        )).toBe(true);
         expect(events.some((event) => event.type === "sources" && event.sources?.[0]?.domain === "nodejs.org")).toBe(true);
         const prompt = stream.mock.calls[0][1] as { role: string; content: string }[];
         expect(prompt[0].content).not.toContain("Node.js 22 is the current release line");
@@ -1188,11 +1192,61 @@ describe("POST /api/chat", () => {
         expect(prompt[0].content).toMatch(/do not claim that you searched the web/i);
         expect(events[0]).toMatchObject({ type: "start" });
         expect(events.some((event) => event.type === "action_error")).toBe(true);
+        expect(events.some((event) =>
+          event.type === "context"
+          && event.context.sources.some((source) =>
+            source.type === "web"
+            && source.state === "not_used"
+            && /Web verification was unavailable/i.test(source.reason),
+          ),
+        )).toBe(true);
         expect(events[0]).not.toHaveProperty("sources");
         expect(warn.mock.calls.some(([line]) => String(line).includes("web.search.failed") || String(line).includes("action.failed"))).toBe(true);
       } finally {
         warn.mockRestore();
       }
+    });
+
+    it("cancels an in-flight Action before provider synthesis when Stop wins", async () => {
+      readyClient([]);
+      webMocks.decideWebSearch.mockReturnValue({ search: true, reason: "news" });
+      webMocks.getWebSearchConfig.mockReturnValue({ providerId: "tavily", apiKey: "test-key", maxResults: 8, maxPages: 4, maxSources: 5 });
+      webMocks.getWebSearchProvider.mockReturnValue({ id: "tavily", searchWeb: vi.fn() });
+      webMocks.runWebSearchPipeline.mockImplementation(async (_query, opts) => {
+        await new Promise<never>((_, reject) => {
+          const fail = () => {
+            const err = new Error("aborted");
+            err.name = "AbortError";
+            reject(err);
+          };
+          if (opts.signal.aborted) fail();
+          else opts.signal.addEventListener("abort", fail, { once: true });
+        });
+        return { sources: [], degraded: true, failureCategory: "aborted", searchResultCount: 0, pagesFetched: 0 };
+      });
+      stream.mockResolvedValue(providerChunks(["should not run"], "stop"));
+      const response = await POST(validRequest());
+      expect(response.status).toBe(200);
+      const decoder = new TextDecoder();
+      const reader = response.body!.getReader();
+      let buffer = "";
+      while (!buffer.includes("event: action_start")) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+      }
+      expect(buffer).toContain("event: action_start");
+      stopState.status = "interrupted";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+      }
+      expect(buffer).toMatch(/event: action_error/);
+      expect(buffer).toMatch(/"status":"cancelled"/);
+      expect(buffer).toMatch(/event: status[\s\S]*"status":"interrupted"/);
+      expect(stream).not.toHaveBeenCalled();
+      expect(webMocks.runWebSearchPipeline).toHaveBeenCalledOnce();
     });
 
     it("transforms citation handles in the stream and rejects unknown ids", async () => {
@@ -1310,6 +1364,12 @@ describe("POST /api/chat", () => {
         expect(prompt[0].content).toMatch(/Web verification was unavailable/i);
         expect(events[0]).toMatchObject({ type: "start" });
         expect(events.some((event) => event.type === "action_error")).toBe(true);
+        expect(events.some((event) =>
+          event.type === "context"
+          && event.context.sources.some((source) =>
+            source.type === "web" && source.state === "not_used",
+          ),
+        )).toBe(true);
         expect(events[0]).not.toHaveProperty("sources");
         expect(JSON.stringify(warn.mock.calls)).toContain("provider_unconfigured");
         expect(warn.mock.calls.some(([line]) => String(line).includes("web.search.failed") || String(line).includes("action.failed"))).toBe(true);

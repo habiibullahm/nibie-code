@@ -354,6 +354,8 @@ export async function createAutoWebActionChatResponse(input: AutoWebActionChatIn
               prompt = [{ role: "system", content: `${prompt[0].content}\n\n${citationRules}` }, ...prompt.slice(1)];
             }
           }
+          // Early start omitted diagnostics; send them now so the context panel matches ordinary chat.
+          enqueue("context", { context });
           logInfo("context.built", {
             requestId,
             durationMs: Date.now() - started,
