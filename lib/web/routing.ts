@@ -6,7 +6,11 @@ export type WebSearchRule = {
   pattern: RegExp;
 };
 
-/** Exported for tests. Search rules are evaluated before no-search heuristics. */
+/**
+ * Exported for tests. Strong search cues only — bare weak tokens (`version`,
+ * `release`, `price`, `job`) live in `WEAK_CURRENCY_SEARCH_RULES` and require a
+ * currency cue after conceptual/coding suppressors run.
+ */
 export const WEB_SEARCH_RULES: readonly WebSearchRule[] = [
   {
     reason: "explicit_request",
@@ -28,8 +32,9 @@ export const WEB_SEARCH_RULES: readonly WebSearchRule[] = [
   {
     reason: "prices_markets",
     search: true,
+    // Bare "price(s)" is weak — see WEAK_CURRENCY_SEARCH_RULES.
     pattern:
-      /\b(?:price|prices|stock(?:s)?|share\s+price|fx|forex|exchange\s+rate|crypto|bitcoin|ethereum|spot\s+price|market\s+price)\b/i,
+      /\b(?:stock(?:s)?|share\s+price|fx|forex|exchange\s+rate|crypto|bitcoin|ethereum|spot\s+price|market\s+price)\b/i,
   },
   {
     reason: "schedules",
@@ -39,8 +44,8 @@ export const WEB_SEARCH_RULES: readonly WebSearchRule[] = [
   {
     reason: "releases_versions",
     search: true,
-    pattern:
-      /\b(?:release|released|version|changelog|what'?s\s+new\s+in|cve-\d+|cve\b)\b/i,
+    // Bare "version" / "release" are weak — see WEAK_CURRENCY_SEARCH_RULES.
+    pattern: /\b(?:changelog|what'?s\s+new\s+in|cve-\d+|cve\b)\b/i,
   },
   {
     reason: "public_figures",
@@ -57,13 +62,36 @@ export const WEB_SEARCH_RULES: readonly WebSearchRule[] = [
   {
     reason: "jobs",
     search: true,
-    pattern: /\b(?:job(?:s)?|hiring|careers?\s+posting|job\s+posting|open\s+roles?)\b/i,
+    // Bare "job(s)" is weak — see WEAK_CURRENCY_SEARCH_RULES.
+    pattern: /\b(?:hiring|careers?\s+posting|job\s+posting|open\s+roles?)\b/i,
   },
   {
     reason: "public_info_stale",
     search: true,
     // Requires a currency cue elsewhere in the query (checked in decideWebSearch).
     pattern: /\b(?:who\s+owns|market\s+share|regulation|regulated\s+by)\b/i,
+  },
+] as const;
+
+/**
+ * Weak tokens that historically over-triggered on conceptual/coding asks.
+ * Only search when a currency cue is also present (and suppressors did not win).
+ */
+export const WEAK_CURRENCY_SEARCH_RULES: readonly WebSearchRule[] = [
+  {
+    reason: "prices_markets",
+    search: true,
+    pattern: /\b(?:price|prices)\b/i,
+  },
+  {
+    reason: "releases_versions",
+    search: true,
+    pattern: /\b(?:release|released|version)\b/i,
+  },
+  {
+    reason: "jobs",
+    search: true,
+    pattern: /\b(?:job|jobs)\b/i,
   },
 ] as const;
 
@@ -89,7 +117,8 @@ export type DecideWebSearchOpts = {
 /**
  * Deterministic capability routing for web search. No LLM.
  * Empty/whitespace → no search. Room-only grounding can skip web when file context exists.
- * First matching search rule wins; otherwise a no-search reason is returned.
+ * Strong search cues win first; conceptual/coding/writing suppressors run before weak
+ * token rules (`version` / `release` / `price` / `job`), which require a currency cue.
  */
 export function decideWebSearch(query: string, opts?: DecideWebSearchOpts): WebRouteDecision {
   const text = query.trim();
@@ -112,6 +141,9 @@ export function decideWebSearch(query: string, opts?: DecideWebSearchOpts): WebR
     return { search: true, reason: "public_info_stale" };
   }
 
+  const hasCurrencyCue = CURRENCY_CUE_PATTERN.test(text);
+
+  // Strong search rules (currency cues, news, markets, docs, …).
   for (const rule of WEB_SEARCH_RULES) {
     if (!rule.search || rule.reason === "explicit_request" || rule.reason === "public_info_stale") {
       continue;
@@ -121,14 +153,24 @@ export function decideWebSearch(query: string, opts?: DecideWebSearchOpts): WebR
     }
   }
 
+  // Suppressors before weak bare-token rules so conceptual/coding asks do not search.
   if (PURE_WRITING_PATTERN.test(text)) {
     return { search: false, reason: "pure_writing" };
   }
-  if (GENERIC_CODING_PATTERN.test(text) && !CURRENCY_CUE_PATTERN.test(text)) {
+  if (GENERIC_CODING_PATTERN.test(text) && !hasCurrencyCue) {
     return { search: false, reason: "generic_coding" };
   }
-  if (CONCEPTUAL_PATTERN.test(text)) {
+  if (CONCEPTUAL_PATTERN.test(text) && !hasCurrencyCue) {
     return { search: false, reason: "conceptual" };
+  }
+
+  // Weak tokens only with an explicit currency cue.
+  if (hasCurrencyCue) {
+    for (const rule of WEAK_CURRENCY_SEARCH_RULES) {
+      if (rule.pattern.test(text)) {
+        return { search: true, reason: rule.reason };
+      }
+    }
   }
 
   return { search: false, reason: "default_no_search" };

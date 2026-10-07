@@ -164,14 +164,24 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   logInfo("chat.response.started", { requestId, regenerate, mode });
 
   // Web search runs after Room hybrid retrieval and only for a fresh generation (replay already returned).
-  // Failures never block the reply: empty web context continues as normal chat.
+  // Failures never block the reply: empty web context continues as normal chat, with an authoritative
+  // "verification unavailable" instruction when routing wanted search but sources were empty.
   let web: WebContextInput[] | undefined;
+  let webVerificationUnavailable = false;
   const webDecision = decideWebSearch(userMessage.content, { hasRoomFileContext: Boolean(files?.length) });
   logInfo("web.route.decided", { requestId, search: webDecision.search, reason: webDecision.reason });
   if (webDecision.search) {
     const webConfig = getWebSearchConfig();
     const webProvider = getWebSearchProvider();
-    if (webConfig && webProvider) {
+    if (!webConfig || !webProvider) {
+      webVerificationUnavailable = true;
+      logWarn("web.search.failed", {
+        requestId,
+        category: "provider_unconfigured",
+        durationMs: 0,
+        code: operationalCodes.webSearchFailed,
+      });
+    } else {
       const webStartedAt = Date.now();
       logInfo("web.search.started", { requestId, maxResults: webConfig.maxResults });
       try {
@@ -200,21 +210,25 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
             sourceCount: pipeline.sources.length,
             snippetOnlyCount,
           });
-        } else if (pipeline.degraded) {
-          logWarn("web.search.failed", {
-            requestId,
-            category: pipeline.failureCategory ?? "empty",
-            durationMs: webDurationMs,
-            code: operationalCodes.webSearchFailed,
-          });
         } else {
-          logInfo("web.search.succeeded", {
-            requestId,
-            resultCount: pipeline.searchResultCount,
-            durationMs: webDurationMs,
-          });
+          webVerificationUnavailable = true;
+          if (pipeline.degraded) {
+            logWarn("web.search.failed", {
+              requestId,
+              category: pipeline.failureCategory ?? "empty",
+              durationMs: webDurationMs,
+              code: operationalCodes.webSearchFailed,
+            });
+          } else {
+            logInfo("web.search.succeeded", {
+              requestId,
+              resultCount: pipeline.searchResultCount,
+              durationMs: webDurationMs,
+            });
+          }
         }
       } catch {
+        webVerificationUnavailable = true;
         logWarn("web.search.failed", {
           requestId,
           category: "provider_error",
@@ -254,6 +268,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       files,
       attachments,
       web,
+      webVerificationUnavailable,
       messages: rows.map((row) => ({ role: row.role as "user" | "assistant", content: row.content, position: row.position })),
       currentPosition: userMessage.position,
     });

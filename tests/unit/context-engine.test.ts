@@ -368,6 +368,26 @@ describe("context engine", () => {
     expect(provider[1]?.content.indexOf("Room note")).toBeLessThan(provider[1]?.content.indexOf("<untrusted_web_content>") ?? -1);
   });
 
+  it("adds verification-unavailable policy and soft web diagnostic when search yielded nothing", () => {
+    const plan = buildContext(input({
+      messages: [{ role: "user", content: "What is the latest Node release?", position: 1 }],
+      currentPosition: 1,
+      webVerificationUnavailable: true,
+    }));
+    expect(plan.blocks.some((block) => block.id === "web")).toBe(false);
+    expect(plan.blocks.find((block) => block.id === "core")?.text).toMatch(/Web verification was unavailable/i);
+    expect(plan.diagnostics.sources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "web",
+          state: "not_used",
+          reason: "Web verification was unavailable for this reply.",
+        }),
+      ]),
+    );
+    expect(toProviderMessages(plan)[0]?.content).toMatch(/Do not present unverified current public facts/i);
+  });
+
   it("builds a 32-message plan in under 15ms", () => {
     const started = Date.now();
     buildContext(input({ messages: messages(32, 200), currentPosition: 32 }));

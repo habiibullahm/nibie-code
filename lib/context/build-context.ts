@@ -6,7 +6,11 @@ import { pinPieces, type PinPiece } from "@/lib/context/pin-context";
 import { profilePieces, profileReason, type ProfilePiece } from "@/lib/context/profile-context";
 import { roomPieces, roomReason, type RoomPiece } from "@/lib/context/room-context";
 import { renderThreadSummary, resolveThreadSummary, selectThreadMessages } from "@/lib/context/thread-context";
-import { renderWebContext } from "@/lib/context/web-context";
+import {
+  renderWebContext,
+  WEB_VERIFICATION_UNAVAILABLE_DIAGNOSTIC_REASON,
+  WEB_VERIFICATION_UNAVAILABLE_INSTRUCTION,
+} from "@/lib/context/web-context";
 import { ATTACHMENT_TOKEN_CAP, budgetLimits, estimateTokens, FILE_TOKEN_CAP, PIN_TOKEN_CAP, PROTECTED_RECENT_COUNT, ROOM_TOKEN_CAP, SUMMARY_TOKEN_CAP, WEB_TOKEN_CAP } from "@/lib/context/token-budget";
 
 function block(partial: ContextBlock): ContextBlock {
@@ -42,7 +46,11 @@ export function buildContext(input: BuildContextInput): ContextPlan {
   const resolved = resolveThreadSummary(input.summary, input.currentPosition);
   const pieces = profilePieces(input.preferences);
   // Unreadable preferences fall back to the Default depth, like every other preference.
-  const corePolicyText = contextPolicyFor(input.responseMode, input.preferenceReadFailed ? "balanced" : input.preferences.responseLength);
+  const basePolicyText = contextPolicyFor(input.responseMode, input.preferenceReadFailed ? "balanced" : input.preferences.responseLength);
+  const webVerificationUnavailable = Boolean(input.webVerificationUnavailable) && !(input.web?.length);
+  const corePolicyText = webVerificationUnavailable
+    ? `${basePolicyText}\n\n${WEB_VERIFICATION_UNAVAILABLE_INSTRUCTION}`
+    : basePolicyText;
   const coreTokens = estimateTokens(corePolicyText);
   const currentTokens = estimateTokens(current.content);
   if (coreTokens + currentTokens > inputBudgetTokens) throw new ContextBuildError();
@@ -198,7 +206,9 @@ export function buildContext(input: BuildContextInput): ContextPlan {
     ? renderedWeb?.includedCount
       ? { type: "web", label: "Web sources", state: "included", reason: renderedWeb.truncated ? "Partly included: some web text did not fit this reply." : renderedWeb.includedCount === 1 ? "A public web source" : "Public web sources" }
       : { type: "web", label: "Web sources", state: "not_used", reason: "Not used for this reply." }
-    : null;
+    : webVerificationUnavailable
+      ? { type: "web", label: "Web sources", state: "not_used", reason: WEB_VERIFICATION_UNAVAILABLE_DIAGNOSTIC_REASON }
+      : null;
 
   let diagnostics: ContextDiagnostics;
   try {

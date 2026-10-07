@@ -53,6 +53,29 @@ describe("decideWebSearch", () => {
         reason: "generic_coding",
       });
     });
+
+    it("does not search on weak tokens without currency cues (P1 false positives)", () => {
+      expect(decideWebSearch("What is the difference between version control strategies?")).toEqual({
+        search: false,
+        reason: "conceptual",
+      });
+      expect(decideWebSearch("Fix the version check in this function")).toEqual({
+        search: false,
+        reason: "generic_coding",
+      });
+      expect(decideWebSearch("How should I price my consulting package?")).toEqual({
+        search: false,
+        reason: "default_no_search",
+      });
+      expect(decideWebSearch("Explain the concept of release trains")).toEqual({
+        search: false,
+        reason: "conceptual",
+      });
+      expect(decideWebSearch("What is a job queue in Node?")).toEqual({
+        search: false,
+        reason: "conceptual",
+      });
+    });
   });
 
   describe("search cases (brief eval)", () => {
@@ -124,6 +147,17 @@ describe("decideWebSearch", () => {
       expect(decideWebSearch("Show me the official docs for the Stripe API")).toEqual({
         search: true,
         reason: "current_docs",
+      });
+    });
+
+    it("searches weak version/price/job tokens only with currency cues", () => {
+      expect(decideWebSearch("What is the current price of consulting packages in NYC?")).toEqual({
+        search: true,
+        reason: "temporal_currency",
+      });
+      expect(decideWebSearch("What is the latest release of Next.js?")).toEqual({
+        search: true,
+        reason: "temporal_currency",
       });
     });
 

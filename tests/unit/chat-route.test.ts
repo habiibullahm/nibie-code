@@ -1086,6 +1086,55 @@ describe("POST /api/chat", () => {
         expect(stream).toHaveBeenCalledOnce();
         const prompt = stream.mock.calls[0][1] as { role: string; content: string }[];
         expect(prompt.some((message) => message.content.includes("<untrusted_web_content>"))).toBe(false);
+        expect(prompt[0].content).toMatch(/Web verification was unavailable/i);
+        expect(prompt[0].content).toMatch(/Do not present unverified current public facts/i);
+        expect(events[0]).toMatchObject({
+          type: "start",
+          context: {
+            sources: expect.arrayContaining([
+              {
+                type: "web",
+                label: "Web sources",
+                state: "not_used",
+                reason: "Web verification was unavailable for this reply.",
+              },
+            ]),
+          },
+        });
+        expect(warn.mock.calls.some(([line]) => String(line).includes("web.search.failed"))).toBe(true);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it("injects verification-unavailable guidance when web is unconfigured but routing wants search", async () => {
+      readyClient([]);
+      stream.mockResolvedValue(providerChunks(["General answer."], "stop"));
+      webMocks.decideWebSearch.mockReturnValue({ search: true, reason: "temporal_currency" });
+      webMocks.getWebSearchConfig.mockReturnValue(null);
+      webMocks.getWebSearchProvider.mockReturnValue(null);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      try {
+        const response = await POST(validRequest());
+        expect(response.status).toBe(200);
+        const events = await Array.fromAsync(readChatSse(response.body!));
+        expect(events.slice(-2)).toEqual([{ type: "status", status: "complete" }, { type: "done" }]);
+        expect(webMocks.runWebSearchPipeline).not.toHaveBeenCalled();
+        const prompt = stream.mock.calls[0][1] as { role: string; content: string }[];
+        expect(prompt[0].content).toMatch(/Web verification was unavailable/i);
+        expect(events[0]).toMatchObject({
+          type: "start",
+          context: {
+            sources: expect.arrayContaining([
+              expect.objectContaining({
+                type: "web",
+                state: "not_used",
+                reason: "Web verification was unavailable for this reply.",
+              }),
+            ]),
+          },
+        });
+        expect(JSON.stringify(warn.mock.calls)).toContain("provider_unconfigured");
         expect(warn.mock.calls.some(([line]) => String(line).includes("web.search.failed"))).toBe(true);
       } finally {
         warn.mockRestore();

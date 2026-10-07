@@ -9,6 +9,7 @@ import type { WebSearchProvider } from "@/lib/web/provider";
 
 export type WebEvalCaseId =
   | "no_web"
+  | "no_web_weak_token"
   | "current_version"
   | "news"
   | "ceo"
@@ -17,7 +18,8 @@ export type WebEvalCaseId =
   | "room_plus_web"
   | "prompt_injection"
   | "ssrf_localhost"
-  | "provider_failure";
+  | "provider_failure"
+  | "empty_web_safe";
 
 export type WebEvalRouteCase = {
   id: WebEvalCaseId;
@@ -42,6 +44,31 @@ export const WEB_EVAL_ROUTE_CASES: readonly WebEvalRouteCase[] = [
     id: "no_web",
     query: "Fix this TypeScript type error",
     expected: { search: false, reason: "generic_coding" },
+  },
+  {
+    id: "no_web_weak_token",
+    query: "What is the difference between version control strategies?",
+    expected: { search: false, reason: "conceptual" },
+  },
+  {
+    id: "no_web_weak_token",
+    query: "Fix the version check in this function",
+    expected: { search: false, reason: "generic_coding" },
+  },
+  {
+    id: "no_web_weak_token",
+    query: "How should I price my consulting package?",
+    expected: { search: false, reason: "default_no_search" },
+  },
+  {
+    id: "no_web_weak_token",
+    query: "Explain the concept of release trains",
+    expected: { search: false, reason: "conceptual" },
+  },
+  {
+    id: "no_web_weak_token",
+    query: "What is a job queue in Node?",
+    expected: { search: false, reason: "conceptual" },
   },
   {
     id: "current_version",

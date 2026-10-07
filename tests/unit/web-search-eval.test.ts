@@ -2,7 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import { toProviderMessages } from "@/lib/ai/provider-messages";
 import { buildContext } from "@/lib/context/build-context";
 import { CONTEXT_POLICY_TEXT } from "@/lib/context/context-policy";
-import { fenceWebText, renderWebContext, WEB_CONTEXT_PREFACE } from "@/lib/context/web-context";
+import {
+  fenceWebText,
+  renderWebContext,
+  WEB_CONTEXT_PREFACE,
+  WEB_VERIFICATION_UNAVAILABLE_DIAGNOSTIC_REASON,
+  WEB_VERIFICATION_UNAVAILABLE_INSTRUCTION,
+} from "@/lib/context/web-context";
 import { WEB_TOKEN_CAP } from "@/lib/context/token-budget";
 import { defaultUserPreferences } from "@/lib/preferences/types";
 import type { BuildContextInput } from "@/lib/context/context-types";
@@ -48,10 +54,12 @@ describe("web search eval (brief §12)", () => {
   });
 
   describe("no web", () => {
-    it("does not call the search provider for conceptual / writing / coding queries", async () => {
+    it("does not call the search provider for conceptual / writing / coding / weak-token queries", async () => {
       const searchWeb = vi.fn(async () => [...WEB_EVAL_SEARCH_RESULTS]);
       const provider = { id: "tavily" as const, searchWeb };
-      const noWebQueries = WEB_EVAL_ROUTE_CASES.filter((c) => c.id === "no_web");
+      const noWebQueries = WEB_EVAL_ROUTE_CASES.filter(
+        (c) => c.id === "no_web" || c.id === "no_web_weak_token",
+      );
 
       for (const { query, opts, expected } of noWebQueries) {
         const decision = decideWebSearch(query, opts);
@@ -229,18 +237,30 @@ describe("web search eval (brief §12)", () => {
         pagesFetched: 0,
       });
 
-      // Route pattern: empty pipeline → omit web; chat continues.
+      // Route pattern: empty pipeline → omit web sources; instruct model not to invent current facts.
       const plan = buildContext(
         contextInput({
           web: pipeline.sources.length ? pipeline.sources : undefined,
+          webVerificationUnavailable: true,
         }),
       );
       expect(plan.blocks.some((block) => block.id === "web")).toBe(false);
-      expect(plan.blocks.find((block) => block.id === "core")?.included).toBe(true);
-      expect(() => toProviderMessages(plan)).not.toThrow();
-      expect(toProviderMessages(plan).at(-1)?.content).toBe(
-        "What is the latest Node.js LTS version?",
+      expect(plan.blocks.find((block) => block.id === "core")?.text).toContain(
+        WEB_VERIFICATION_UNAVAILABLE_INSTRUCTION,
       );
+      expect(plan.diagnostics.sources).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "web",
+            state: "not_used",
+            reason: WEB_VERIFICATION_UNAVAILABLE_DIAGNOSTIC_REASON,
+          }),
+        ]),
+      );
+      expect(() => toProviderMessages(plan)).not.toThrow();
+      const messages = toProviderMessages(plan);
+      expect(messages[0]?.content).toContain(WEB_VERIFICATION_UNAVAILABLE_INSTRUCTION);
+      expect(messages.at(-1)?.content).toBe("What is the latest Node.js LTS version?");
     });
 
     it("degrades when provider/config are unconfigured", async () => {
@@ -251,6 +271,33 @@ describe("web search eval (brief §12)", () => {
       });
       expect(out.failureCategory).toBe("provider_unconfigured");
       expect(out.sources).toEqual([]);
+
+      const plan = buildContext(contextInput({ webVerificationUnavailable: true }));
+      expect(plan.blocks.find((block) => block.id === "core")?.text).toContain(
+        WEB_VERIFICATION_UNAVAILABLE_INSTRUCTION,
+      );
+    });
+  });
+
+  describe("empty-web safe behavior", () => {
+    it("keeps chat buildable and forbids unverified current facts when search yields nothing", () => {
+      const plan = buildContext(
+        contextInput({
+          messages: [{ role: "user", content: "Who is the current CEO of Stripe?", position: 1 }],
+          web: undefined,
+          webVerificationUnavailable: true,
+        }),
+      );
+      expect(plan.blocks.find((block) => block.id === "core")?.text).toMatch(
+        /Web verification was unavailable/i,
+      );
+      expect(plan.blocks.find((block) => block.id === "core")?.text).toMatch(
+        /Do not present unverified current public facts/i,
+      );
+      expect(plan.diagnostics.sources.some((s) => s.type === "web" && s.state === "not_used")).toBe(
+        true,
+      );
+      expect(() => toProviderMessages(plan)).not.toThrow();
     });
   });
 });

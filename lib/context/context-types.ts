@@ -113,6 +113,8 @@ export type BuildContextInput = {
   attachments?: AttachmentContextInput[] | null;
   // Public web sources already retrieved and SSRF-checked for this request. Omitted when routing skipped web or retrieval failed.
   web?: WebContextInput[] | null;
+  // True when capability routing wanted web but sources were empty (unconfigured, provider fail, empty pipeline).
+  webVerificationUnavailable?: boolean;
 };
 
 export class ContextBuildError extends Error {
