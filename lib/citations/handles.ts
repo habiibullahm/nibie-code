@@ -6,16 +6,20 @@ export const SOURCE_HANDLE_PATTERN = /\[SOURCE:(web|room_file|attachment):(\d+)\
 
 const KINDS = ["web", "room_file", "attachment"] as const;
 
-/** True when `fragment` is a proper prefix of a valid `[SOURCE:kind:n]` marker. */
+/**
+ * True when `fragment` could still become a valid `[SOURCE:kind:n]` marker.
+ * Includes short ambiguous opens (`[`, `[S`, …) so stream chunks that split
+ * before `SOURCE` do not leak raw `[SOURCE:…]` into visible text.
+ */
 export function isSourceHandlePrefix(fragment: string): boolean {
-  if (!fragment.startsWith("[SOURCE")) return false;
-  if (fragment.length < "[SOURCE".length) return false;
+  if (!fragment.startsWith("[")) return false;
   // Complete markers are not prefixes.
   if (/^\[SOURCE:(?:web|room_file|attachment):\d+\]$/.test(fragment)) return false;
-  const rest = fragment.slice("[SOURCE".length);
-  if (rest === "") return true;
-  if (!rest.startsWith(":")) return false;
-  const afterColon = rest.slice(1);
+  // Hold "[", "[S", …, "[SOURCE:" while they remain a prefix of the open marker.
+  if (SOURCE_HANDLE_OPEN.startsWith(fragment)) return true;
+  if (!fragment.startsWith(SOURCE_HANDLE_OPEN)) return false;
+
+  const afterColon = fragment.slice(SOURCE_HANDLE_OPEN.length);
   if (afterColon === "") return true;
   const second = afterColon.indexOf(":");
   if (second === -1) {
@@ -31,6 +35,11 @@ export function isSourceHandlePrefix(fragment: string): boolean {
     return /^\d+$/.test(body) && Number(body) >= 1;
   }
   return /^\d+$/.test(indexPart);
+}
+
+/** True when a held prefix is clearly citation syntax (safe to drop on finish). */
+export function isCommittedSourceHandlePrefix(fragment: string): boolean {
+  return fragment.startsWith("[SOURCE");
 }
 
 export function citationHandle(kind: SourceKind, index: number): string {

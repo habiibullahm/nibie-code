@@ -1,5 +1,6 @@
 import {
   SOURCE_HANDLE_PATTERN,
+  isCommittedSourceHandlePrefix,
   isSourceHandlePrefix,
   parseSourceMarker,
 } from "@/lib/citations/handles";
@@ -122,8 +123,14 @@ export function createCitationStreamFilter(sources: readonly SourceReference[]) 
           pending = rest;
           return out;
         }
-        // Finish: never emit raw internal SOURCE syntax. Drop the stuck prefix.
-        invalidCitationCount += 1;
+        // Finish: drop clear `[SOURCE…` prefixes (never leak internal syntax).
+        // Ambiguous opens like `[` / `[S` are ordinary text — emit them.
+        if (isCommittedSourceHandlePrefix(rest)) {
+          invalidCitationCount += 1;
+          pending = "";
+          return out;
+        }
+        out += rest;
         pending = "";
         return out;
       }

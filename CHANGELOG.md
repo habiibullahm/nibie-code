@@ -27,6 +27,7 @@ What's new in Nibie.
 
 ### Fixed
 
+- Web citation markers no longer appear as raw `[SOURCE:web:…]` text when the model streams a handle across chunk boundaries; they convert to clickable `[n]` markers with the Sources list.
 - Web search recognizes Indonesian web-intent and freshness cues for market questions (for example IHSG) without searching conceptual asks like “apa itu IHSG?”.
 - Web search no longer fires on conceptual or coding questions that only mention weak words like version, release, price, or job.
 - When web verification is unavailable, Nibie continues the reply without treating unverified current public facts as known.
