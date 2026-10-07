@@ -19,6 +19,7 @@ export const preferencePatchSchema = z.object({
   responseLength: responseLengthSchema.optional(),
   responseStyle: responseStyleSchema.optional(),
   aboutYou: z.union([z.null(), aboutYouSchema]).optional(),
+  recallEnabled: z.boolean().optional(),
 }).strict().refine((patch) => Object.keys(patch).length > 0);
 
 // A blank name or note clears the field. Unknown keys are left untouched so strict validation still rejects them.

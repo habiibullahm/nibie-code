@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { deleteMemoryAction, forgetMemoryAction, listMemoriesAction, updateMemoryAction } from "@/app/actions/memories";
 import { DataPrivacyPanel } from "@/components/data-privacy-dialog";
 import { WeeklyUsageSummary } from "@/components/settings/weekly-usage-summary";
 import { ThemeSwitcher } from "@/components/theme-switcher";
@@ -9,6 +11,7 @@ import { modelPickerCopy, type ModelOption } from "@/lib/chat/models";
 import type { ChatPreferenceFlag } from "@/lib/chat/preferences";
 import { chatModelToPreferenceModel, preferenceModelToChatModel, resolveDefaultModel } from "@/lib/preferences/model";
 import { aboutYouLimit, preferredNameLimit, type PreferencePatch, type UserPreferences } from "@/lib/preferences/types";
+import { memoryContentLimit, memoryTypes, type MemoryRecord, type MemoryType } from "@/lib/recall/types";
 
 export type SettingsSectionProps = {
   preferences: UserPreferences;
@@ -108,6 +111,172 @@ export function ProfileSettingsSection({ preferences, email = "", disabled, onCh
 export function PersonalizationSettingsSection({ preferences, disabled, onChange }: SettingsSectionProps) {
   return <SettingsSection title="Personalization" description="Optional details Nibie may use when you want them. This is not hidden memory.">
     <SettingsTextField id="about-you" label="About you" hint="Role, goals, or working context. Leave blank to clear it." value={preferences.aboutYou ?? ""} maxLength={aboutYouLimit} multiline disabled={disabled} onCommit={(aboutYou) => onChange({ aboutYou })} />
+  </SettingsSection>;
+}
+
+const typeLabels: Record<MemoryType, string> = {
+  preference: "Preferences",
+  project: "Projects",
+  instruction: "Instructions",
+  fact: "Facts",
+};
+
+function MemoryRow({ memory, disabled, preview, onChanged }: {
+  memory: MemoryRecord;
+  disabled: boolean;
+  preview: boolean;
+  onChanged: () => void;
+}) {
+  const [draft, setDraft] = useState(memory.content);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    if (busy || disabled || draft.trim() === memory.content) return;
+    setBusy(true);
+    setError(null);
+    if (preview) {
+      setBusy(false);
+      onChanged();
+      return;
+    }
+    const result = await updateMemoryAction(memory.id, { type: memory.type, content: draft });
+    setBusy(false);
+    if (result.error) { setError(result.error); return; }
+    onChanged();
+  }
+
+  async function forget() {
+    if (busy || disabled) return;
+    setBusy(true);
+    setError(null);
+    if (preview) {
+      setBusy(false);
+      onChanged();
+      return;
+    }
+    const result = await forgetMemoryAction(memory.id);
+    setBusy(false);
+    if (result.error) { setError(result.error); return; }
+    onChanged();
+  }
+
+  async function remove() {
+    if (busy || disabled) return;
+    setBusy(true);
+    setError(null);
+    if (preview) {
+      setBusy(false);
+      onChanged();
+      return;
+    }
+    const result = await deleteMemoryAction(memory.id);
+    setBusy(false);
+    if (result.error) { setError(result.error); return; }
+    onChanged();
+  }
+
+  return <div className="memory-row" data-inactive={memory.isActive ? undefined : "true"}>
+    <textarea
+      className="memory-row-text"
+      maxLength={memoryContentLimit}
+      disabled={disabled || busy || !memory.isActive}
+      value={draft}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={() => void save()}
+      aria-label={`Memory (${memory.type})`}
+    />
+    <div className="memory-row-actions">
+      {!memory.isActive ? <span className="settings-note">Forgotten</span> : null}
+      {memory.isActive ? <button type="button" disabled={disabled || busy} onClick={() => void forget()}>Forget</button> : null}
+      <button type="button" disabled={disabled || busy} onClick={() => void remove()}>Delete</button>
+    </div>
+    {error ? <p className="settings-note" role="alert">{error}</p> : null}
+  </div>;
+}
+
+export function MemorySettingsSection({ preferences, disabled, preview = false, onChange }: SettingsSectionProps) {
+  const [memories, setMemories] = useState<MemoryRecord[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(!preview);
+  const enabled = preferences.recallEnabled;
+
+  async function reload() {
+    if (preview) {
+      setMemories([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    const result = await listMemoriesAction();
+    setLoading(false);
+    if (result.error) {
+      setLoadError(result.error);
+      return;
+    }
+    setLoadError(null);
+    setMemories(result.data ?? []);
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (preview) {
+        if (!cancelled) {
+          setMemories([]);
+          setLoading(false);
+        }
+        return;
+      }
+      setLoading(true);
+      const result = await listMemoriesAction();
+      if (cancelled) return;
+      setLoading(false);
+      if (result.error) {
+        setLoadError(result.error);
+        return;
+      }
+      setLoadError(null);
+      setMemories(result.data ?? []);
+    })();
+    return () => { cancelled = true; };
+  }, [preview]);
+
+  const grouped = memoryTypes.map((type) => ({
+    type,
+    items: memories.filter((memory) => memory.type === type),
+  })).filter((group) => group.items.length > 0);
+
+  return <SettingsSection title="Memory" description="Facts you asked Nibie to remember across conversations. Transparent and under your control — not hidden profiling.">
+    <div className="chat-settings-row">
+      <div className="chat-settings-copy">
+        <div className="chat-settings-label" id="recall-enabled-label">Use saved memories</div>
+        <p className="chat-settings-detail" id="recall-enabled-detail">
+          {enabled
+            ? "Nibie may save when you ask and use active memories when they are relevant."
+            : "Recall is off. Nothing new is saved and nothing is retrieved. Stored memories stay until you delete them."}
+        </p>
+      </div>
+      <button
+        type="button"
+        className="chat-settings-switch"
+        role="switch"
+        aria-checked={enabled}
+        aria-labelledby="recall-enabled-label"
+        aria-describedby="recall-enabled-detail"
+        disabled={disabled}
+        onClick={() => onChange({ recallEnabled: !enabled })}
+      >
+        <span />
+      </button>
+    </div>
+    {loading ? <p className="settings-note">Loading memories…</p> : null}
+    {loadError ? <p className="settings-note" role="alert">{loadError}</p> : null}
+    {!loading && !loadError && !grouped.length ? <p className="settings-note">No saved memories yet. In chat, say “remember …” or “ingat …” to store one.</p> : null}
+    {grouped.map((group) => <div key={group.type} className="memory-group">
+      <div className="settings-theme-label">{typeLabels[group.type]}</div>
+      {group.items.map((memory) => <MemoryRow key={memory.id} memory={memory} disabled={disabled} preview={preview} onChanged={() => void reload()} />)}
+    </div>)}
   </SettingsSection>;
 }
 
