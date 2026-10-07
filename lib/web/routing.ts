@@ -118,6 +118,20 @@ const GENERIC_CODING_PATTERN =
 const CURRENCY_CUE_PATTERN =
   /\b(?:latest|current|today|recent(?:ly)?|this\s+week|right\s+now|as\s+of|up[- ]to[- ]date|saat\s+ini|sekarang|hari\s+ini|terbaru|terkini|baru[- ]baru\s+ini|minggu\s+ini|update\s+terbaru|update\s+terkini)\b/i;
 
+/**
+ * Indonesian / IDX market topic cues (same family as WEAK_CURRENCY_SEARCH_RULES).
+ * Alone they must not search; with condition/direction intent they do (see below).
+ */
+const MARKET_TOPIC_PATTERN =
+  /\b(?:ihsg|idx|jci|bei|saham|harga\s+saham|pasar\s+saham|indeks\s+saham|indeks\s+pasar)\b/i;
+
+/**
+ * Condition / direction / performance intent for live market asks that often omit
+ * explicit freshness words ("hari ini") but still need web grounding.
+ */
+const MARKET_CONDITION_INTENT_PATTERN =
+  /\b(?:kondisi|arah|analisa|analisis|anjlok|menguat|melemah|penutupan|closing|pergerakan|proyeksi|outlook|forecast|kinerja|performa|performance|how\s+(?:is|are)|where\s+is)\b/i;
+
 export type DecideWebSearchOpts = {
   hasRoomFileContext?: boolean;
 };
@@ -125,8 +139,10 @@ export type DecideWebSearchOpts = {
 /**
  * Deterministic capability routing for web search. No LLM.
  * Empty/whitespace → no search. Room-only grounding can skip web when file context exists.
- * Strong search cues win first; conceptual/coding/writing suppressors run before weak
- * token rules (`version` / `release` / `price` / `job`), which require a currency cue.
+ * Strong search cues win first; market topic + condition/direction intent searches next
+ * (before conceptual suppressors, so "IHSG anjlok kenapa?" still searches). Conceptual /
+ * coding / writing suppressors then run before weak token rules (`version` / `release` /
+ * `price` / `job` / bare IHSG), which require a currency cue.
  */
 export function decideWebSearch(query: string, opts?: DecideWebSearchOpts): WebRouteDecision {
   const text = query.trim();
@@ -159,6 +175,13 @@ export function decideWebSearch(query: string, opts?: DecideWebSearchOpts): WebR
     if (rule.pattern.test(text)) {
       return { search: true, reason: rule.reason };
     }
+  }
+
+  // Market topic + condition/direction intent → search without a separate currency cue.
+  // Runs before conceptual suppressors so "kenapa IHSG anjlok" still grounds on web.
+  // Definitional asks ("apa itu IHSG?") lack condition intent and stay suppressed below.
+  if (MARKET_TOPIC_PATTERN.test(text) && MARKET_CONDITION_INTENT_PATTERN.test(text)) {
+    return { search: true, reason: "prices_markets" };
   }
 
   // Suppressors before weak bare-token rules so conceptual/coding asks do not search.

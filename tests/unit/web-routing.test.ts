@@ -192,6 +192,34 @@ describe("decideWebSearch", () => {
       });
     });
 
+    it("searches Indonesian market condition/direction asks without an explicit freshness cue", () => {
+      expect(decideWebSearch("bagaimana kondisi IHSG dan arah pasar saham?")).toEqual({
+        search: true,
+        reason: "prices_markets",
+      });
+      expect(decideWebSearch("kondisi IHSG")).toEqual({
+        search: true,
+        reason: "prices_markets",
+      });
+      expect(decideWebSearch("arah IHSG")).toEqual({
+        search: true,
+        reason: "prices_markets",
+      });
+      expect(decideWebSearch("IHSG anjlok kenapa?")).toEqual({
+        search: true,
+        reason: "prices_markets",
+      });
+      expect(decideWebSearch("pergerakan IHSG")).toEqual({
+        search: true,
+        reason: "prices_markets",
+      });
+      // Bare market topic without condition or currency still skips (cost-conscious).
+      expect(decideWebSearch("saya pegang saham BBCA")).toEqual({
+        search: false,
+        reason: "default_no_search",
+      });
+    });
+
     it("searches prices, schedules, jobs, and current docs", () => {
       expect(decideWebSearch("What is the Bitcoin price?")).toEqual({
         search: true,
