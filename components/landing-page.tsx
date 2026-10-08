@@ -51,7 +51,7 @@ const statements = [
 ] as const;
 
 const modes = [
-  ["Fast", "Quick answers"],
+  ["Fast", "Lowest latency"],
   ["Balanced", "Best for everyday work"],
   ["High", "Deeper reasoning"],
 ] as const;

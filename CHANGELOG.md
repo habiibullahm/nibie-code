@@ -22,7 +22,7 @@ What's new in Nibie.
 
 ### Changed
 
-- Model and Research controls are clearer: Research shows Off or Deep Research (with a stronger selected state when Deep Research is on), and replies have a slightly tighter vertical rhythm for easier scanning.
+- Composer controls show clear Room, Model, and Deep Research Off/On labels; Deep Research On has a stronger selected state; wait labels stay mode-aware (Responding…, Thinking… in High, Researching… in Deep Research); replies have a slightly tighter vertical rhythm for easier scanning.
 - Improved message input readability, code example controls, and conversation navigation across desktop and mobile.
 - Sources under a reply are now tucked into a single quiet line showing where the answer came from; open it to see each source with its title and site, or click a citation number to jump straight to it.
 - Nibie now uses an abstract ribbon mark instead of a letter-like symbol. Replies are shown as plain text without a name header, and a quiet status (Responding…, Thinking… in High, or Researching… in Deep Research) appears only if the wait lasts more than a moment and disappears as soon as the answer starts.

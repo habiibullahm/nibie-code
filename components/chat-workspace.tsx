@@ -205,7 +205,8 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const activeConversation = shownConversations.find((item) => item.id === activeId);
   const selectedModel = modelChoice !== "Auto" && availableModes.includes(modelChoice) ? modelChoice : "Auto";
   const mode = selectedModel === "Auto" ? modeFor(activeConversation?.selected_model, Boolean(activeId)) : selectedModel;
-  // Only High asks the model to reason, so only High says "Thinking…" while waiting for the first token.
+  // Presentation-only wait labels: Deep Research → Researching…; High → Thinking… because High always sends reasoning effort;
+  // Fast/Balanced → Responding… (no client-visible reasoning state). 300ms grace is CSS on .response-waiting.
   const waitLabel = researchMode === "deep" ? "Researching…" : mode === "High" ? "Thinking…" : "Responding…";
   const savedMessages = activeId === initialData?.activeId ? initialData?.messages : undefined;
   const activeLocal = localMessages[activeId ?? ""];

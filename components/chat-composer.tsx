@@ -218,8 +218,8 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
 
   const modelItems: MenuItem<ChatModel>[] = models.map((option) => ({ value: option.id, label: option.label, detail: option.credits === undefined ? option.description : `${option.description} · ${option.credits} credit${option.credits === 1 ? "" : "s"}` }));
   const researchItems: MenuItem<"normal" | "deep">[] = [
-    { value: "normal", label: "Off", detail: "Standard reply · web when needed" },
-    { value: "deep", label: "Deep Research", detail: "Multi-source gather · compare · cite · costs more" },
+    { value: "normal", label: "Off", detail: "Standard reply · automatic web search still available when useful" },
+    { value: "deep", label: "On", detail: "Multi-source gather · compare · cite · costs more" },
   ];
   const hasDraft = draft.length > 0;
   const hasAttachments = attachments.items.length > 0 || Boolean(attachments.notice);
@@ -254,9 +254,9 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
     {onRoomChange && roomSelectionNotice ? <p className="composer-room-notice" role="status">{roomSelectionNotice}</p> : null}
     <div className="composer-tools composer-secondary-tools">
       <div className="composer-left-tools">
-        {onRoomChange ? <ComposerMenu name="Room" description="Choose where this conversation belongs." value={roomId} items={roomItems} onChange={onRoomChange} disabled={sending || streaming || roomsLoading} disabledReason={roomsLoading ? "Loading rooms" : "Message is being sent"} /> : <span className="composer-room-context" aria-label={`Room context: ${roomLabel}`} title={roomLabel}>{roomLabel}</span>}
-        <ComposerMenu name="Model" description="Choose how Nibie answers: Fast, Balanced, or High." value={mode} items={modelItems} onChange={onModelChange} disabled={sending || streaming || !models.length} disabledReason={!models.length ? "No models are configured" : savingMode ? "Saving…" : "A response is running"} />
-        <ComposerMenu name="Research" description="Choose how far Nibie should research before answering." value={researchMode} items={researchItems} onChange={onResearchModeChange} disabled={sending || streaming} disabledReason="A response is running" emphasizedValue="deep" />
+        {onRoomChange ? <ComposerMenu name="Room" description="Choose where this conversation belongs." value={roomId} items={roomItems} onChange={onRoomChange} disabled={sending || streaming || roomsLoading} disabledReason={roomsLoading ? "Loading rooms" : "Message is being sent"} /> : <span className="composer-room-context" aria-label={`Room: ${roomLabel}`} title={`Room: ${roomLabel}`}><span className="composer-menu-context" aria-hidden="true">Room: </span><span className="composer-menu-value">{roomLabel}</span></span>}
+        <ComposerMenu name="Model" description="Choose Fast, Balanced, or High. Mode sets capability and routing, not how long the answer is." value={mode} items={modelItems} onChange={onModelChange} disabled={sending || streaming || !models.length} disabledReason={!models.length ? "No models are configured" : savingMode ? "Saving…" : "A response is running"} />
+        <ComposerMenu name="Deep Research" description="Turn on for bounded multi-source research. Off does not disable automatic web search when it is useful." value={researchMode} items={researchItems} onChange={onResearchModeChange} disabled={sending || streaming} disabledReason="A response is running" emphasizedValue="deep" />
       </div>
     </div>
     {caption ? <p className="composer-caption" role="status">{caption}</p> : null}

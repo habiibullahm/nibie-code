@@ -118,9 +118,9 @@ test("growing composer stays below messages at desktop, tablet, and mobile sizes
 
     const modelButton = page.getByRole("button", { name: /^Model:/ });
     await modelButton.click();
-    await expect(page.getByRole("menu", { name: "Model" })).toBeVisible();
+    await expect(page.getByRole("menu", { name: "Select model" })).toBeVisible();
     await page.keyboard.press("Escape");
-    await expect(page.getByRole("menu", { name: "Model" })).toHaveCount(0);
+    await expect(page.getByRole("menu", { name: "Select model" })).toHaveCount(0);
   }
 });
 

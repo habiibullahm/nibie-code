@@ -133,7 +133,7 @@ for (const width of [320, 390, 768, 1024, 1440]) {
     expect(menu!.x + menu!.width).toBeLessThanOrEqual(width);
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: /^Model:/ }).click();
-    const modelMenu = await page.getByRole("menu", { name: "Model", exact: true }).boundingBox();
+    const modelMenu = await page.getByRole("menu", { name: "Select model" }).boundingBox();
     expect(modelMenu!.x).toBeGreaterThanOrEqual(0);
     expect(modelMenu!.x + modelMenu!.width).toBeLessThanOrEqual(width);
     await page.keyboard.press("Escape");

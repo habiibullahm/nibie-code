@@ -11,7 +11,7 @@ export type ModelChoice = z.infer<typeof modelChoiceSchema>;
 
 // User-facing picker copy. The mode picks capability and routing only; it never sets how long an answer is.
 export const modelPickerCopy: Record<ChatModel, { label: string; description: string }> = {
-  Fast: { label: "Fast", description: "Quick answers" },
+  Fast: { label: "Fast", description: "Lowest latency" },
   Balanced: { label: "Balanced", description: "Best for everyday work" },
   High: { label: "High", description: "Deeper reasoning" },
 };

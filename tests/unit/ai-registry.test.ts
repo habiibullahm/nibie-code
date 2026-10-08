@@ -122,7 +122,7 @@ describe("authoritative server routing registry", () => {
 describe("model options offered to the UI", () => {
   it("is one picker: Fast, Balanced, High with product copy, in product order", () => {
     expect(getModelOptions(all).models).toEqual([
-      { id: "Fast", label: "Fast", description: "Quick answers", credits: 1 },
+      { id: "Fast", label: "Fast", description: "Lowest latency", credits: 1 },
       { id: "Balanced", label: "Balanced", description: "Best for everyday work", credits: 3 },
       { id: "High", label: "High", description: "Deeper reasoning", credits: 6 },
     ]);

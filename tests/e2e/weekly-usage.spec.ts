@@ -5,7 +5,7 @@ const dialog = (page: Page) => page.getByRole("dialog", { name: "Settings" });
 test("keeps weekly usage quiet in General settings and the picker shows safe mode weights", async ({ page }) => {
   await page.goto("/preview");
   await page.getByRole("button", { name: "Model: Balanced", exact: true }).click();
-  const picker = page.getByRole("menu", { name: "Model", exact: true });
+  const picker = page.getByRole("menu", { name: "Select model" });
   await expect(picker.getByRole("menuitemradio", { name: /Fast.*1 credit/ })).toBeVisible();
   await expect(picker.getByRole("menuitemradio", { name: /Balanced.*3 credits/ })).toBeVisible();
   await expect(picker.getByRole("menuitemradio", { name: /High.*6 credits/ })).toBeVisible();

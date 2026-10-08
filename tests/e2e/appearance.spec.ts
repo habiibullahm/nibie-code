@@ -109,12 +109,13 @@ test.describe("mode picker (mock workspace)", () => {
   test("offers only Fast, Balanced and High, defaults to Balanced, and is keyboard operable", async ({ page }) => {
     await page.goto("/preview");
     const picker = page.getByRole("button", { name: "Model: Balanced", exact: true });
-    await expect(picker).toHaveText("Balanced");
+    await expect(picker).toHaveText("Model: Balanced");
     await expect(picker).toHaveAttribute("aria-haspopup", "menu");
     await expect(page.getByRole("button", { name: /^Reasoning:/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Deep Research: Off", exact: true })).toBeVisible();
     await picker.click();
-    const menu = page.getByRole("menu", { name: "Model" });
-    await expect(menu.getByRole("menuitemradio")).toHaveText([/^Fast\s*Quick answers/, /^Balanced\s*Best for everyday work/, /^High\s*Deeper reasoning/]);
+    const menu = page.getByRole("menu", { name: "Select model" });
+    await expect(menu.getByRole("menuitemradio")).toHaveText([/^Fast\s*Lowest latency/, /^Balanced\s*Best for everyday work/, /^High\s*Deeper reasoning/]);
     await expect(menu.getByRole("menuitemradio", { name: /^Balanced/ })).toBeFocused();
     await page.keyboard.press("ArrowUp");
     await expect(menu.getByRole("menuitemradio", { name: /^Fast/ })).toBeFocused();
@@ -133,7 +134,7 @@ test.describe("mode picker (mock workspace)", () => {
     await page.goto("/preview");
     await page.getByRole("button", { name: "Model: Balanced", exact: true }).click();
     await page.getByRole("menuitemradio", { name: /^High/ }).click();
-    await expect(page.getByRole("button", { name: "Model: High", exact: true })).toHaveText("High");
+    await expect(page.getByRole("button", { name: "Model: High", exact: true })).toHaveText("Model: High");
   });
 });
 

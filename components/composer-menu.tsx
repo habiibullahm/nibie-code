@@ -5,7 +5,7 @@ import { Check, ChevronDown } from "lucide-react";
 
 export type MenuItem<T extends string> = { value: T; label: string; detail?: string };
 type Props<T extends string> = {
-  // Names the control for assistive tech, e.g. "Model" -> "Model: Balanced".
+  // Names the control for assistive tech and the visible desktop prefix, e.g. "Model" -> "Model: Balanced".
   name: string;
   value: T;
   items: MenuItem<T>[];
@@ -30,6 +30,7 @@ export function ComposerMenu<T extends string>({ name, value, items, onChange, d
   const menuId = useId();
   const current = items.find((item) => item.value === value) ?? items[0];
   const currentLabel = current?.label ?? (value || "Unavailable");
+  const accessibleName = `${name}: ${currentLabel}`;
 
   useEffect(() => {
     if (!open) return;
@@ -59,9 +60,13 @@ export function ComposerMenu<T extends string>({ name, value, items, onChange, d
   return <div className="composer-menu" ref={rootRef}>
     <button ref={buttonRef} type="button" className={`composer-menu-button${emphasized ? " is-emphasized" : ""}`} disabled={disabled} title={disabled ? disabledReason : description ? `Select ${name.toLowerCase()}` : undefined}
       aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined}
-      aria-label={disabled && disabledReason ? `${name}: ${currentLabel} (${disabledReason})` : `${name}: ${currentLabel}`}
+      aria-label={disabled && disabledReason ? `${accessibleName} (${disabledReason})` : accessibleName}
       onClick={() => setOpen((state) => !state)} onKeyDown={openFromKey}>
-      <span>{currentLabel}</span><ChevronDown size={13} aria-hidden="true" />
+      <span className="composer-menu-label">
+        <span className="composer-menu-context" aria-hidden="true">{name}: </span>
+        <span className="composer-menu-value">{currentLabel}</span>
+      </span>
+      <ChevronDown size={13} aria-hidden="true" />
     </button>
     {open && <div id={menuId} className="composer-menu-list" role="menu" aria-label={description ? `Select ${name.toLowerCase()}` : name} onKeyDown={moveFocus}>
       {description ? <div className="composer-menu-heading" role="presentation"><strong>Select {name.toLowerCase()}</strong><small>{description}</small></div> : null}

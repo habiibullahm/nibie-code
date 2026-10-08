@@ -635,7 +635,7 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .auth-switch a { color: var(--link); font-weight: 500; text-decoration: underline; text-underline-offset: 4px; }
 
 /* Composer pickers (room, reasoning effort) */
-.composer-left-tools .composer-menu-button { max-width: min(220px, 40vw); }
+.composer-left-tools .composer-menu-button { max-width: min(240px, 42vw); }
 .composer-left-tools .composer-menu-list { max-height: min(320px, 45dvh); overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 .composer-menu-list::-webkit-scrollbar { width: 6px; }
 .composer-menu-list::-webkit-scrollbar-track { background: transparent; }
@@ -693,12 +693,14 @@ a.message-source-title:hover { text-decoration: underline; text-decoration-thick
 @media (max-width: 760px) { .attachment-chip { max-width: 100%; } .attachment-chip-action { width: 32px; height: 32px; } }
 .composer-room-notice { width: min(100%, 760px); margin: 7px auto 0; color: var(--text-3); font-size: 11px; line-height: 1.5; }
 .composer-menu { position: relative; }
-.composer-menu-button { display: inline-flex; align-items: center; gap: 5px; max-width: 150px; min-height: 30px; padding: 0 8px 0 10px; border: 0; border-radius: 8px; background: var(--bg-subtle); color: var(--text-3); font-size: 11.5px; cursor: pointer; }
+.composer-menu-button { display: inline-flex; align-items: center; gap: 5px; max-width: 210px; min-height: 30px; padding: 0 8px 0 10px; border: 0; border-radius: 8px; background: var(--bg-subtle); color: var(--text-3); font-size: 11.5px; cursor: pointer; }
 .composer-secondary-tools .composer-menu-button { min-height: 28px; padding-inline: 5px; background: transparent; color: var(--text-3); }
 .composer-secondary-tools .composer-menu-button:hover:not(:disabled), .composer-secondary-tools .composer-menu-button[aria-expanded="true"] { background: var(--hover); color: var(--text-2); }
 .composer-secondary-tools .composer-menu-button.is-emphasized { background: var(--active); color: var(--text); font-weight: 600; }
 .composer-secondary-tools .composer-menu-button.is-emphasized svg { color: var(--emphasis); }
-.composer-menu-button span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.composer-menu-label, .composer-room-context { display: inline-flex; min-width: 0; overflow: hidden; white-space: nowrap; }
+.composer-menu-context { flex: none; color: var(--text-4); }
+.composer-menu-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .composer-menu-button svg { flex: none; color: var(--text-4); }
 .composer-menu-button:hover:not(:disabled), .composer-menu-button[aria-expanded="true"] { background: var(--hover); color: var(--text); }
 .composer-menu-button:disabled { opacity: .5; cursor: not-allowed; }
@@ -722,6 +724,8 @@ a.message-source-title:hover { text-decoration: underline; text-decoration-thick
   .composer-form { column-gap: 4px; row-gap: 4px; }
   .composer-actions { gap: 3px; min-height: 44px; }
   .composer-left-tools .composer-menu-button, .composer-room-context { max-width: min(140px, 34vw); min-height: 38px; padding-inline: 4px; font-size: 11px; }
+  /* Compact mobile chips: value only; full "Room: …" / "Model: …" / "Deep Research: Off|On" stays in aria-label. */
+  .composer-menu-context { display: none; }
   .composer-left-tools > .composer-menu { position: static; }
   .composer-left-tools .composer-menu-list { left: 0; right: auto; }
   .send-button { width: 44px; height: 44px; border-radius: 11px; }

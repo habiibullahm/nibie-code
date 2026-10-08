@@ -15,7 +15,7 @@ test("the mode picker sends only a mode and persists without exposing provider n
     await page.getByRole("button", { name: "New chat", exact: true }).first().click();
     await expect(page.getByRole("button", { name: /^Reasoning:/ })).toHaveCount(0);
     await page.getByRole("button", { name: /^Model:/ }).click();
-    await expect(page.getByRole("menu", { name: "Model", exact: true })).not.toContainText(/GPT|DeepSeek|MiniMax|OpenAI/);
+    await expect(page.getByRole("menu", { name: "Select model" })).not.toContainText(/GPT|DeepSeek|MiniMax|OpenAI/);
     await page.getByRole("menuitemradio", { name: /^Fast/ }).click();
     const sent = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/chat" && request.method() === "POST", { timeout: 60_000 });
     await page.getByRole("textbox", { name: "Message Nibie" }).fill("Reply with one short sentence about tides.");
