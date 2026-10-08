@@ -8,6 +8,7 @@ What's new in Nibie.
 
 ### Added
 
+- Copy or download a single conversation’s transcript from the thread ··· menu (clean plain text for copy; UTF-8 Markdown download).
 - Download a file you attached to a chat from the message chip (your account only).
 - Ask about a public GitHub pull request or project and Nibie can check live GitHub data, show “Checking GitHub…” while it runs, and keep “Used GitHub” on the answer after reload — public projects only, one check per reply.
 - Nibie now enforces an AI spend budget separate from your weekly credits, so expensive replies stop with a clear “try again later” message when the budget is reached instead of keeping spend going.

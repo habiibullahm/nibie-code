@@ -12,6 +12,7 @@ import {
   type ExportConversationRow,
   type ExportMessageRow,
 } from "../../lib/privacy/export";
+import { buildTranscriptText } from "../../lib/chat/transcript";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 describe("Supabase row-level security", () => {
@@ -964,6 +965,69 @@ describe("Supabase row-level security", () => {
     expect(await sql`select title from public.conversations where id = ${conversationB}`).toEqual([{ title: "B conversation" }]);
     expect(await sql`select id from public.users where id = ${userA}`).toEqual([{ id: userA }]);
     expect(await sql`select preferred_name from public.user_preferences where user_id = ${userA}`).toEqual([{ preferred_name: "Habib" }]);
+  });
+
+  it("keeps single-chat transcripts owner-scoped for active and archived threads", async () => {
+    const owner = randomUUID();
+    const stranger = randomUUID();
+    const activeId = randomUUID();
+    const archivedId = randomUUID();
+    const activeUserMessage = randomUUID();
+    const archivedUserMessage = randomUUID();
+    await sql`insert into auth.users (id) values (${owner}), (${stranger})`;
+    await asUser(owner, async (tx) => {
+      await tx`insert into public.conversations (id, user_id, title, selected_model) values
+        (${activeId}, ${owner}, 'Active transcript', 'Balanced'),
+        (${archivedId}, ${owner}, 'Archived transcript', 'Balanced')`;
+      await tx`select * from public.append_user_message(${activeId}, ${activeUserMessage}, 'active only')`;
+      await tx`select * from public.append_user_message(${archivedId}, ${archivedUserMessage}, 'archived only')`;
+      await tx`update public.conversations set archived_at = now() where id = ${archivedId}`;
+    });
+
+    const ownedConversations = await asUser(owner, (tx) => tx`
+      select id, title from public.conversations where id in (${activeId}, ${archivedId}) order by title
+    `);
+    expect(ownedConversations).toEqual([
+      { id: activeId, title: "Active transcript" },
+      { id: archivedId, title: "Archived transcript" },
+    ]);
+
+    const ownedMessages = await asUser(owner, (tx) => tx`
+      select id, conversation_id, role, content, status, position, created_at
+      from public.messages
+      where conversation_id = ${archivedId}
+      order by position, id
+    `);
+    expect(ownedMessages.some((row) => row.content === "archived only")).toBe(true);
+
+    const transcript = buildTranscriptText(
+      { id: archivedId, title: "Archived transcript" },
+      ownedMessages.map((row) => ({
+        id: String(row.id),
+        role: String(row.role),
+        content: String(row.content),
+        status: String(row.status),
+        position: Number(row.position),
+        created_at: row.created_at as string | Date,
+      })),
+      "plain",
+    );
+    expect("text" in transcript).toBe(true);
+    if ("text" in transcript) {
+      expect(transcript.text).toContain("Archived transcript");
+      expect(transcript.text).toContain("archived only");
+      expect(transcript.text).not.toContain("active only");
+      expect(transcript.text).not.toContain(String(conversationB));
+    }
+
+    const strangerConversation = await asUser(stranger, (tx) => tx`
+      select id from public.conversations where id = ${archivedId}
+    `);
+    const strangerMessages = await asUser(stranger, (tx) => tx`
+      select id from public.messages where conversation_id = ${archivedId}
+    `);
+    expect(strangerConversation).toHaveLength(0);
+    expect(strangerMessages).toHaveLength(0);
   });
 
   describe("chat attachments", () => {
