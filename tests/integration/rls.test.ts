@@ -485,6 +485,13 @@ describe("Supabase row-level security", () => {
       tx`select id from public.messages where content ilike ${"%\\%_%"} and status = 'complete' limit 5`,
     );
     expect(Array.isArray(malformed)).toBe(true);
+
+    // Clean up fixtures so later suite cases that assert exact room lists stay deterministic.
+    await asUser(userA, async (tx) => {
+      await tx`delete from public.messages where conversation_id in (${owned}, ${archived})`;
+      await tx`delete from public.conversations where id in (${owned}, ${archived})`;
+      await tx`delete from public.rooms where id = ${roomA}`;
+    });
   });
 
   it("keeps rooms owner-scoped and leaves general threads valid when a room is deleted", async () => {
