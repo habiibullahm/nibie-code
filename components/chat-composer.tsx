@@ -64,6 +64,7 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const selectionRef = useRef<{ start: number; end: number; direction: "forward" | "backward" | "none" } | null>(null);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
   const attachments = useDraftAttachments();
