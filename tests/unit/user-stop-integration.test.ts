@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 const { createClient, provider } = vi.hoisted(() => ({ createClient: vi.fn(), provider: vi.fn() }));
 vi.mock("@/lib/supabase/server", () => ({ createSupabaseServerClient: createClient }));
-vi.mock("@/lib/ai/provider", () => ({ chatProvider: { stream: provider } }));
+vi.mock("@/lib/ai/provider", () => ({ chatProvider: { stream: provider }, configuredModelLabel: (mode: string) => mode }));
 vi.mock("@/lib/ai/registry", () => ({
   getModelOptions: () => ({ models: [{ id: "Fast" }, { id: "Balanced" }, { id: "High" }] }),
   contextCapabilitiesFor: () => ({ contextWindowTokens: 16384, maxOutputTokens: 2048 }),
@@ -64,6 +64,9 @@ function database(mode: string, options: { lateClaim?: boolean; failStopWrite?: 
         const cost = weights[args.p_logical_mode] ?? 0; creditsUsed += cost;
         return { data: { accepted: true, credits_charged: cost, credits_used: creditsUsed, credits_remaining: 500 - creditsUsed, reset_at: "2026-10-05T00:00:00.000Z" }, error: null };
       }
+      if (name === "reserve_ai_spend") return { data: { accepted: true, reserved_micros: 150000, user_remaining_micros: 4_850_000, global_remaining_micros: 49_850_000 }, error: null };
+      if (name === "finalize_ai_spend") return { data: true, error: null };
+      if (name === "release_ai_spend") return { data: true, error: null };
       if (name === "start_weekly_ai_usage") return { data: true, error: null };
       if (name === "release_weekly_ai_usage") { creditsUsed = Math.max(0, creditsUsed - (weights[mode] ?? 0)); return { data: true, error: null }; }
       if (name === "append_user_message") {

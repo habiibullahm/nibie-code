@@ -47,6 +47,21 @@ describe("OpenAI compatible SSE parsing", () => {
     await expect(Array.fromAsync(readOpenAiSse(bodyOf(tail("length"))))).rejects.toThrow("output limit");
   });
 
+  it("captures provider usage from the final stream chunk", async () => {
+    const source =
+      'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'
+      + 'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":11,"completion_tokens":2,"total_tokens":13}}\n\n'
+      + "data: [DONE]\n\n";
+    expect(await Array.fromAsync(readOpenAiSse(bodyOf(source)))).toEqual([
+      { type: "delta", text: "hi" },
+      {
+        type: "done",
+        finishReason: "stop",
+        usage: { inputTokens: 11, outputTokens: 2, reasoningTokens: 0, totalTokens: 13, source: "provider" },
+      },
+    ]);
+  });
+
   it("cancels a pending provider reader on abort", async () => {
     const cancel = vi.fn();
     const aborter = new AbortController();

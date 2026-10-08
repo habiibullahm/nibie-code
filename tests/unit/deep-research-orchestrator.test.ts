@@ -79,7 +79,7 @@ describe("deep research orchestrator", () => {
     expect(result.web.length).toBeGreaterThanOrEqual(2);
     expect(result.metrics.searchQueryCount).toBeGreaterThanOrEqual(2);
     expect(result.metrics.pagesFetched).toBeGreaterThanOrEqual(1);
-    expect(result.usagePolicy.id).toBe("temporary_undercount_v1");
+    expect(result.usagePolicy.id).toBe("research_metered_v1");
     expect(result.status === "complete" || result.status === "incomplete").toBe(true);
   });
 

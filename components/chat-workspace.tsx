@@ -521,7 +521,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
             status: "streaming",
             created_at: new Date().toISOString(),
             ...(data.sources?.length ? { sources: data.sources } : {}),
-            ...(data.research ? { research: { status: "running", followUpUsed: false, searchQueryCount: 0, pagesFetched: 0, evidenceCount: 0, durationMs: 0, usagePolicy: "temporary_undercount_v1" } } : {}),
+            ...(data.research ? { research: { status: "running", followUpUsed: false, searchQueryCount: 0, pagesFetched: 0, evidenceCount: 0, durationMs: 0, usagePolicy: "research_metered_v1" } } : {}),
           };
           setLocalMessages((items) => { const rows = items[id] ?? []; return { ...items, [id]: options.placeholderId && rows.some((row) => row.id === options.placeholderId) ? rows.map((row) => row.id === options.placeholderId ? reply : row) : [...rows, reply] }; });
         }
@@ -529,7 +529,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
           setContextDiagnostics(data.context);
         }
         if (data.type === "progress" && assistantId) {
-          setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId ? { ...message, researchStage: data.stage, research: message.research ?? { status: "running", followUpUsed: false, searchQueryCount: 0, pagesFetched: 0, evidenceCount: 0, durationMs: 0, usagePolicy: "temporary_undercount_v1" } } : message) }));
+          setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId ? { ...message, researchStage: data.stage, research: message.research ?? { status: "running", followUpUsed: false, searchQueryCount: 0, pagesFetched: 0, evidenceCount: 0, durationMs: 0, usagePolicy: "research_metered_v1" } } : message) }));
         }
         if (data.type === "action_start" && assistantId) {
           const label = actionRunningLabel(data.actionId);
@@ -570,7 +570,12 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
       } else {
         // The server reported this failure itself, so it is final.
         if (assistantId) setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId ? { ...message, content: message.content || "Response unavailable.", status: "error" } : message) }));
-        setNotice(error instanceof ChatStreamServerError ? error.message : failureNotice);
+        // Prefer the server's JSON/SSE message (for example AI spend budget) over the generic failure copy.
+        const serverMessage =
+          error instanceof ChatStreamServerError || (kind === "request-failed" && error instanceof Error)
+            ? error.message.trim()
+            : "";
+        setNotice(serverMessage || failureNotice);
         router.refresh();
       }
     } finally {

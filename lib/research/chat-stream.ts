@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { chatProvider } from "@/lib/ai/provider";
+import { chatProvider, configuredModelLabel } from "@/lib/ai/provider";
 import { toProviderMessages } from "@/lib/ai/provider-messages";
 import { contextCapabilitiesFor, providerFor } from "@/lib/ai/registry";
 import { createReasoningStreamFilter } from "@/lib/ai/sanitize-model-output";
@@ -31,7 +31,16 @@ import { researchSynthesisInstruction } from "@/lib/research/synthesize";
 import type { ResearchProgressStage, ResearchRunMetrics, ResearchRunStatus } from "@/lib/research/types";
 import { researchUsagePolicyFields } from "@/lib/research/usage-policy";
 import type { MemoryRecord, RecallOperationStatus } from "@/lib/recall/types";
-import { weeklyCreditCost, WEEKLY_FREE_CREDIT_LIMIT } from "@/lib/usage/policy";
+import {
+  finalizeGenerationSpend,
+  releaseUsageHold,
+  releaseWeeklyUsageHold,
+  reserveUsageBeforeGeneration,
+  startWeeklyUsage,
+} from "@/lib/usage/guards";
+import { estimateUsageFromText, withCostEstimate, type ProviderTokenUsage } from "@/lib/usage/provider-usage";
+import { estimateResearchSpendMicros } from "@/lib/usage/research-spend";
+import { failureCategoryFrom, logGenerationTelemetry } from "@/lib/usage/telemetry";
 import { getWebSearchProvider } from "@/lib/web/provider";
 
 const encoder = new TextEncoder();
@@ -67,7 +76,7 @@ export type DeepResearchChatStreamInput = {
 
 /**
  * Deep Research generation path: early SSE start + progress stages, bounded orchestrator,
- * Citations V1 attach/stream/persist, Stop-aware, usage honesty via temporary_undercount_v1.
+ * Citations V1 attach/stream/persist, Stop-aware, metered via research_metered_v1.
  */
 export async function createDeepResearchChatResponse(input: DeepResearchChatStreamInput): Promise<Response> {
   const {
@@ -202,20 +211,28 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
     stopCheck ??= checkStopped();
   }, stopPollMs);
 
+  let spendSettled = false;
+  let researchWorkStarted = false;
+  let synthesisStarted = false;
+  /** Full credit+spend release — only before research work incurs cost. */
   const releaseReservation = async () => {
-    try {
-      const { error } = await supabase.rpc("release_weekly_ai_usage", { p_generation_id: assistant.id });
-      if (error) logError("weekly_usage.reservation.release_failed", { requestId, logicalMode: mode, code: operationalCodes.requestFailed });
-    } catch {
-      logError("weekly_usage.reservation.release_failed", { requestId, logicalMode: mode, code: operationalCodes.requestFailed });
-    }
+    await releaseUsageHold({ supabase, userId, generationId: assistant.id, requestId, logicalMode: mode });
+    spendSettled = true;
+  };
+  /** After planner/search work, refund unstarted weekly credits but leave spend for finalize. */
+  const releaseCreditsOnly = async () => {
+    await releaseWeeklyUsageHold({ supabase, generationId: assistant.id, requestId, logicalMode: mode });
   };
 
   const summaryMaintenance = deferThreadSummaryMaintenance({ supabase, conversationId, requestId });
   let usageReservationMs = 0;
+  let spendReservedMicros = 0;
   let providerStartedAt = Date.now();
   let providerTtftMs: number | null = null;
   let finishReason = "unspecified";
+  let providerUsage: ProviderTokenUsage | null = null;
+  let synthesisPromptChars = 8_000;
+  let synthesisOutputChars = 0;
   const providerTimedOutRef = { value: false };
   const timeoutError = "The provider took too long to finish this response. Please try again.";
 
@@ -249,6 +266,7 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
             }
           },
         });
+        researchWorkStarted = true;
 
         researchMetrics = research.metrics;
         // Synthesis model call counted separately below.
@@ -278,7 +296,7 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
         // True user Stop / client cancel only. Gather-deadline "interrupted" (no user abort) must not
         // become a Stopped placeholder — with evidence it synthesizes as incomplete below.
         if (userStopped || clientCancelled || aborter.signal.aborted) {
-          await releaseReservation();
+          await releaseCreditsOnly();
           await persist(stoppedPlaceholder, "interrupted");
           logInfo("research.interrupted", { requestId, durationMs: durationMs(), ...researchUsagePolicyFields() });
           enqueue("status", { status: "interrupted" });
@@ -309,7 +327,7 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
             code: operationalCodes.deepResearchFailed,
             ...researchUsagePolicyFields(),
           });
-          await releaseReservation();
+          await releaseCreditsOnly();
           await persist(message, "error");
           enqueue("error", { error: message });
           return;
@@ -375,100 +393,51 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
           });
         } catch {
           logError("context.build.failed", { requestId, code: operationalCodes.contextBuildFailed, stage: "context", durationMs: durationMs() });
-          await releaseReservation();
+          await releaseCreditsOnly();
           await persist("Response unavailable.", "error");
           enqueue("error", { error: safeError });
           return;
         }
 
-        // Credits for synthesis (temporary undercount of planner/search). Preflight may already hold them.
-        if (!weeklyUsageReserved) {
-          const reservationStartedAt = Date.now();
-          let reservation: {
-            accepted: boolean;
-            credits_charged: number;
-            credits_used: number;
-            credits_remaining: number;
-            reset_at: string;
-          } | null = null;
-          let reservationError: unknown = null;
-          try {
-            const result = await supabase
-              .rpc("reserve_weekly_ai_usage", {
-                p_generation_id: assistant.id,
-                p_logical_mode: mode,
-              })
-              .single<{
-                accepted: boolean;
-                credits_charged: number;
-                credits_used: number;
-                credits_remaining: number;
-                reset_at: string;
-              }>();
-            reservation = result.data;
-            reservationError = result.error;
-          } catch {
-            reservationError = new Error("Reservation request failed.");
-          }
-          usageReservationMs = Date.now() - reservationStartedAt;
+        synthesisPromptChars = prompt?.reduce((sum, message) => sum + message.content.length, 0) ?? 8_000;
 
-          if (
-            reservationError ||
-            !reservation ||
-            typeof reservation.accepted !== "boolean" ||
-            !Number.isInteger(reservation.credits_remaining) ||
-            reservation.credits_remaining < 0 ||
-            reservation.credits_remaining > WEEKLY_FREE_CREDIT_LIMIT ||
-            typeof reservation.reset_at !== "string" ||
-            !Number.isFinite(Date.parse(reservation.reset_at))
-          ) {
-            logError("weekly_usage.reservation.failed", {
-              requestId,
-              logicalMode: mode,
-              durationMs: usageReservationMs,
-              code: operationalCodes.requestFailed,
-            });
-            await releaseReservation();
-            await persist(clientCancelled ? "Response stopped." : "Response unavailable.", clientCancelled ? "interrupted" : "error");
-            enqueue("error", { error: safeError });
+        // Research credits = mode + multi-call overhead. Preflight may already hold them.
+        if (!weeklyUsageReserved) {
+          const gate = await reserveUsageBeforeGeneration({
+            supabase,
+            userId,
+            generationId: assistant.id,
+            mode,
+            usageKind: "research",
+            requestId,
+          });
+          if (!gate.ok) {
+            await persist(
+              gate.code === operationalCodes.weeklyUsageLimitRejected
+                ? "Weekly usage limit reached."
+                : gate.code === operationalCodes.aiSpendLimitRejected
+                  ? "AI spend budget reached."
+                  : clientCancelled ? "Response stopped." : "Response unavailable.",
+              gate.status === 429 || !clientCancelled ? "error" : "interrupted",
+            );
+            enqueue("error", { error: gate.error });
             return;
           }
-          if (!reservation.accepted) {
-            logWarn("weekly_usage.limit.rejected", {
-              requestId,
-              logicalMode: mode,
-              creditsCharged: 0,
-              creditsRemaining: reservation.credits_remaining,
-            });
-            await persist("Weekly usage limit reached.", "error");
-            enqueue("error", { error: "You've reached your weekly Nibie usage limit." });
-            return;
-          }
-          if (reservation.credits_charged !== weeklyCreditCost[mode]) {
-            logError("weekly_usage.reservation.failed", {
-              requestId,
-              logicalMode: mode,
-              durationMs: usageReservationMs,
-              reason: "policy_mismatch",
-              code: operationalCodes.requestFailed,
-            });
-            await releaseReservation();
-            await persist("Response unavailable.", "error");
-            enqueue("error", { error: safeError });
-            return;
-          }
+          usageReservationMs = gate.usageReservationMs;
+          spendReservedMicros = gate.spendReservedMicros;
           logInfo("weekly_usage.reservation.accepted", {
             requestId,
             logicalMode: mode,
-            creditsCharged: reservation.credits_charged,
-            creditsRemaining: reservation.credits_remaining,
+            usageKind: "research",
+            creditsCharged: gate.creditsCharged,
+            creditsRemaining: gate.creditsRemaining,
             reservationLatencyMs: usageReservationMs,
             ...researchUsagePolicyFields(),
           });
         }
 
         if (aborter.signal.aborted || clientCancelled || userStopped) {
-          await releaseReservation();
+          await releaseCreditsOnly();
           await persist("Response stopped.", "interrupted");
           logInfo("research.interrupted", { requestId, stage: "pre_synthesis", durationMs: durationMs() });
           enqueue("status", { status: "interrupted" });
@@ -496,6 +465,7 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
 
         let responseStream: ReadableStream<Uint8Array>;
         try {
+          synthesisStarted = true;
           responseStream = await chatProvider.stream(mode, prompt!, aborter.signal);
         } catch {
           clearTimeout(timeout);
@@ -505,23 +475,16 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
             logError("chat.response.failed", { requestId, durationMs: durationMs(), stage: "provider", code: operationalCodes.aiProviderFailed });
             logWarn("research.failed", { requestId, category: "synthesis_provider", durationMs: durationMs(), code: operationalCodes.deepResearchFailed });
           }
-          if (!interrupted) await releaseReservation();
+          if (!interrupted) await releaseCreditsOnly();
           if (!userStopped) await persist(clientCancelled ? stoppedPlaceholder : "Response unavailable.", clientCancelled ? "interrupted" : "error");
           enqueue("error", { error: providerTimedOut ? timeoutError : safeError });
           return;
         }
 
-        let usageStarted = false;
-        try {
-          const { data, error } = await supabase.rpc("start_weekly_ai_usage", { p_generation_id: assistant.id });
-          usageStarted = data === true && !error;
-        } catch {
-          usageStarted = false;
-        }
+        const usageStarted = await startWeeklyUsage({ supabase, generationId: assistant.id, requestId, logicalMode: mode });
         if (!usageStarted) {
-          logError("weekly_usage.start.failed", { requestId, logicalMode: mode, code: operationalCodes.requestFailed });
           aborter.abort();
-          await releaseReservation();
+          await releaseCreditsOnly();
           await persist(clientCancelled ? "Response stopped." : "Response unavailable.", clientCancelled ? "interrupted" : "error");
           enqueue("error", { error: safeError });
           clearTimeout(timeout);
@@ -539,6 +502,7 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
           if (!text) return;
           if (providerTtftMs === null) providerTtftMs = Date.now() - providerStartedAt;
           output += text;
+          synthesisOutputChars = output.length;
           enqueue("delta", { text });
         };
         const feedModelText = (chunk: string) => {
@@ -584,6 +548,7 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
             if (item.type === "done") {
               completed = true;
               finishReason = item.finishReason ?? "unspecified";
+              if (item.usage) providerUsage = item.usage;
               break;
             }
             feedModelText(item.text);
@@ -695,7 +660,8 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
           code: operationalCodes.deepResearchFailed,
         });
         try {
-          await releaseReservation();
+          if (researchWorkStarted) await releaseCreditsOnly();
+          else await releaseReservation();
         } catch {
           /* ignore */
         }
@@ -706,21 +672,60 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
         }
         enqueue("error", { error: safeError });
       } finally {
-        logInfo("chat.response.metrics", {
+        const spendBreakdown = estimateResearchSpendMicros({
+          synthesisMode: mode,
+          planMode: availablePlanMode,
+          metrics: researchMetrics,
+          synthesisUsage: providerUsage,
+          synthesisPromptChars,
+          synthesisOutputChars,
+          synthesisStarted,
+        });
+        const costEstimate = withCostEstimate(
+          mode,
+          providerUsage
+            ?? estimateUsageFromText({
+              promptChars: synthesisPromptChars,
+              outputChars: synthesisOutputChars,
+            }),
+        );
+        if (!spendSettled) {
+          await finalizeGenerationSpend({
+            supabase,
+            userId,
+            generationId: assistant.id,
+            actualMicros: spendBreakdown.actualMicros,
+            requestId,
+          });
+          spendSettled = true;
+        }
+        logGenerationTelemetry({
           requestId,
           logicalMode: mode,
           provider: providerFor(mode),
+          model: configuredModelLabel(mode),
+          usageKind: "research",
+          usage: costEstimate,
           providerTtftMs,
           generationDurationMs: Date.now() - providerStartedAt,
-          appBeforeProviderMs: providerStartedAt - requestStartedAt,
-          usageReservationMs,
           totalDurationMs: Date.now() - requestStartedAt,
           finishReason,
+          failureCategory: failureCategoryFrom({ finishReason, stage: "research" }),
           deepResearch: true,
+          usageReservationMs,
+          spendReservedMicros,
+          spendAccepted: true,
+        });
+        logInfo("research.usage.summary", {
+          requestId,
           ...researchUsagePolicyFields(),
           searchQueryCount: researchMetrics.searchQueryCount,
           pagesFetched: researchMetrics.pagesFetched,
           modelCallCount: researchMetrics.modelCallCount,
+          spendPlannerMicros: spendBreakdown.plannerMicros,
+          spendSearchMicros: spendBreakdown.searchMicros,
+          spendSynthesisMicros: spendBreakdown.synthesisMicros,
+          spendActualMicros: spendBreakdown.actualMicros,
         });
         clearInterval(stopWatch);
         aborter.abort();
