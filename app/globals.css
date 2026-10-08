@@ -370,8 +370,9 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .message-author { display: flex; align-items: center; gap: 6px; min-height: 18px; margin: 0 0 8px; color: var(--text-3); font-size: 12px; font-weight: 600; }
 .message-author:empty { display: none; }
 .message-content.assistant > .message-author .message-time { margin-left: 0; }
-/* Before the first token: a "Thinking…" status pulsing by opacity only. It is removed as soon as text arrives; streaming has no motion. */
-.response-waiting { display: flex; align-items: center; gap: 10px; min-height: 24px; }
+/* Before the first token: a status label (Responding… / Thinking… / Researching…) that appears only after 300ms, then pulses by opacity only. It is removed as soon as text arrives; streaming has no motion. */
+.response-waiting { display: flex; align-items: center; gap: 10px; min-height: 24px; opacity: 0; animation: nibie-reveal .01s linear .3s forwards; }
+@keyframes nibie-reveal { to { opacity: 1; } }
 .response-thinking { display: inline-flex; align-items: center; flex: none; min-height: 24px; color: var(--text-3); font-size: 14px; font-weight: 500; letter-spacing: -.01em; animation: nibie-thinking 1.4s ease-in-out infinite; }
 @keyframes nibie-thinking { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .response-thinking { animation: none; opacity: .75; } }
