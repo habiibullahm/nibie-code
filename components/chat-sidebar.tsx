@@ -97,10 +97,15 @@ function ConversationSearchDialog({
   const [searching, setSearching] = useState(false);
   const [messageSearchFailed, setMessageSearchFailed] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [selectionQuery, setSelectionQuery] = useState("");
   const requestId = useRef(0);
   const trimmed = search.trim();
   const query = trimmed.toLowerCase();
   const contentReady = trimmed.length >= SEARCH_MIN_CHARS;
+  if (selectionQuery !== trimmed) {
+    setSelectionQuery(trimmed);
+    setSelectedIndex(0);
+  }
 
   const localTitleMatches = useMemo(
     () => (query ? conversations.filter((item) => item.title.toLowerCase().includes(query)) : conversations),
@@ -116,31 +121,36 @@ function ConversationSearchDialog({
     return searchLocalConversations(searchCorpus, rooms, trimmed);
   }, [contentReady, searchCorpus, rooms, trimmed]);
 
-  const payload = preview ? localPayload : remote;
-  const fallbackTitleHits = localTitleMatches.map((item) => ({
+  const activeRemote = contentReady && !preview && remote?.query === trimmed ? remote : null;
+  const payload = preview ? localPayload : activeRemote;
+  const roomNameById = useMemo(() => new Map(rooms.map((room) => [room.id, room.name])), [rooms]);
+  const fallbackTitleHits = useMemo(() => localTitleMatches.map((item) => ({
     kind: "conversation" as const,
     conversationId: item.id,
     title: item.title,
     roomId: item.room_id,
-    roomName: rooms.find((room) => room.id === item.room_id)?.name ?? null,
+    roomName: item.room_id ? roomNameById.get(item.room_id) ?? null : null,
     archived: false,
-  }));
-  const fallbackArchivedHits = localArchivedTitleMatches.map((item) => ({
+  })), [localTitleMatches, roomNameById]);
+  const fallbackArchivedHits = useMemo(() => localArchivedTitleMatches.map((item) => ({
     kind: "conversation" as const,
     conversationId: item.id,
     title: item.title,
     roomId: item.room_id,
-    roomName: rooms.find((room) => room.id === item.room_id)?.name ?? null,
+    roomName: item.room_id ? roomNameById.get(item.room_id) ?? null : null,
     archived: true,
-  }));
-  const conversationHits = contentReady ? (payload?.conversations ?? fallbackTitleHits) : [];
-  const messageHits = contentReady ? (payload?.messages ?? []) : [];
-  const archivedHits = contentReady
-    ? (payload?.archived ?? fallbackArchivedHits)
-    : fallbackArchivedHits;
+  })), [localArchivedTitleMatches, roomNameById]);
+  const showSearching = contentReady && !preview && searching;
+  const showMessageSearchFailed = Boolean(contentReady && (payload?.messageSearchFailed || messageSearchFailed));
 
-  // Below the content-search threshold, keep the previous recent/title-only list.
-  const recentOrTitle = contentReady ? conversationHits : fallbackTitleHits;
+  const { recentOrTitle, messageHits, archivedHits } = useMemo(() => {
+    const conversationHits = contentReady ? (payload?.conversations ?? fallbackTitleHits) : [];
+    return {
+      recentOrTitle: contentReady ? conversationHits : fallbackTitleHits,
+      messageHits: contentReady ? (payload?.messages ?? []) : [],
+      archivedHits: contentReady ? (payload?.archived ?? fallbackArchivedHits) : fallbackArchivedHits,
+    };
+  }, [contentReady, payload, fallbackTitleHits, fallbackArchivedHits]);
 
   const flatResults = useMemo(() => {
     const rows: Array<{ key: string; hit: ChatSearchHit; group: "conversation" | "message" | "archived" }> = [];
@@ -149,11 +159,7 @@ function ConversationSearchDialog({
     for (const hit of archivedHits) rows.push({ key: `a-${hit.kind}-${hit.kind === "message" ? hit.messageId : hit.conversationId}`, hit, group: "archived" });
     return rows;
   }, [recentOrTitle, messageHits, archivedHits]);
-
-  useEffect(() => { setSelectedIndex(0); }, [trimmed]);
-  useEffect(() => {
-    if (selectedIndex >= flatResults.length) setSelectedIndex(Math.max(0, flatResults.length - 1));
-  }, [flatResults.length, selectedIndex]);
+  const activeIndex = flatResults.length ? Math.min(selectedIndex, flatResults.length - 1) : 0;
 
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -165,16 +171,11 @@ function ConversationSearchDialog({
   }, []);
 
   useEffect(() => {
-    if (preview || !contentReady) {
-      setRemote(null);
-      setSearching(false);
-      setMessageSearchFailed(false);
-      return;
-    }
+    if (preview || !contentReady) return;
     const controller = new AbortController();
     const id = ++requestId.current;
-    setSearching(true);
     const timer = window.setTimeout(async () => {
+      setSearching(true);
       try {
         const response = await fetch(`/api/chat/search?q=${encodeURIComponent(trimmed.slice(0, SEARCH_MAX_QUERY))}`, {
           method: "GET",
@@ -260,16 +261,22 @@ function ConversationSearchDialog({
     if (!flatResults.length) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      setSelectedIndex((index) => (index + 1) % flatResults.length);
+      setSelectedIndex((index) => {
+        const current = flatResults.length ? Math.min(index, flatResults.length - 1) : 0;
+        return (current + 1) % flatResults.length;
+      });
       return;
     }
     if (event.key === "ArrowUp") {
       event.preventDefault();
-      setSelectedIndex((index) => (index <= 0 ? flatResults.length - 1 : index - 1));
+      setSelectedIndex((index) => {
+        const current = flatResults.length ? Math.min(index, flatResults.length - 1) : 0;
+        return current <= 0 ? flatResults.length - 1 : current - 1;
+      });
       return;
     }
     if (event.key === "Enter") {
-      const row = flatResults[selectedIndex];
+      const row = flatResults[activeIndex];
       if (!row || row.hit.archived) return;
       event.preventDefault();
       activate(row.hit);
@@ -277,12 +284,12 @@ function ConversationSearchDialog({
   }
 
   const total = flatResults.length;
-  const empty = contentReady && !searching && total === 0;
+  const empty = contentReady && !showSearching && total === 0;
   const status = !trimmed
     ? "Search conversation titles and saved message content."
-    : searching
+    : showSearching
       ? "Searching…"
-      : messageSearchFailed
+      : showMessageSearchFailed
         ? "Message search is temporarily unavailable. Showing conversation titles only."
         : empty
           ? "No matching conversations or messages."
@@ -313,15 +320,15 @@ function ConversationSearchDialog({
       </label>
       <div className="chat-search-results">
         <p className="history-search-status" role="status" aria-live="polite">
-          {searching ? <LoaderCircle size={14} className="chat-search-spinner" aria-hidden="true" /> : null}
+          {showSearching ? <LoaderCircle size={14} className="chat-search-spinner" aria-hidden="true" /> : null}
           <span>{status}</span>
           {empty ? <span className="chat-search-status-secondary">Try a different word or phrase.</span> : null}
         </p>
         {recentOrTitle.length > 0 && <section className="history-group" aria-label={contentReady ? "Conversation title matches" : "Recent chats"}>
           <h2>{contentReady ? "Conversations" : "Recent chats"}</h2>
           {recentOrTitle.map((hit, index) => {
-            const selected = selectedIndex === conversationStart + index;
-            return <button type="button" className={`chat-search-row is-title${selected ? " is-selected" : ""}`} key={hit.conversationId} aria-label={hit.title} aria-selected={selected} onMouseEnter={() => setSelectedIndex(conversationStart + index)} onClick={() => activate(hit)}>
+            const selected = activeIndex === conversationStart + index;
+            return <button type="button" className={`chat-search-row is-title${selected ? " is-selected" : ""}`} key={hit.conversationId} aria-label={hit.title} aria-current={selected ? "true" : undefined} onMouseEnter={() => setSelectedIndex(conversationStart + index)} onClick={() => activate(hit)}>
               <MessageSquare size={15} aria-hidden="true" />
               <span className="chat-search-row-body">
                 <span className="chat-search-row-title" aria-hidden="true">{contentReady ? <SearchHighlight text={hit.title} query={trimmed} /> : hit.title}</span>
@@ -333,8 +340,8 @@ function ConversationSearchDialog({
         {messageHits.length > 0 && <section className="history-group" aria-label="Message matches">
           <h2>Messages</h2>
           {messageHits.map((hit, index) => {
-            const selected = selectedIndex === messageStart + index;
-            return <button type="button" className={`chat-search-row is-message${selected ? " is-selected" : ""}`} key={hit.messageId} aria-label={`${hit.title}: ${hit.snippet}`} aria-selected={selected} onMouseEnter={() => setSelectedIndex(messageStart + index)} onClick={() => activate(hit)}>
+            const selected = activeIndex === messageStart + index;
+            return <button type="button" className={`chat-search-row is-message${selected ? " is-selected" : ""}`} key={hit.messageId} aria-label={`${hit.title}: ${hit.snippet}`} aria-current={selected ? "true" : undefined} onMouseEnter={() => setSelectedIndex(messageStart + index)} onClick={() => activate(hit)}>
               <MessageSquare size={15} aria-hidden="true" />
               <span className="chat-search-row-body" aria-hidden="true">
                 <span className="chat-search-row-title">{hit.title}</span>
@@ -347,7 +354,7 @@ function ConversationSearchDialog({
         {archivedHits.length > 0 && <section className="history-group" aria-label="Archived search results">
           <h2>Archived</h2>
           {archivedHits.map((hit, index) => {
-            const selected = selectedIndex === archivedStart + index;
+            const selected = activeIndex === archivedStart + index;
             const summary: ConversationSummary = {
               id: hit.conversationId,
               title: hit.title,

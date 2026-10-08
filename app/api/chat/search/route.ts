@@ -28,7 +28,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Search query is too long." }, { status: 400 });
     }
 
-    const result = await searchOwnedChats(supabase, raw);
+    const result = await searchOwnedChats(supabase as unknown as import("@/lib/chat/search-owned").ChatSearchDb, raw);
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
     return NextResponse.json(result.data);
   } catch {

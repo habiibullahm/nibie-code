@@ -14,13 +14,37 @@ import {
 
 type QueryResult<T> = PromiseLike<{ data: T[] | null; error: { message?: string } | null }>;
 
+/** Narrow facade over the authenticated Supabase client's filter builder. */
+export type ChatSearchDb = {
+  from: (table: "conversations" | "messages" | "rooms") => {
+    select: (columns: string) => {
+      ilike: (column: string, pattern: string) => {
+        order: (column: string, options?: { ascending: boolean }) => {
+          order: (column: string, options?: { ascending: boolean }) => {
+            limit: (count: number) => QueryResult<SearchConversationRow>;
+          };
+          limit: (count: number) => QueryResult<SearchConversationRow>;
+        };
+        limit: (count: number) => QueryResult<SearchConversationRow>;
+      };
+      eq: (column: string, value: string) => {
+        ilike: (column: string, pattern: string) => {
+          order: (column: string, options?: { ascending: boolean }) => {
+            limit: (count: number) => QueryResult<SearchMessageRow>;
+          };
+        };
+      };
+      in: (column: string, values: string[]) => QueryResult<SearchConversationRow> & QueryResult<{ id: string; name: string }>;
+    };
+  };
+};
+
 /**
  * Owner-scoped chat search via the authenticated Supabase client (RLS).
  * Never accepts a client-provided user id. Prefers no migration: bounded ILIKE reads.
  */
 export async function searchOwnedChats(
-  // Authenticated user-scoped client; RLS is the authorization boundary.
-  supabase: { from: (table: string) => any },
+  supabase: ChatSearchDb,
   rawQuery: unknown,
 ): Promise<{ ok: true; data: ChatSearchPayload } | { ok: false; error: string; status: number }> {
   const query = normalizeSearchQuery(rawQuery);
@@ -38,7 +62,7 @@ export async function searchOwnedChats(
   let messageSearchFailed = false;
 
   if (pattern) {
-    const titleResult: Awaited<QueryResult<SearchConversationRow>> = await supabase
+    const titleResult = await supabase
       .from("conversations")
       .select("id,title,room_id,archived_at,updated_at")
       .ilike("title", pattern)
@@ -51,7 +75,7 @@ export async function searchOwnedChats(
     }
     titleRows = titleResult.data ?? [];
 
-    const messageResult: Awaited<QueryResult<SearchMessageRow>> = await supabase
+    const messageResult = await supabase
       .from("messages")
       .select("id,conversation_id,role,content,created_at")
       .eq("status", "complete")
@@ -77,12 +101,12 @@ export async function searchOwnedChats(
   let conversationRows = titleRows;
   const missingIds = [...conversationIds].filter((id) => !conversationRows.some((row) => row.id === id));
   if (missingIds.length) {
-    const extra: Awaited<QueryResult<SearchConversationRow>> = await supabase
+    const extra = await supabase
       .from("conversations")
       .select("id,title,room_id,archived_at,updated_at")
       .in("id", missingIds);
     if (!extra.error && extra.data) {
-      conversationRows = [...conversationRows, ...extra.data];
+      conversationRows = [...conversationRows, ...(extra.data as SearchConversationRow[])];
     } else if (extra.error) {
       messageSearchFailed = true;
       messageRows = [];
@@ -92,11 +116,11 @@ export async function searchOwnedChats(
   const roomIds = [...new Set(conversationRows.map((row) => row.room_id).filter((id): id is string => Boolean(id)))];
   let rooms: { id: string; name: string }[] = [];
   if (roomIds.length) {
-    const roomResult: Awaited<QueryResult<{ id: string; name: string }>> = await supabase
+    const roomResult = await supabase
       .from("rooms")
       .select("id,name")
       .in("id", roomIds);
-    if (!roomResult.error && roomResult.data) rooms = roomResult.data;
+    if (!roomResult.error && roomResult.data) rooms = roomResult.data as { id: string; name: string }[];
   }
 
   const data = mapOwnedSearchRows({
