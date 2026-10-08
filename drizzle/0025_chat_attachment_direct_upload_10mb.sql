@@ -1,7 +1,7 @@
 -- Chat attachments: raise per-file limit to 10 MB / combined total to 20 MB, and add transient
 -- direct-to-storage staging (upload-init → TUS signed upload → finalize/extract → delete) so
 -- uploads bypass the Vercel Function ≈4.5 MB request-body limit. Durable store remains extracted text only.
--- Keep as 0025 while Chat Roles #69 is open with its own 0025; renumber to 0026 after #69 merges.
+-- Numbered 0025: next after 0024 on main (#69 closed without merging its competing 0025).
 
 ALTER TABLE "message_attachments" DROP CONSTRAINT "message_attachments_size_bounds";--> statement-breakpoint
 ALTER TABLE "message_attachments" ADD CONSTRAINT "message_attachments_size_bounds" CHECK ("message_attachments"."size_bytes" between 1 and 10485760);--> statement-breakpoint
