@@ -107,10 +107,12 @@ test("a reply still generating when the thread loads settles from the server wit
   await page.goto("/preview/chat-core?workspace=1&mode=High&conversation=" + conversation);
   await page.evaluate(() => { window.loadedOnce = true; });
   const assistant = page.locator(".message-row.assistant");
-  // The claim placeholder reads as the responding indicator, never as a literal "…" answer.
+  // Claim placeholder "…" becomes High's waiting UI (Thinking…), never a markdown answer body.
+  // Do not assert not.toContainText("…") on the whole content — "Thinking…" itself contains "…".
   const responding = assistant.locator(".visually-hidden[role='status']");
   await expect(responding).toHaveText("Nibie is responding");
-  await expect(assistant.locator(".message-content")).not.toContainText("…");
+  await expect(assistant.locator(".response-thinking")).toHaveText("Thinking…");
+  await expect(assistant.locator(".markdown")).toHaveCount(0);
   await expect(assistant.getByRole("button", { name: "Copy response" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Stop response" })).toHaveCount(0);
 
