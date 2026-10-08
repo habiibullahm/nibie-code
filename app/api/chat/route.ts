@@ -39,7 +39,11 @@ import type { UsageKind } from "@/lib/usage/policy";
 import { estimateUsageFromText, withCostEstimate, type GenerationCostEstimate, type ProviderTokenUsage } from "@/lib/usage/provider-usage";
 import { failureCategoryFrom, logGenerationTelemetry } from "@/lib/usage/telemetry";
 import { createDeepResearchChatResponse } from "@/lib/research/chat-stream";
-import { createAutoWebActionChatResponse } from "@/lib/actions/auto-web-response";
+import {
+  createAutoGitHubActionChatResponse,
+  createAutoWebActionChatResponse,
+} from "@/lib/actions/auto-web-response";
+import { decideGitHubRead } from "@/lib/github/routing";
 import { decideWebSearch } from "@/lib/web/routing";
 import type { WebContextInput } from "@/lib/web/types";
 
@@ -330,6 +334,47 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       weeklyUsageReserved: true,
     });
   }
+
+  // GitHub Read (before web): deterministic intent → one allowlisted github.* Action.
+  // Same Cost Guard preflight + Action stream path as web.search. Public repos only.
+  const githubDecision = decideGitHubRead(userMessage.content);
+  if (githubDecision.use) {
+    const weeklyRejected = await rejectWeeklyUsageBeforeStream({
+      supabase,
+      userId: user.id,
+      assistantId: assistant.id,
+      mode,
+      requestId,
+    });
+    if (weeklyRejected) return weeklyRejected;
+    return createAutoGitHubActionChatResponse({
+      request,
+      requestId,
+      requestStartedAt,
+      supabase,
+      userId: user.id,
+      conversationId: conversation.id,
+      roomId: conversation.room_id ?? null,
+      assistant: { id: assistant.id, position: assistant.position },
+      userMessage: { id: userMessage.id, content: userMessage.content, position: userMessage.position },
+      mode,
+      preferences: preferenceState.preferences,
+      preferenceReadFailed: Boolean(preferenceState.error),
+      summary,
+      room,
+      files,
+      attachments,
+      memories,
+      recallOperation,
+      rows,
+      githubActionId: githubDecision.actionId,
+      githubRawInput: githubDecision.input,
+      githubRouteReason: githubDecision.reason,
+      githubActionTitle: githubDecision.title,
+      weeklyUsageReserved: true,
+    });
+  }
+  logInfo("github.route.decided", { requestId, use: false, reason: githubDecision.reason });
 
   // Automatic Web Search V1 runs through Action Runtime (web.search) — allowlisted, audited, stoppable.
   // Deterministic routing decides; no extra LLM round for the Action decision. Fast path (no search) is unchanged.
