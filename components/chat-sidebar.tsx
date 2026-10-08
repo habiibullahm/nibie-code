@@ -326,7 +326,11 @@ function ConversationSearchDialog({
         <Search size={16} aria-hidden="true" />
         <input
           ref={inputRef}
-          type="search"
+          type="text"
+          role="searchbox"
+          enterKeyHint="search"
+          autoComplete="off"
+          spellCheck={false}
           aria-label="Search conversations and messages"
           placeholder="Search conversations and messages…"
           maxLength={SEARCH_MAX_QUERY}

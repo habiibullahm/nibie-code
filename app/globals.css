@@ -175,11 +175,17 @@ a.sidebar-workbench { margin-top: 8px; color: inherit; text-decoration: none; }
 .history-search input { min-width: 0; width: 100%; border: 0; padding: 0; background: transparent; color: var(--text); font: inherit; font-size: 12px; outline: none; }
 .chat-search-input input { font-size: 14px; }
 .history-search input::placeholder { color: var(--text-4); }
-/* Keep a single clear control — hide the native search cancel that duplicates our button. */
+/* Defense in depth if type=search is reintroduced — hide native cancel next to our clear button. */
 .chat-search-input input[type="search"]::-webkit-search-decoration,
 .chat-search-input input[type="search"]::-webkit-search-cancel-button,
 .chat-search-input input[type="search"]::-webkit-search-results-button,
-.chat-search-input input[type="search"]::-webkit-search-results-decoration { display: none; appearance: none; }
+.chat-search-input input[type="search"]::-webkit-search-results-decoration {
+  display: none !important;
+  -webkit-appearance: none;
+  appearance: none;
+  width: 0;
+  height: 0;
+}
 .chat-search-clear { display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 7px; color: var(--text-3); background: transparent; cursor: pointer; flex: none; }
 .chat-search-clear:hover { background: var(--hover); color: var(--text); }
 .history-search-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 9px 18px; color: var(--text-3); font-size: 12px; line-height: 1.5; }
