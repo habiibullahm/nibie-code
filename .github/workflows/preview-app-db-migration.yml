@@ -9,6 +9,8 @@ name: Preview App DB Migration
 #   - PR label `allow-shared-db-migrate` (explicit approval after reviewing SQL), or
 #   - `workflow_dispatch` (manual run).
 # Without that, the job refuses to migrate (and fails when drizzle SQL changed).
+# Label presence is resolved via the Issues Labels API (not only the webhook
+# payload), because synchronize events can omit labels that are already on the PR.
 #
 # Not the PR Guard "Integration DB + RLS" job (local Docker only).
 # Not Supabase GitHub "Preview" branching (skipped here; migrations live in drizzle/).
@@ -32,6 +34,8 @@ on:
 
 permissions:
   contents: read
+  # Live label lookup on synchronize (event payload labels can be empty).
+  pull-requests: read
 
 # Share the queue with Production DB Migration — never overlap or cancel mid-migrate.
 concurrency:
@@ -69,7 +73,11 @@ jobs:
         id: decide
         env:
           EVENT_NAME: ${{ github.event_name }}
-          LABEL_CSV: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          # Prefer API labels below; event payload is a fallback only.
+          LABEL_CSV_EVENT: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           git fetch --no-tags origin main 2>/dev/null || true
@@ -88,6 +96,20 @@ jobs:
             echo "Explicit workflow_dispatch — shared DB migrate allowed."
             exit 0
           fi
+
+          # pull_request synchronize payloads sometimes omit labels even when the
+          # PR already has allow-shared-db-migrate (seen empty LABEL_CSV on 4c773d4).
+          LABEL_CSV="${LABEL_CSV_EVENT:-}"
+          if [[ -n "${PR_NUMBER:-}" ]]; then
+            API_LABELS="$(gh api "repos/${GH_REPO}/issues/${PR_NUMBER}/labels" --paginate --jq '.[].name' 2>/dev/null | paste -sd, - || true)"
+            if [[ -n "${API_LABELS//[$' \t\r\n']/}" ]]; then
+              LABEL_CSV="$API_LABELS"
+              echo "Resolved PR labels via API: ${LABEL_CSV}"
+            else
+              echo "Label API returned empty; falling back to event payload: ${LABEL_CSV_EVENT:-<empty>}"
+            fi
+          fi
+
           if [[ ",${LABEL_CSV}," == *",allow-shared-db-migrate,"* ]]; then
             echo "apply=true" >> "$GITHUB_OUTPUT"
             echo "reason=pr_label" >> "$GITHUB_OUTPUT"
