@@ -1,6 +1,6 @@
 {
-  "id": "a25e0025-atch-5493-g025-0025attach10mb",
-  "prevId": "a24e0024-cost-5392-f024-0024costguard",
+  "id": "a26e0026-role-5594-h026-0026chatroles",
+  "prevId": "a25e0025-atch-5493-g025-0025attach10mb",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -60,6 +60,19 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "chat_role": {
+          "name": "chat_role",
+          "type": "chat_role",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'general'"
+        },
+        "custom_instructions": {
+          "name": "custom_instructions",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -320,7 +333,7 @@
         },
         "message_attachments_size_bounds": {
           "name": "message_attachments_size_bounds",
-          "value": "\"message_attachments\".\"size_bytes\" between 1 and 10485760"
+          "value": "\"message_attachments\".\"size_bytes\" between 1 and 4194304"
         },
         "message_attachments_text_bounds": {
           "name": "message_attachments_text_bounds",
@@ -2783,6 +2796,18 @@
         "web",
         "room_file",
         "attachment"
+      ]
+    },
+    "public.chat_role": {
+      "name": "chat_role",
+      "schema": "public",
+      "values": [
+        "general",
+        "developer",
+        "researcher",
+        "writer",
+        "product_lead",
+        "custom"
       ]
     }
   },
