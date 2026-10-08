@@ -4,7 +4,8 @@ const { createClient, modelOptions } = vi.hoisted(() => ({ createClient: vi.fn()
 vi.mock("@/lib/supabase/server", () => ({ createSupabaseServerClient: createClient }));
 vi.mock("@/lib/ai/registry", () => ({ getModelOptions: modelOptions }));
 
-import { POST } from "../../app/api/chat/attachments/route";
+import { POST as createSession } from "../../app/api/chat/attachments/route";
+import { POST as confirmUpload } from "../../app/api/chat/attachments/confirm/route";
 import { DELETE } from "../../app/api/chat/attachments/[attachmentId]/route";
 import { addUserMessageAction, startConversationAction } from "../../app/actions/chat";
 import { MAX_ATTACHMENT_BYTES } from "../../lib/attachments/limits";
@@ -14,9 +15,10 @@ const owner = "7c1f8a52-4f61-4d7e-9a3e-1b2c3d4e5f60";
 const conversation = "5e9bdcca-9205-4fea-a773-13952bb78c44";
 const message = "b79e56e1-b479-46f4-97d3-30b2e22be90e";
 const attachmentId = "a1b2c3d4-0000-4000-8000-000000000001";
+const uploadId = "c0ffee00-0000-4000-8000-000000000099";
 const signedIn = { getClaims: async () => ({ data: { claims: { sub: owner } }, error: null }) };
+const stagingPath = `${owner}/drafts/${uploadId}/${uploadId}.txt`;
 
-// A chainable query that records its calls and resolves to the next queued result.
 function table(results: unknown[], calls: unknown[][]) {
   const builder: Record<string, unknown> = {};
   for (const method of ["select", "eq", "is", "lt", "insert", "delete", "order", "limit"]) {
@@ -29,77 +31,185 @@ function table(results: unknown[], calls: unknown[][]) {
   return builder;
 }
 
-function upload(file: File | null, extra: Record<string, string> = {}, headers: Record<string, string> = {}) {
-  const form = new FormData();
-  if (file) form.set("file", file);
-  for (const [key, value] of Object.entries(extra)) form.set(key, value);
-  return new Request("http://localhost/api/chat/attachments", { method: "POST", body: form, headers });
+function jsonRequest(url: string, body: unknown, headers: Record<string, string> = {}) {
+  return new Request(url, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...headers },
+    body: JSON.stringify(body),
+  });
 }
 
-describe("POST /api/chat/attachments", () => {
+function sessionClient(options: {
+  fromResults?: Record<string, unknown[]>;
+  signed?: { data: { signedUrl: string; token: string; path: string } | null; error: unknown };
+  download?: { data: Blob | null; error: unknown };
+  removeError?: unknown;
+  calls?: unknown[][];
+} = {}) {
+  const calls = options.calls ?? [];
+  const queues = options.fromResults ?? {};
+  const storage = {
+    createSignedUploadUrl: vi.fn(async () => options.signed ?? { data: { signedUrl: "https://storage.example/sign", token: "tok", path: stagingPath }, error: null }),
+    download: vi.fn(async () => options.download ?? { data: new Blob(["hello"]), error: null }),
+    remove: vi.fn(async () => ({ data: null, error: options.removeError ?? null })),
+  };
+  return {
+    auth: signedIn,
+    from: (name: string) => {
+      calls.push(["from", name]);
+      return table(queues[name] ?? [], calls);
+    },
+    storage: { from: () => storage },
+    _storage: storage,
+    _calls: calls,
+  };
+}
+
+describe("POST /api/chat/attachments (upload session)", () => {
   beforeEach(() => { createClient.mockReset(); });
 
   it("requires a session and a same-origin request", async () => {
-    createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: null, error: new Error("none") }) }, from: vi.fn() });
-    expect((await POST(upload(new File(["x"], "a.txt")))).status).toBe(401);
+    createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: null, error: new Error("none") }) }, from: vi.fn(), storage: { from: vi.fn() } });
+    expect((await createSession(jsonRequest("http://localhost/api/chat/attachments", { name: "a.txt", size: 1, type: "text/plain" }))).status).toBe(401);
     const from = vi.fn();
-    createClient.mockResolvedValue({ auth: signedIn, from });
-    expect((await POST(upload(new File(["x"], "a.txt"), {}, { origin: "https://evil.example" }))).status).toBe(403);
+    createClient.mockResolvedValue({ auth: signedIn, from, storage: { from: vi.fn() } });
+    expect((await createSession(jsonRequest("http://localhost/api/chat/attachments", { name: "a.txt", size: 1, type: "text/plain" }, { origin: "https://evil.example" }))).status).toBe(403);
     expect(from).not.toHaveBeenCalled();
   });
 
   it("never lets a request name an owner, message or conversation", async () => {
     const from = vi.fn();
-    createClient.mockResolvedValue({ auth: signedIn, from });
+    createClient.mockResolvedValue({ auth: signedIn, from, storage: { from: vi.fn() } });
     for (const field of ["user_id", "message_id", "conversation_id", "extracted_text"]) {
-      const response = await POST(upload(new File(["x"], "a.txt"), { [field]: "someone-else" }));
+      const response = await createSession(jsonRequest("http://localhost/api/chat/attachments", { name: "a.txt", size: 1, type: "text/plain", [field]: "someone-else" }));
       expect(response.status).toBe(400);
     }
     expect(from).not.toHaveBeenCalled();
   });
 
-  it("rejects images, unsupported files and oversized uploads before saving", async () => {
-    const from = vi.fn();
-    createClient.mockResolvedValue({ auth: signedIn, from });
-    const image = await POST(upload(new File([Uint8Array.of(0x89, 0x50, 0x4e, 0x47)], "photo.png", { type: "image/png" })));
+  it("rejects images, unsupported files and oversized uploads before signing", async () => {
+    const client = sessionClient();
+    createClient.mockResolvedValue(client);
+    const image = await createSession(jsonRequest("http://localhost/api/chat/attachments", { name: "photo.png", size: 10, type: "image/png" }));
     expect(image.status).toBe(400);
     expect(await image.json()).toEqual({ error: attachmentErrors.image });
-    expect((await POST(upload(new File(["MZ"], "tool.exe")))).status).toBe(400);
-    const declaredTooLarge = await POST(upload(new File(["x"], "a.txt"), {}, { "content-length": String(MAX_ATTACHMENT_BYTES * 2) }));
-    expect(declaredTooLarge.status).toBe(413);
-    expect((await POST(upload(new File([new Uint8Array(MAX_ATTACHMENT_BYTES + 1).fill(65)], "big.txt")))).status).toBe(413);
-    expect(from).not.toHaveBeenCalled();
+    expect((await createSession(jsonRequest("http://localhost/api/chat/attachments", { name: "tool.exe", size: 10, type: "" }))).status).toBe(400);
+    const tooLarge = await createSession(jsonRequest("http://localhost/api/chat/attachments", { name: "a.txt", size: MAX_ATTACHMENT_BYTES + 1, type: "text/plain" }));
+    expect(tooLarge.status).toBe(413);
+    expect(client._storage.createSignedUploadUrl).not.toHaveBeenCalled();
   });
 
-  it("saves the extracted text as an unlinked draft of the session owner and returns metadata only", async () => {
+  it("returns a signed upload ticket without buffering file bytes", async () => {
     const calls: unknown[][] = [];
-    const results = [
-      { data: null, error: null },
-      { data: null, error: null, count: 0 },
-      { data: { id: attachmentId, original_name: "attachment-a.txt", mime_type: "text/plain", size_bytes: 64, truncated: false, page_count: null }, error: null },
-    ];
-    createClient.mockResolvedValue({ auth: signedIn, from: (name: string) => { calls.push(["from", name]); return table(results, calls); } });
-    const response = await POST(upload(new File(["The internal codename for this test document is Cedar Harbor."], "attachment-a.txt", { type: "text/plain" })));
+    const resultsByTable: Record<string, unknown[]> = {
+      attachment_upload_sessions: [
+        { data: [], error: null },
+        { data: { id: uploadId }, error: null },
+      ],
+      message_attachments: [
+        { data: null, error: null },
+        { data: null, error: null, count: 0 },
+      ],
+    };
+    const storage = {
+      createSignedUploadUrl: vi.fn(async () => ({ data: { signedUrl: "https://storage.example/sign?token=tok", token: "tok", path: stagingPath }, error: null })),
+      download: vi.fn(),
+      remove: vi.fn(async () => ({ data: null, error: null })),
+    };
+    createClient.mockResolvedValue({
+      auth: signedIn,
+      from: (name: string) => { calls.push(["from", name]); return table(resultsByTable[name] ?? [], calls); },
+      storage: { from: () => storage },
+    });
+
+    const response = await createSession(jsonRequest("http://localhost/api/chat/attachments", { name: "notes.txt", size: 12, type: "text/plain" }));
     expect(response.status).toBe(201);
     const body = await response.json();
-    expect(body).toEqual({ attachment: { id: attachmentId, name: "attachment-a.txt", mimeType: "text/plain", sizeBytes: 64, truncated: false, pageCount: null } });
+    expect(body.upload).toMatchObject({
+      signedUrl: "https://storage.example/sign?token=tok",
+      token: "tok",
+      contentType: "text/plain",
+    });
+    expect(body.upload.uploadId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(storage.createSignedUploadUrl).toHaveBeenCalledOnce();
+    expect(JSON.stringify(body)).not.toContain("extracted");
+  });
+});
+
+describe("POST /api/chat/attachments/confirm", () => {
+  beforeEach(() => { createClient.mockReset(); });
+
+  it("downloads staging bytes, saves extracted text, and removes the object", async () => {
+    const text = "The internal codename for this test document is Cedar Harbor.";
+    const calls: unknown[][] = [];
+    const resultsByTable: Record<string, unknown[]> = {
+      attachment_upload_sessions: [
+        {
+          data: {
+            id: uploadId,
+            user_id: owner,
+            storage_path: stagingPath,
+            original_name: "attachment-a.txt",
+            mime_type: "text/plain",
+            declared_size: new TextEncoder().encode(text).byteLength,
+            expires_at: new Date(Date.now() + 60_000).toISOString(),
+          },
+          error: null,
+        },
+        { data: null, error: null },
+      ],
+      message_attachments: [
+        { data: null, error: null },
+        { data: null, error: null, count: 0 },
+        { data: { id: attachmentId, original_name: "attachment-a.txt", mime_type: "text/plain", size_bytes: new TextEncoder().encode(text).byteLength, truncated: false, page_count: null }, error: null },
+      ],
+    };
+    const storage = {
+      createSignedUploadUrl: vi.fn(),
+      download: vi.fn(async () => ({ data: new Blob([text]), error: null })),
+      remove: vi.fn(async () => ({ data: null, error: null })),
+    };
+    createClient.mockResolvedValue({
+      auth: signedIn,
+      from: (name: string) => { calls.push(["from", name]); return table(resultsByTable[name] ?? [], calls); },
+      storage: { from: () => storage },
+    });
+
+    const response = await confirmUpload(jsonRequest("http://localhost/api/chat/attachments/confirm", { uploadId }));
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    expect(body).toEqual({ attachment: { id: attachmentId, name: "attachment-a.txt", mimeType: "text/plain", sizeBytes: new TextEncoder().encode(text).byteLength, truncated: false, pageCount: null } });
     expect(JSON.stringify(body)).not.toContain("Cedar Harbor");
-    const insert = calls.find((call) => call[0] === "insert")![1] as Record<string, unknown>;
-    expect(insert).toEqual({ user_id: owner, original_name: "attachment-a.txt", mime_type: "text/plain", size_bytes: new TextEncoder().encode("The internal codename for this test document is Cedar Harbor.").byteLength, extracted_text: "The internal codename for this test document is Cedar Harbor.", truncated: false, page_count: null });
+    expect(storage.download).toHaveBeenCalledWith(stagingPath);
+    expect(storage.remove).toHaveBeenCalledWith([stagingPath]);
+    const insert = calls.find((call) => call[0] === "insert" && typeof call[1] === "object" && call[1] && "extracted_text" in (call[1] as object))![1] as Record<string, unknown>;
+    expect(insert.extracted_text).toBe(text);
     expect(insert).not.toHaveProperty("message_id");
-    expect(calls.filter((call) => call[0] === "from").every((call) => call[1] === "message_attachments")).toBe(true);
   });
 
-  it("explains a full draft list and a database that has no attachments yet", async () => {
-    const fullQueue = [{ data: null, error: null }, { data: null, error: null, count: 20 }];
-    createClient.mockResolvedValue({ auth: signedIn, from: () => table(fullQueue, []) });
-    const full = await POST(upload(new File(["x"], "a.txt")));
-    expect(full.status).toBe(409);
-    const missingQueue = [{ data: null, error: null }, { data: null, error: { code: "PGRST205" } }];
-    createClient.mockResolvedValue({ auth: signedIn, from: () => table(missingQueue, []) });
-    const missing = await POST(upload(new File(["x"], "a.txt")));
-    expect(missing.status).toBe(503);
-    expect(await missing.json()).toEqual({ error: "Attachments aren't available yet." });
+  it("aborts a staging upload without creating a draft", async () => {
+    const calls: unknown[][] = [];
+    const resultsByTable: Record<string, unknown[]> = {
+      attachment_upload_sessions: [
+        { data: { id: uploadId, user_id: owner, storage_path: stagingPath }, error: null },
+        { data: null, error: null },
+      ],
+    };
+    const storage = {
+      createSignedUploadUrl: vi.fn(),
+      download: vi.fn(),
+      remove: vi.fn(async () => ({ data: null, error: null })),
+    };
+    createClient.mockResolvedValue({
+      auth: signedIn,
+      from: (name: string) => { calls.push(["from", name]); return table(resultsByTable[name] ?? [], calls); },
+      storage: { from: () => storage },
+    });
+    const response = await confirmUpload(jsonRequest("http://localhost/api/chat/attachments/confirm", { uploadId, abort: true }));
+    expect(response.status).toBe(200);
+    expect(storage.download).not.toHaveBeenCalled();
+    expect(storage.remove).toHaveBeenCalledWith([stagingPath]);
+    expect(calls.some((call) => call[0] === "insert")).toBe(false);
   });
 });
 

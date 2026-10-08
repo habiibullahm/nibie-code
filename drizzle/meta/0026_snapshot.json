@@ -1,5 +1,5 @@
 {
-  "id": "a25e0025-atch-5493-g025-0025attach10mb",
+  "id": "a26e0026-atch-5594-h026-0026direct10",
   "prevId": "a24e0024-cost-5392-f024-0024costguard",
   "version": "7",
   "dialect": "postgresql",
@@ -2700,6 +2700,122 @@
         }
       },
       "isRLSEnabled": false
+    },
+    "public.attachment_upload_sessions": {
+      "name": "attachment_upload_sessions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "storage_path": {
+          "name": "storage_path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "original_name": {
+          "name": "original_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mime_type": {
+          "name": "mime_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "declared_size": {
+          "name": "declared_size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "attachment_upload_sessions_user_expires_idx": {
+          "name": "attachment_upload_sessions_user_expires_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "attachment_upload_sessions_user_id_users_id_fk": {
+          "name": "attachment_upload_sessions_user_id_users_id_fk",
+          "tableFrom": "attachment_upload_sessions",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "attachment_upload_sessions_name_length": {
+          "name": "attachment_upload_sessions_name_length",
+          "value": "char_length(\"attachment_upload_sessions\".\"original_name\") between 1 and 120 and \"attachment_upload_sessions\".\"original_name\" = btrim(\"attachment_upload_sessions\".\"original_name\")"
+        },
+        "attachment_upload_sessions_mime_allowlist": {
+          "name": "attachment_upload_sessions_mime_allowlist",
+          "value": "\"attachment_upload_sessions\".\"mime_type\" in ('text/plain', 'text/markdown', 'text/csv', 'application/json', 'application/pdf', 'text/x-typescript', 'text/javascript', 'text/x-python', 'text/x-java', 'text/x-go', 'text/x-rust', 'application/sql', 'text/html', 'text/css', 'application/yaml', 'application/xml')"
+        },
+        "attachment_upload_sessions_size_bounds": {
+          "name": "attachment_upload_sessions_size_bounds",
+          "value": "\"attachment_upload_sessions\".\"declared_size\" between 1 and 10485760"
+        },
+        "attachment_upload_sessions_owner_path": {
+          "name": "attachment_upload_sessions_owner_path",
+          "value": "\"attachment_upload_sessions\".\"storage_path\" like (\"attachment_upload_sessions\".\"user_id\")::text || '/%'"
+        }
+      },
+      "isRLSEnabled": true
     }
   },
   "enums": {

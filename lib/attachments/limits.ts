@@ -2,7 +2,8 @@
 
 export const MAX_ATTACHMENTS_PER_MESSAGE = 3;
 
-// Per-file upload cap. Each file is its own upload request.
+// Per-file upload cap. Bytes go client → Supabase Storage (signed URL), then the server downloads to extract text.
+// They must not pass through the Vercel Function request body (≈4.5 MB platform limit).
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 // All attachments of one message together (2× the per-file cap).
@@ -17,6 +18,10 @@ export const MAX_PDF_PAGES = 50;
 // Unsent drafts one account may hold at a time, and how long an abandoned draft is kept.
 export const MAX_DRAFT_ATTACHMENTS = 20;
 export const DRAFT_ATTACHMENT_TTL_MS = 24 * 60 * 60 * 1000;
+
+// Transient staging bucket for direct-to-storage uploads. Objects are removed after extract (or when the session expires).
+export const CHAT_ATTACHMENT_UPLOADS_BUCKET = "chat-attachment-uploads";
+export const ATTACHMENT_UPLOAD_SESSION_TTL_MS = 2 * 60 * 60 * 1000;
 
 export const ATTACHMENT_ACCEPT = ".txt,.md,.markdown,.json,.csv,.pdf,.ts,.tsx,.js,.jsx,.py,.java,.go,.rs,.sql,.html,.css,.yaml,.yml,.xml";
 

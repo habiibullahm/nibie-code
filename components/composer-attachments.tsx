@@ -5,6 +5,7 @@ import { FileText, RotateCcw, X } from "lucide-react";
 import { attachmentTypeLabel, ATTACHMENT_TYPES, formatBytes, MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENTS_TOTAL_BYTES } from "@/lib/attachments/limits";
 import { attachmentErrors, checkAttachmentFile } from "@/lib/attachments/rules";
 import type { AttachmentSummary } from "@/lib/attachments/types";
+import { putFileToSignedUploadUrl } from "@/lib/attachments/upload-client";
 
 export type DraftAttachment = {
   key: string;
@@ -17,12 +18,18 @@ export type DraftAttachment = {
   retryable: boolean;
   file?: File;
   attachment?: AttachmentSummary;
+  uploadId?: string;
 };
 
 const failedUpload = "We couldn't attach that file. Please try again.";
 
-// Draft attachments of the composer. Each file is validated here, uploaded once, and re-checked by the server, which
-// extracts its text and keeps it as an unsent draft until the message that carries it is saved.
+type UploadSessionResponse = {
+  upload?: { uploadId: string; signedUrl: string; token: string; path: string; contentType: string };
+  error?: string;
+};
+
+// Draft attachments of the composer. Each file is validated here, uploaded to Storage via a signed URL, then confirmed
+// so the server can extract text into an unsent draft (original bytes are not kept).
 export function useDraftAttachments() {
   const [items, setItems] = useState<DraftAttachment[]>([]);
   const [notice, setNotice] = useState("");
@@ -36,19 +43,81 @@ export function useDraftAttachments() {
   const upload = useCallback(async (key: string, file: File) => {
     const controller = new AbortController();
     controllers.current.set(key, controller);
-    const body = new FormData();
-    body.set("file", file);
+    let uploadId: string | undefined;
     try {
-      const response = await fetch("/api/chat/attachments", { method: "POST", body, signal: controller.signal });
-      const payload = await response.json().catch(() => null) as { attachment?: AttachmentSummary; error?: string } | null;
+      const sessionResponse = await fetch("/api/chat/attachments", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: file.name, size: file.size, type: file.type }),
+        signal: controller.signal,
+      });
+      const sessionPayload = await sessionResponse.json().catch(() => null) as UploadSessionResponse | null;
       if (controller.signal.aborted) return;
-      if (response.ok && payload?.attachment) {
-        update(key, { status: "ready", attachment: payload.attachment, error: undefined, file: undefined, name: payload.attachment.name, typeLabel: attachmentTypeLabel(payload.attachment.mimeType) });
-      } else {
-        update(key, { status: "error", error: payload?.error ?? failedUpload, retryable: response.status >= 500 || response.status === 409 });
+      if (!sessionResponse.ok || !sessionPayload?.upload) {
+        update(key, {
+          status: "error",
+          error: sessionPayload?.error ?? failedUpload,
+          retryable: sessionResponse.status >= 500 || sessionResponse.status === 409,
+        });
+        return;
       }
-    } catch {
-      if (!controller.signal.aborted) update(key, { status: "error", error: failedUpload, retryable: true });
+      uploadId = sessionPayload.upload.uploadId;
+      update(key, { uploadId });
+
+      const put = await putFileToSignedUploadUrl(sessionPayload.upload.signedUrl, file, controller.signal);
+      if (controller.signal.aborted) {
+        void fetch("/api/chat/attachments/confirm", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ uploadId, abort: true }),
+        }).catch(() => undefined);
+        return;
+      }
+      if (!put.ok) {
+        void fetch("/api/chat/attachments/confirm", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ uploadId, abort: true }),
+        }).catch(() => undefined);
+        update(key, { status: "error", error: failedUpload, retryable: true });
+        return;
+      }
+
+      const confirmResponse = await fetch("/api/chat/attachments/confirm", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ uploadId }),
+        signal: controller.signal,
+      });
+      const confirmPayload = await confirmResponse.json().catch(() => null) as { attachment?: AttachmentSummary; error?: string } | null;
+      if (controller.signal.aborted) return;
+      if (confirmResponse.ok && confirmPayload?.attachment) {
+        update(key, {
+          status: "ready",
+          attachment: confirmPayload.attachment,
+          error: undefined,
+          file: undefined,
+          uploadId: undefined,
+          name: confirmPayload.attachment.name,
+          typeLabel: attachmentTypeLabel(confirmPayload.attachment.mimeType),
+        });
+      } else {
+        update(key, {
+          status: "error",
+          error: confirmPayload?.error ?? failedUpload,
+          retryable: confirmResponse.status >= 500 || confirmResponse.status === 409,
+        });
+      }
+    } catch (error) {
+      if (uploadId) {
+        void fetch("/api/chat/attachments/confirm", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ uploadId, abort: true }),
+        }).catch(() => undefined);
+      }
+      if (controller.signal.aborted || (error instanceof DOMException && error.name === "AbortError")) return;
+      update(key, { status: "error", error: failedUpload, retryable: true });
     } finally {
       if (controllers.current.get(key) === controller) controllers.current.delete(key);
     }
@@ -94,7 +163,7 @@ export function useDraftAttachments() {
   const retry = useCallback((key: string) => {
     const item = items.find((entry) => entry.key === key);
     if (!item?.file || !item.retryable) return;
-    update(key, { status: "uploading", error: undefined });
+    update(key, { status: "uploading", error: undefined, uploadId: undefined });
     void upload(key, item.file);
   }, [items, update, upload]);
 

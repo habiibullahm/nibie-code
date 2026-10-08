@@ -12,15 +12,50 @@ async function workspace(page: Page, options: { failFirstUpload?: boolean } = {}
   const removed: string[] = [];
   const sends: unknown[][] = [];
   let failures = options.failFirstUpload ? 1 : 0;
-  await page.route("**/api/chat/attachments", async (route) => {
-    const body = route.request().postDataBuffer()?.toString("latin1") ?? "";
-    const name = /filename="([^"]+)"/.exec(body)?.[1] ?? "file";
+  const sessions = new Map<string, { name: string; sizeBytes: number }>();
+  await page.route("**/storage.example/**", async (route) => { await route.fulfill({ status: 200, body: "ok" }); });
+  await page.route("**/api/chat/attachments/confirm", async (route) => {
+    const payload = route.request().postDataJSON() as { uploadId?: string; abort?: boolean };
+    if (payload.abort) return route.fulfill({ json: { ok: true } });
+    const session = payload.uploadId ? sessions.get(payload.uploadId) : undefined;
+    if (!session) return route.fulfill({ status: 409, json: { error: "An attachment is no longer available. Remove it and attach it again." } });
     if (failures > 0) { failures -= 1; return route.fulfill({ status: 503, json: { error: "We couldn't attach that file. Please try again." } }); }
-    uploads.push(name);
-    const attachment: Saved = { id: crypto.randomUUID(), name, mimeType: name.endsWith(".md") ? "text/markdown" : "text/plain", sizeBytes: 62, truncated: false, pageCount: null };
+    uploads.push(session.name);
+    sessions.delete(payload.uploadId!);
+    const attachment: Saved = {
+      id: crypto.randomUUID(),
+      name: session.name,
+      mimeType: session.name.endsWith(".md") ? "text/markdown" : "text/plain",
+      sizeBytes: session.sizeBytes,
+      truncated: false,
+      pageCount: null,
+    };
     await route.fulfill({ status: 201, json: { attachment } });
   });
-  await page.route("**/api/chat/attachments/*", async (route) => { removed.push(route.request().url().split("/").pop()!); await route.fulfill({ json: {} }); });
+  await page.route("**/api/chat/attachments", async (route) => {
+    if (route.request().url().includes("/confirm")) return route.fallback();
+    const payload = route.request().postDataJSON() as { name?: string; size?: number };
+    const name = payload.name ?? "file";
+    const uploadId = crypto.randomUUID();
+    sessions.set(uploadId, { name, sizeBytes: Number(payload.size) || 62 });
+    await route.fulfill({
+      status: 201,
+      json: {
+        upload: {
+          uploadId,
+          path: `user/drafts/${uploadId}/${uploadId}.txt`,
+          token: "tok",
+          signedUrl: `https://storage.example/sign/${uploadId}`,
+          contentType: name.endsWith(".md") ? "text/markdown" : "text/plain",
+        },
+      },
+    });
+  });
+  await page.route("**/api/chat/attachments/*", async (route) => {
+    if (route.request().url().includes("/confirm")) return route.fallback();
+    removed.push(route.request().url().split("/").pop()!);
+    await route.fulfill({ json: {} });
+  });
   await page.route("**/preview/chat-core**", async (route) => {
     if (route.request().method() !== "POST") return route.continue();
     if (!route.request().headers()["next-action"]) return route.abort();
