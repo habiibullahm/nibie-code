@@ -206,7 +206,11 @@ describe("Actions runtime", () => {
     expect(pipelineMock.runWebSearchPipeline).not.toHaveBeenCalled();
     expect(supabase.rpc).toHaveBeenCalledWith(
       "insert_action_run",
-      expect.objectContaining({ p_action_id: WEB_SEARCH_ACTION_ID, p_status: "running" }),
+      expect.objectContaining({
+        p_user_id: "11111111-1111-4111-8111-111111111111",
+        p_action_id: WEB_SEARCH_ACTION_ID,
+        p_status: "running",
+      }),
     );
   });
 

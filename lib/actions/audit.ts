@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ActionCapability, ActionErrorCode, ActionRunStatus } from "@/lib/actions/types";
+import { createActionAuditClient } from "@/lib/supabase/service-role";
 
 const SECRET_KEY =
   /^(?:.*(?:api[_-]?key|access[_-]?token|refresh[_-]?token|secret|password|passwd|authorization|cookie|credential|bearer|private[_-]?key).*)$/i;
@@ -54,6 +55,7 @@ function redactValue(value: unknown): unknown {
 }
 
 export type InsertActionRunInput = {
+  /** Preferred persistence client; production should pass the service-role audit client. */
   supabase: SupabaseClient;
   userId: string;
   roomId?: string | null;
@@ -73,13 +75,24 @@ export type ActionRunRow = {
 };
 
 /**
- * Insert a new action_runs row via server-controlled RPC (non-terminal statuses only).
+ * Resolve the PostgREST client used for audit RPCs.
+ * Prefer SUPABASE_SERVICE_ROLE_KEY; fall back to the caller-supplied client (tests).
+ */
+export function resolveActionAuditClient(preferred?: SupabaseClient): SupabaseClient | null {
+  return createActionAuditClient() ?? preferred ?? null;
+}
+
+/**
+ * Insert a new action_runs row via service-role RPC (non-terminal statuses only).
  * Soft-fails for callers that still need a truthful in-memory outcome when persistence is down.
  */
 export async function insertActionRun(input: InsertActionRunInput): Promise<ActionRunRow | null> {
+  const client = resolveActionAuditClient(input.supabase);
+  if (!client) return null;
   const status = input.status ?? "running";
-  const { data, error } = await input.supabase
+  const { data, error } = await client
     .rpc("insert_action_run", {
+      p_user_id: input.userId,
       p_conversation_id: input.conversationId,
       p_action_id: input.actionId,
       p_capability: input.capability,
@@ -103,9 +116,12 @@ export type CompleteActionRunInput = {
   metadata?: Record<string, unknown> | null;
 };
 
-/** Finalize a non-terminal action_runs row via server-controlled RPC. */
+/** Finalize a non-terminal action_runs row via service-role RPC. */
 export async function completeActionRun(input: CompleteActionRunInput): Promise<boolean> {
-  const { data, error } = await input.supabase.rpc("complete_action_run", {
+  const client = resolveActionAuditClient(input.supabase);
+  if (!client) return false;
+  const { data, error } = await client.rpc("complete_action_run", {
+    p_user_id: input.userId,
     p_run_id: input.runId,
     p_status: input.status,
     p_error_code: input.errorCode ?? null,

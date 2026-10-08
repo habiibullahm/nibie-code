@@ -30,6 +30,10 @@ What's new in Nibie.
 - Nibie's answers are now substantive by default, with enough explanation, steps, examples, or trade-offs to understand or act without asking again, and no padding. Short follow-ups like a company name or tech stack refine your current question, and Nibie won't start a quiz or mock interview unless you ask for one. Settings → Response depth offers Concise, Default, and Detailed, and a request in your message always wins.
 - Nibie answers are easier to scan, with headings, steps, comparison tables, or code when they help.
 
+### Security
+
+- Action audit records can no longer be forged from a signed-in browser session; only Nibie's server Action Runtime can write them.
+
 ### Fixed
 
 - Web Search and Deep Research no longer lose a valid weekly credit reservation between the allowance check and the reply, which could block an answer even when credits remained.

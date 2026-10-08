@@ -25,7 +25,18 @@ describe("Supabase row-level security", () => {
     return sql.begin(async (tx) => {
       await tx`set local role authenticated`;
       await tx`select set_config('request.jwt.claim.sub', ${userId}, true)`;
+      await tx`select set_config('request.jwt.claim.role', 'authenticated', true)`;
       await tx`select set_config('request.jwt.claims', ${JSON.stringify({ sub: userId, role: "authenticated" })}, true)`;
+      return callback(tx);
+    });
+  }
+
+  /** Trusted Action Runtime boundary: service_role JWT (not a browser user). */
+  async function asServiceRole<T>(callback: (tx: TransactionSql) => Promise<T>) {
+    return sql.begin(async (tx) => {
+      await tx`set local role service_role`;
+      await tx`select set_config('request.jwt.claim.role', 'service_role', true)`;
+      await tx`select set_config('request.jwt.claims', ${JSON.stringify({ role: "service_role" })}, true)`;
       return callback(tx);
     });
   }
@@ -66,6 +77,8 @@ describe("Supabase row-level security", () => {
     await sql`drop type if exists public.weekly_usage_mode cascade`;
     await sql`drop function if exists public.insert_action_run(uuid, text, text, text, text, uuid, uuid, jsonb) cascade`;
     await sql`drop function if exists public.complete_action_run(uuid, text, text, jsonb) cascade`;
+    await sql`drop function if exists public.insert_action_run(uuid, uuid, text, text, text, text, uuid, uuid, jsonb) cascade`;
+    await sql`drop function if exists public.complete_action_run(uuid, uuid, text, text, jsonb) cascade`;
     await sql`drop table if exists public.action_runs cascade`;
     await sql`drop table if exists public.message_research cascade`;
     await sql`drop table if exists public.message_sources cascade`;
@@ -105,8 +118,16 @@ describe("Supabase row-level security", () => {
     await sql`create or replace function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$`;
     await sql`do $$ begin create role authenticated nologin; exception when duplicate_object then null; end $$`;
     await sql`do $$ begin create role anon nologin; exception when duplicate_object then null; end $$`;
+    await sql`do $$ begin create role service_role nologin bypassrls; exception when duplicate_object then null; end $$`;
     await sql`grant usage on schema auth to authenticated`;
+    await sql`grant usage on schema public to service_role`;
     await sql`insert into auth.users (id) values (${userA})`;
+    await sql`create or replace function auth.role() returns text language sql stable as $$
+      select coalesce(
+        nullif(current_setting('request.jwt.claim.role', true), ''),
+        nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role'
+      )
+    $$`;
 
     // Exercise a preinstalled Supabase-style extension without relocating it.
     await sql`create schema if not exists extensions`;
@@ -1080,6 +1101,18 @@ describe("Supabase row-level security", () => {
       { relrowsecurity: true, relforcerowsecurity: true },
     ]);
 
+    // Browser-equivalent authenticated role must not EXECUTE audit-write RPCs.
+    expect(await sql`
+      select
+        has_function_privilege('authenticated', 'public.insert_action_run(uuid, uuid, text, text, text, text, uuid, uuid, jsonb)', 'execute') as insert_exec,
+        has_function_privilege('authenticated', 'public.complete_action_run(uuid, uuid, text, text, jsonb)', 'execute') as complete_exec
+    `).toEqual([{ insert_exec: false, complete_exec: false }]);
+    expect(await sql`
+      select
+        has_function_privilege('service_role', 'public.insert_action_run(uuid, uuid, text, text, text, text, uuid, uuid, jsonb)', 'execute') as insert_exec,
+        has_function_privilege('service_role', 'public.complete_action_run(uuid, uuid, text, text, jsonb)', 'execute') as complete_exec
+    `).toEqual([{ insert_exec: true, complete_exec: true }]);
+
     await sql`insert into auth.users (id) values (${owner}), (${stranger})`;
     await sql`insert into public.conversations (id, user_id, title) values
       (${thread}, ${owner}, 'Actions owner'),
@@ -1087,34 +1120,48 @@ describe("Supabase row-level security", () => {
     await sql`insert into public.messages (id, conversation_id, user_id, role, content, status, position) values
       (${assistantOwn}, ${thread}, ${owner}, 'assistant', 'reply', 'complete', 1)`;
 
-    // Trusted backend path: insert non-terminal via RPC, then complete.
-    const inserted = await asUser(owner, (tx) => tx`
+    // Browser user calling either audit RPC directly is rejected (permission denied on EXECUTE).
+    await expect(asUser(owner, (tx) => tx`
       select * from public.insert_action_run(
-        ${thread}::uuid, 'web.search', 'read', '{"query":"latest Node.js"}', 'running',
+        ${owner}::uuid, ${thread}::uuid, 'web.search', 'read', '{"query":"forged via rpc"}', 'running',
+        null::uuid, ${assistantOwn}::uuid, null::jsonb
+      )
+    `)).rejects.toThrow(/permission denied/i);
+    await expect(asUser(owner, (tx) => tx`
+      select public.complete_action_run(${randomUUID()}::uuid, ${randomUUID()}::uuid, 'completed', null, null::jsonb) as ok
+    `)).rejects.toThrow(/permission denied/i);
+
+    // Trusted Action Runtime path: service_role insert + complete with explicit owner.
+    const inserted = await asServiceRole((tx) => tx`
+      select * from public.insert_action_run(
+        ${owner}::uuid, ${thread}::uuid, 'web.search', 'read', '{"query":"latest Node.js"}', 'running',
         null::uuid, ${assistantOwn}::uuid, null::jsonb
       )
     `);
     expect(inserted).toHaveLength(1);
     const runCompleted = inserted[0].id as string;
-    await expect(asUser(owner, (tx) => tx`
-      select public.complete_action_run(${runCompleted}::uuid, 'completed', null, ${JSON.stringify({ itemCount: 1 })}::jsonb) as ok
+    expect(inserted[0].status).toBe("running");
+    const [owned] = await sql`select user_id from public.action_runs where id = ${runCompleted}`;
+    expect(owned.user_id).toBe(owner);
+    await expect(asServiceRole((tx) => tx`
+      select public.complete_action_run(${owner}::uuid, ${runCompleted}::uuid, 'completed', null, ${JSON.stringify({ itemCount: 1 })}::jsonb) as ok
     `)).resolves.toEqual([{ ok: true }]);
 
-    const failedInsert = await asUser(owner, (tx) => tx`
+    const failedInsert = await asServiceRole((tx) => tx`
       select * from public.insert_action_run(
-        ${thread}::uuid, 'web.search', 'read', '{"query":"news"}', 'running', null::uuid, ${assistantOwn}::uuid, null::jsonb
+        ${owner}::uuid, ${thread}::uuid, 'web.search', 'read', '{"query":"news"}', 'running', null::uuid, ${assistantOwn}::uuid, null::jsonb
       )
     `);
     const runFailed = failedInsert[0].id as string;
-    await asUser(owner, (tx) => tx`select public.complete_action_run(${runFailed}::uuid, 'failed', 'execution_failed', null::jsonb)`);
+    await asServiceRole((tx) => tx`select public.complete_action_run(${owner}::uuid, ${runFailed}::uuid, 'failed', 'execution_failed', null::jsonb)`);
 
-    const cancelledInsert = await asUser(owner, (tx) => tx`
+    const cancelledInsert = await asServiceRole((tx) => tx`
       select * from public.insert_action_run(
-        ${thread}::uuid, 'web.search', 'read', '{"query":"stopped"}', 'running', null::uuid, ${assistantOwn}::uuid, null::jsonb
+        ${owner}::uuid, ${thread}::uuid, 'web.search', 'read', '{"query":"stopped"}', 'running', null::uuid, ${assistantOwn}::uuid, null::jsonb
       )
     `);
     const runCancelled = cancelledInsert[0].id as string;
-    await asUser(owner, (tx) => tx`select public.complete_action_run(${runCancelled}::uuid, 'cancelled', 'aborted', null::jsonb)`);
+    await asServiceRole((tx) => tx`select public.complete_action_run(${owner}::uuid, ${runCancelled}::uuid, 'cancelled', 'aborted', null::jsonb)`);
 
     // Superuser seed for stranger row (simulates another owner's server write).
     await sql`
@@ -1152,22 +1199,22 @@ describe("Supabase row-level security", () => {
       delete from public.action_runs where id = ${runCompleted} returning id
     `)).rejects.toThrow(/permission denied/i);
 
-    // RPC must not accept a forged terminal insert status.
-    await expect(asUser(owner, (tx) => tx`
+    // Service-role RPC must not accept a forged terminal insert status.
+    await expect(asServiceRole((tx) => tx`
       select * from public.insert_action_run(
-        ${thread}::uuid, 'web.search', 'read', '{"query":"x"}', 'completed', null::uuid, null::uuid, null::jsonb
+        ${owner}::uuid, ${thread}::uuid, 'web.search', 'read', '{"query":"x"}', 'completed', null::uuid, null::uuid, null::jsonb
       )
     `)).rejects.toThrow();
 
     // Completing an already-terminal row is a no-op (append-only).
-    await expect(asUser(owner, (tx) => tx`
-      select public.complete_action_run(${runCompleted}::uuid, 'failed', 'x', null::jsonb) as ok
+    await expect(asServiceRole((tx) => tx`
+      select public.complete_action_run(${owner}::uuid, ${runCompleted}::uuid, 'failed', 'x', null::jsonb) as ok
     `)).resolves.toEqual([{ ok: false }]);
 
     // Reject overlong summaries at the DB check when over 240 chars.
-    await expect(asUser(owner, (tx) => tx`
+    await expect(asServiceRole((tx) => tx`
       select * from public.insert_action_run(
-        ${thread}::uuid, 'web.search', 'read', ${"x".repeat(241)}, 'running', null::uuid, null::uuid, null::jsonb
+        ${owner}::uuid, ${thread}::uuid, 'web.search', 'read', ${"x".repeat(241)}, 'running', null::uuid, null::uuid, null::jsonb
       )
     `)).rejects.toThrow();
 
@@ -1177,14 +1224,14 @@ describe("Supabase row-level security", () => {
     await sql`insert into public.rooms (id, user_id, name) values (${foreignRoom}, ${stranger}, 'Other room')`;
     await sql`insert into public.messages (id, conversation_id, user_id, role, content, status, position) values
       (${foreignMessage}, ${strangerThread}, ${stranger}, 'assistant', 'x', 'complete', 1)`;
-    await expect(asUser(owner, (tx) => tx`
+    await expect(asServiceRole((tx) => tx`
       select * from public.insert_action_run(
-        ${thread}::uuid, 'web.search', 'read', '{"query":"x"}', 'running', ${foreignRoom}::uuid, null::uuid, null::jsonb
+        ${owner}::uuid, ${thread}::uuid, 'web.search', 'read', '{"query":"x"}', 'running', ${foreignRoom}::uuid, null::uuid, null::jsonb
       )
     `)).rejects.toThrow();
-    await expect(asUser(owner, (tx) => tx`
+    await expect(asServiceRole((tx) => tx`
       select * from public.insert_action_run(
-        ${thread}::uuid, 'web.search', 'read', '{"query":"x"}', 'running', null::uuid, ${foreignMessage}::uuid, null::jsonb
+        ${owner}::uuid, ${thread}::uuid, 'web.search', 'read', '{"query":"x"}', 'running', null::uuid, ${foreignMessage}::uuid, null::jsonb
       )
     `)).rejects.toThrow();
   });
