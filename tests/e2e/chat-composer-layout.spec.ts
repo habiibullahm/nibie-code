@@ -216,6 +216,9 @@ test("expand and collapse preserve draft, focus, selection, and send reset", asy
   await expand.click();
   await expect(page.getByRole("button", { name: "Collapse composer" })).toBeVisible();
   await page.getByRole("button", { name: "Collapse composer" }).click();
+  // Collapse restores selection on the next animation frame; wait past that before choosing a range to assert.
+  await expect(textarea).toBeFocused();
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   await textarea.evaluate((element: HTMLTextAreaElement) => {
     element.focus();
     element.setSelectionRange(12, 24);
