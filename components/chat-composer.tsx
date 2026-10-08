@@ -218,7 +218,7 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
     {attachmentPanel}
     <div ref={composerRef} className={`composer${expanded ? " is-expanded" : ""}${dragging ? " is-dropping" : ""}`} role={expanded ? "dialog" : undefined} aria-modal={expanded ? "true" : undefined} aria-label={expanded ? "Expanded message composer" : undefined} onKeyDown={handleExpandedKeyDown}>
       <form ref={formRef} className={`composer-form${hasAttachments ? " has-attachments" : ""}${isActive ? " is-active" : ""}`} onSubmit={(event) => { event.preventDefault(); submit(); }}>
-        {expanded ? <div className="composer-expanded-header"><span className="composer-expanded-label">Message</span><button className="composer-icon" type="button" aria-label="Collapse composer" title="Collapse composer" aria-expanded="true" onClick={toggleExpanded}><Minimize2 size={16} aria-hidden="true" /></button></div> : null}
+        {expanded ? <div className="composer-expanded-header"><span className="composer-expanded-label">Message</span><button className="composer-icon" type="button" aria-label="Collapse composer" title="Collapse composer" aria-expanded="true" onMouseDown={(event) => event.preventDefault()} onClick={toggleExpanded}><Minimize2 size={16} aria-hidden="true" /></button></div> : null}
         <div className="composer-content">
           <ComposerAttachments items={attachments.items} notice={attachments.notice} disabled={sending} onRemove={attachments.remove} onRetry={attachments.retry} />
           <textarea ref={textareaRef} aria-label="Message Nibie" placeholder={centered ? "Ask Nibie anything..." : "Reply to Nibie..."} enterKeyHint={enterToSend ? "send" : "enter"} value={draft} rows={1} onChange={(event) => { expandedBeforeClearRef.current = null; setDraft(event.target.value); }} onKeyDown={handleKeyDown} />
@@ -234,7 +234,7 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
           </span>
           <div className="composer-actions">
             <ContextIndicator diagnostics={diagnostics} onEditProfile={onEditProfile} />
-            {!expanded && canExpand ? <button className="composer-icon composer-expand" type="button" aria-label="Expand composer" title="Expand composer" aria-expanded="false" onClick={toggleExpanded}><Maximize2 size={16} aria-hidden="true" /></button> : null}
+            {!expanded && canExpand ? <button className="composer-icon composer-expand" type="button" aria-label="Expand composer" title="Expand composer" aria-expanded="false" onMouseDown={(event) => event.preventDefault()} onClick={toggleExpanded}><Maximize2 size={16} aria-hidden="true" /></button> : null}
             {streaming ? <button key="stop" className="send-button" type="button" aria-label="Stop response" onClick={onStop}><X size={18} /></button> : <button key="send" className="send-button" type="submit" aria-label="Send message" disabled={!draft.trim() || sending || attachmentsBlocked}>{sending ? <span className="send-spinner" /> : <ArrowUp size={18} strokeWidth={2.3} />}</button>}
           </div>
         </div>
