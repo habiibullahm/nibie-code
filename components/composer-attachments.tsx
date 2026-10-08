@@ -35,7 +35,7 @@ async function cancelStaging(uploadId: string) {
   }).catch(() => undefined);
 }
 
-// Draft attachments: validate → upload-init → TUS to Storage → finalize (extract text; drop staging bytes).
+// Draft attachments: validate → upload-init → TUS staging → finalize (extract text, keep durable original, drop staging).
 export function useDraftAttachments() {
   const [items, setItems] = useState<DraftAttachment[]>([]);
   const [notice, setNotice] = useState("");

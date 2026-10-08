@@ -17,7 +17,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ atta
     if (origin && origin !== new URL(request.url).origin) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
     const parsed = validateConversationId((await context.params).attachmentId);
     if (!parsed.success) return NextResponse.json({ error: "Choose a valid attachment." }, { status: 400 });
-    const removed = await deleteDraftAttachment(supabase as unknown as AttachmentClient, parsed.data);
+    const removed = await deleteDraftAttachment(supabase as unknown as AttachmentClient, user.id, parsed.data);
     return removed.error ? NextResponse.json({ error: removed.error }, { status: 503 }) : NextResponse.json({});
   } catch {
     return NextResponse.json({ error: "We couldn't remove that attachment. Please try again." }, { status: 503 });
