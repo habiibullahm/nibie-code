@@ -40,12 +40,13 @@ export type UsageGuardRejected = {
  */
 export async function reserveUsageBeforeGeneration(input: {
   supabase: SupabaseClient;
+  userId: string;
   generationId: string;
   mode: ChatModel;
   usageKind: UsageKind;
   requestId: string;
 }): Promise<UsageGuardOk | UsageGuardRejected> {
-  const { supabase, generationId, mode, usageKind, requestId } = input;
+  const { supabase, userId, generationId, mode, usageKind, requestId } = input;
   const expectedCredits = creditCostFor(mode, usageKind);
 
   const releaseCredits = async () => {
@@ -58,7 +59,7 @@ export async function reserveUsageBeforeGeneration(input: {
   };
 
   const releaseAll = async () => {
-    await releaseGenerationSpend({ supabase, generationId, requestId });
+    await releaseGenerationSpend({ supabase, userId, generationId, requestId });
     await releaseCredits();
   };
 
@@ -146,6 +147,7 @@ export async function reserveUsageBeforeGeneration(input: {
 
   const spend = await reserveGenerationSpend({
     supabase,
+    userId,
     generationId,
     mode,
     usageKind,
@@ -172,17 +174,12 @@ export async function reserveUsageBeforeGeneration(input: {
   };
 }
 
-export async function releaseUsageHold(input: {
+export async function releaseWeeklyUsageHold(input: {
   supabase: SupabaseClient;
   generationId: string;
   requestId: string;
   logicalMode: ChatModel;
 }) {
-  await releaseGenerationSpend({
-    supabase: input.supabase,
-    generationId: input.generationId,
-    requestId: input.requestId,
-  });
   try {
     const { error } = await input.supabase.rpc("release_weekly_ai_usage", { p_generation_id: input.generationId });
     if (error) {
@@ -199,6 +196,22 @@ export async function releaseUsageHold(input: {
       code: operationalCodes.requestFailed,
     });
   }
+}
+
+export async function releaseUsageHold(input: {
+  supabase: SupabaseClient;
+  userId: string;
+  generationId: string;
+  requestId: string;
+  logicalMode: ChatModel;
+}) {
+  await releaseGenerationSpend({
+    supabase: input.supabase,
+    userId: input.userId,
+    generationId: input.generationId,
+    requestId: input.requestId,
+  });
+  await releaseWeeklyUsageHold(input);
 }
 
 export async function startWeeklyUsage(input: {

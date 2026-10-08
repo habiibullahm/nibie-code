@@ -130,7 +130,15 @@ BEGIN
 END;
 $$;--> statement-breakpoint
 
+-- Dollar spend accounting is service_role only (same class as action audit).
+-- Ordinary authenticated clients must not EXECUTE these RPCs with caller-controlled limits/amounts.
+-- Owner association is the explicit p_user_id supplied by the trusted server boundary.
+DROP FUNCTION IF EXISTS public.reserve_ai_spend(uuid, bigint, bigint, bigint);--> statement-breakpoint
+DROP FUNCTION IF EXISTS public.finalize_ai_spend(uuid, bigint);--> statement-breakpoint
+DROP FUNCTION IF EXISTS public.release_ai_spend(uuid);--> statement-breakpoint
+
 CREATE OR REPLACE FUNCTION public.reserve_ai_spend(
+  p_user_id uuid,
   p_generation_id uuid,
   p_reserved_micros bigint,
   p_user_daily_limit_micros bigint,
@@ -139,7 +147,6 @@ CREATE OR REPLACE FUNCTION public.reserve_ai_spend(
 RETURNS TABLE(accepted boolean, reserved_micros bigint, user_remaining_micros bigint, global_remaining_micros bigint)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 DECLARE
-  v_user_id uuid := (SELECT auth.uid());
   v_now timestamptz := clock_timestamp();
   v_day date := (v_now AT TIME ZONE 'UTC')::date;
   v_hour timestamptz := date_trunc('hour', v_now AT TIME ZONE 'UTC') AT TIME ZONE 'UTC';
@@ -147,8 +154,11 @@ DECLARE
   v_global public.ai_spend_global_hourly;
   v_reservation public.ai_spend_reservations;
 BEGIN
-  IF v_user_id IS NULL OR p_generation_id IS NULL THEN
-    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Authenticated generation required.';
+  IF auth.role() IS DISTINCT FROM 'service_role' THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Service role required for AI spend writes.';
+  END IF;
+  IF p_user_id IS NULL OR p_generation_id IS NULL THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Spend owner and generation required.';
   END IF;
   IF p_reserved_micros IS NULL OR p_reserved_micros <= 0 THEN
     RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'Reserved spend must be positive.';
@@ -159,15 +169,15 @@ BEGIN
   END IF;
 
   PERFORM 1 FROM public.messages m
-    WHERE m.id = p_generation_id AND m.user_id = v_user_id AND m.role = 'assistant' AND m.status = 'streaming'
+    WHERE m.id = p_generation_id AND m.user_id = p_user_id AND m.role = 'assistant' AND m.status = 'streaming'
     FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION USING ERRCODE = 'PT404', MESSAGE = 'Generation unavailable.'; END IF;
 
   SELECT r.* INTO v_reservation FROM public.ai_spend_reservations r
     WHERE r.generation_id = p_generation_id FOR UPDATE;
   IF FOUND THEN
-    IF v_reservation.user_id <> v_user_id THEN RAISE EXCEPTION USING ERRCODE = 'PT404', MESSAGE = 'Generation unavailable.'; END IF;
-    SELECT u.* INTO v_user FROM public.ai_spend_user_daily u WHERE u.user_id = v_user_id AND u.day_utc = v_reservation.day_utc;
+    IF v_reservation.user_id <> p_user_id THEN RAISE EXCEPTION USING ERRCODE = 'PT404', MESSAGE = 'Generation unavailable.'; END IF;
+    SELECT u.* INTO v_user FROM public.ai_spend_user_daily u WHERE u.user_id = p_user_id AND u.day_utc = v_reservation.day_utc;
     SELECT g.* INTO v_global FROM public.ai_spend_global_hourly g WHERE g.hour_utc = v_reservation.hour_utc;
     RETURN QUERY SELECT v_reservation.released_at IS NULL AND v_reservation.finalized_at IS NULL,
       CASE WHEN v_reservation.released_at IS NULL THEN v_reservation.reserved_micros ELSE 0 END,
@@ -183,14 +193,14 @@ BEGIN
   END IF;
 
   INSERT INTO public.ai_spend_user_daily AS u (user_id, day_utc, micros_used)
-    VALUES (v_user_id, v_day, p_reserved_micros)
+    VALUES (p_user_id, v_day, p_reserved_micros)
     ON CONFLICT (user_id, day_utc) DO UPDATE SET
       micros_used = u.micros_used + EXCLUDED.micros_used,
       updated_at = v_now
     WHERE u.micros_used + EXCLUDED.micros_used <= p_user_daily_limit_micros
     RETURNING u.* INTO v_user;
   IF NOT FOUND THEN
-    SELECT u.* INTO v_user FROM public.ai_spend_user_daily u WHERE u.user_id = v_user_id AND u.day_utc = v_day;
+    SELECT u.* INTO v_user FROM public.ai_spend_user_daily u WHERE u.user_id = p_user_id AND u.day_utc = v_day;
     SELECT g.* INTO v_global FROM public.ai_spend_global_hourly g WHERE g.hour_utc = v_hour;
     RETURN QUERY SELECT false, 0::bigint,
       GREATEST(0, p_user_daily_limit_micros - COALESCE(v_user.micros_used, 0)),
@@ -210,8 +220,8 @@ BEGIN
     UPDATE public.ai_spend_user_daily AS u SET
       micros_used = u.micros_used - p_reserved_micros,
       updated_at = v_now
-      WHERE u.user_id = v_user_id AND u.day_utc = v_day AND u.micros_used >= p_reserved_micros;
-    SELECT u.* INTO v_user FROM public.ai_spend_user_daily u WHERE u.user_id = v_user_id AND u.day_utc = v_day;
+      WHERE u.user_id = p_user_id AND u.day_utc = v_day AND u.micros_used >= p_reserved_micros;
+    SELECT u.* INTO v_user FROM public.ai_spend_user_daily u WHERE u.user_id = p_user_id AND u.day_utc = v_day;
     SELECT g.* INTO v_global FROM public.ai_spend_global_hourly g WHERE g.hour_utc = v_hour;
     RETURN QUERY SELECT false, 0::bigint,
       GREATEST(0, p_user_daily_limit_micros - COALESCE(v_user.micros_used, 0)),
@@ -220,30 +230,32 @@ BEGIN
   END IF;
 
   INSERT INTO public.ai_spend_reservations (generation_id, user_id, day_utc, hour_utc, reserved_micros)
-    VALUES (p_generation_id, v_user_id, v_day, v_hour, p_reserved_micros);
+    VALUES (p_generation_id, p_user_id, v_day, v_hour, p_reserved_micros);
   RETURN QUERY SELECT true, p_reserved_micros,
     GREATEST(0, p_user_daily_limit_micros - v_user.micros_used),
     GREATEST(0, p_global_hourly_limit_micros - v_global.micros_used);
 END;
 $$;--> statement-breakpoint
 
-CREATE OR REPLACE FUNCTION public.finalize_ai_spend(p_generation_id uuid, p_actual_micros bigint)
+CREATE OR REPLACE FUNCTION public.finalize_ai_spend(p_user_id uuid, p_generation_id uuid, p_actual_micros bigint)
 RETURNS boolean
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 DECLARE
-  v_user_id uuid := (SELECT auth.uid());
   v_reservation public.ai_spend_reservations;
   v_refund bigint;
 BEGIN
-  IF v_user_id IS NULL OR p_generation_id IS NULL THEN
-    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Authenticated generation required.';
+  IF auth.role() IS DISTINCT FROM 'service_role' THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Service role required for AI spend writes.';
+  END IF;
+  IF p_user_id IS NULL OR p_generation_id IS NULL THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Spend owner and generation required.';
   END IF;
   IF p_actual_micros IS NULL OR p_actual_micros < 0 THEN
     RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'Actual spend must be non-negative.';
   END IF;
 
   SELECT r.* INTO v_reservation FROM public.ai_spend_reservations r
-    WHERE r.generation_id = p_generation_id AND r.user_id = v_user_id FOR UPDATE;
+    WHERE r.generation_id = p_generation_id AND r.user_id = p_user_id FOR UPDATE;
   IF NOT FOUND OR v_reservation.released_at IS NOT NULL THEN RETURN false; END IF;
   IF v_reservation.finalized_at IS NOT NULL THEN RETURN true; END IF;
 
@@ -253,7 +265,7 @@ BEGIN
     UPDATE public.ai_spend_user_daily AS u SET
       micros_used = u.micros_used - v_refund,
       updated_at = clock_timestamp()
-      WHERE u.user_id = v_user_id AND u.day_utc = v_reservation.day_utc AND u.micros_used >= v_refund;
+      WHERE u.user_id = p_user_id AND u.day_utc = v_reservation.day_utc AND u.micros_used >= v_refund;
     IF NOT FOUND THEN RAISE EXCEPTION USING ERRCODE = '23514', MESSAGE = 'Spend user accounting invariant failed.'; END IF;
 
     UPDATE public.ai_spend_global_hourly AS g SET
@@ -266,30 +278,32 @@ BEGIN
   UPDATE public.ai_spend_reservations SET
       actual_micros = LEAST(p_actual_micros, reserved_micros),
       finalized_at = clock_timestamp()
-    WHERE generation_id = p_generation_id AND user_id = v_user_id AND finalized_at IS NULL;
+    WHERE generation_id = p_generation_id AND user_id = p_user_id AND finalized_at IS NULL;
   RETURN FOUND;
 END;
 $$;--> statement-breakpoint
 
-CREATE OR REPLACE FUNCTION public.release_ai_spend(p_generation_id uuid)
+CREATE OR REPLACE FUNCTION public.release_ai_spend(p_user_id uuid, p_generation_id uuid)
 RETURNS boolean
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 DECLARE
-  v_user_id uuid := (SELECT auth.uid());
   v_reservation public.ai_spend_reservations;
 BEGIN
-  IF v_user_id IS NULL OR p_generation_id IS NULL THEN
-    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Authenticated generation required.';
+  IF auth.role() IS DISTINCT FROM 'service_role' THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Service role required for AI spend writes.';
+  END IF;
+  IF p_user_id IS NULL OR p_generation_id IS NULL THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Spend owner and generation required.';
   END IF;
 
   SELECT r.* INTO v_reservation FROM public.ai_spend_reservations r
-    WHERE r.generation_id = p_generation_id AND r.user_id = v_user_id FOR UPDATE;
+    WHERE r.generation_id = p_generation_id AND r.user_id = p_user_id FOR UPDATE;
   IF NOT FOUND OR v_reservation.released_at IS NOT NULL OR v_reservation.finalized_at IS NOT NULL THEN RETURN false; END IF;
 
   UPDATE public.ai_spend_user_daily AS u SET
       micros_used = u.micros_used - v_reservation.reserved_micros,
       updated_at = clock_timestamp()
-    WHERE u.user_id = v_user_id AND u.day_utc = v_reservation.day_utc
+    WHERE u.user_id = p_user_id AND u.day_utc = v_reservation.day_utc
       AND u.micros_used >= v_reservation.reserved_micros;
   IF NOT FOUND THEN RAISE EXCEPTION USING ERRCODE = '23514', MESSAGE = 'Spend user release invariant failed.'; END IF;
 
@@ -301,7 +315,7 @@ BEGIN
   IF NOT FOUND THEN RAISE EXCEPTION USING ERRCODE = '23514', MESSAGE = 'Spend global release invariant failed.'; END IF;
 
   UPDATE public.ai_spend_reservations SET released_at = clock_timestamp()
-    WHERE generation_id = p_generation_id AND user_id = v_user_id AND released_at IS NULL;
+    WHERE generation_id = p_generation_id AND user_id = p_user_id AND released_at IS NULL;
   RETURN FOUND;
 END;
 $$;--> statement-breakpoint
@@ -391,8 +405,12 @@ $$;--> statement-breakpoint
 
 REVOKE ALL ON FUNCTION public.reserve_weekly_ai_usage(uuid, public.weekly_usage_mode, text) FROM PUBLIC;--> statement-breakpoint
 GRANT EXECUTE ON FUNCTION public.reserve_weekly_ai_usage(uuid, public.weekly_usage_mode, text) TO authenticated;--> statement-breakpoint
-REVOKE ALL ON FUNCTION public.reserve_ai_spend(uuid, bigint, bigint, bigint), public.finalize_ai_spend(uuid, bigint), public.release_ai_spend(uuid) FROM PUBLIC;--> statement-breakpoint
-GRANT EXECUTE ON FUNCTION public.reserve_ai_spend(uuid, bigint, bigint, bigint), public.finalize_ai_spend(uuid, bigint), public.release_ai_spend(uuid) TO authenticated;--> statement-breakpoint
+REVOKE ALL ON FUNCTION public.reserve_ai_spend(uuid, uuid, bigint, bigint, bigint) FROM PUBLIC, authenticated, anon;--> statement-breakpoint
+REVOKE ALL ON FUNCTION public.finalize_ai_spend(uuid, uuid, bigint) FROM PUBLIC, authenticated, anon;--> statement-breakpoint
+REVOKE ALL ON FUNCTION public.release_ai_spend(uuid, uuid) FROM PUBLIC, authenticated, anon;--> statement-breakpoint
+GRANT EXECUTE ON FUNCTION public.reserve_ai_spend(uuid, uuid, bigint, bigint, bigint) TO service_role;--> statement-breakpoint
+GRANT EXECUTE ON FUNCTION public.finalize_ai_spend(uuid, uuid, bigint) TO service_role;--> statement-breakpoint
+GRANT EXECUTE ON FUNCTION public.release_ai_spend(uuid, uuid) TO service_role;--> statement-breakpoint
 REVOKE ALL ON FUNCTION public.reconcile_stale_ai_usage(integer) FROM PUBLIC, anon, authenticated;--> statement-breakpoint
 GRANT EXECUTE ON FUNCTION public.reconcile_stale_ai_usage(integer) TO service_role;--> statement-breakpoint
 NOTIFY pgrst, 'reload schema';

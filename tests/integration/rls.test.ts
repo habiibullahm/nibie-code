@@ -85,8 +85,9 @@ describe("Supabase row-level security", () => {
     userDailyLimit: number,
     globalHourlyLimit: number,
   ) {
-    return asUser(userId, (tx) => tx`
+    return asServiceRole((tx) => tx`
       select * from public.reserve_ai_spend(
+        ${userId}::uuid,
         ${generationId}::uuid,
         ${reservedMicros}::bigint,
         ${userDailyLimit}::bigint,
@@ -197,6 +198,36 @@ describe("Supabase row-level security", () => {
     expect(reserved).toMatchObject({ accepted: true, credits_charged: 9, credits_used: 9, credits_remaining: 491 });
     const [usage] = await asUser(owner, (tx) => tx`select credits_used, balanced_requests from public.weekly_ai_usage`);
     expect(usage).toEqual({ credits_used: 9, balanced_requests: 1 });
+  });
+
+  it("keeps AI spend RPCs service-role only and rejects authenticated forge", async () => {
+    const owner = await createUsageUser();
+    const generation = await createGeneration(owner);
+
+    expect(await sql`
+      select
+        has_function_privilege('authenticated', 'public.reserve_ai_spend(uuid, uuid, bigint, bigint, bigint)', 'execute') as reserve_exec,
+        has_function_privilege('authenticated', 'public.finalize_ai_spend(uuid, uuid, bigint)', 'execute') as finalize_exec,
+        has_function_privilege('authenticated', 'public.release_ai_spend(uuid, uuid)', 'execute') as release_exec
+    `).toEqual([{ reserve_exec: false, finalize_exec: false, release_exec: false }]);
+    expect(await sql`
+      select
+        has_function_privilege('service_role', 'public.reserve_ai_spend(uuid, uuid, bigint, bigint, bigint)', 'execute') as reserve_exec,
+        has_function_privilege('service_role', 'public.finalize_ai_spend(uuid, uuid, bigint)', 'execute') as finalize_exec,
+        has_function_privilege('service_role', 'public.release_ai_spend(uuid, uuid)', 'execute') as release_exec
+    `).toEqual([{ reserve_exec: true, finalize_exec: true, release_exec: true }]);
+
+    await expect(asUser(owner, (tx) => tx`
+      select * from public.reserve_ai_spend(
+        ${owner}::uuid, ${generation}::uuid, 100000::bigint, 1000000::bigint, 1000000::bigint
+      )
+    `)).rejects.toThrow(/permission denied/i);
+    await expect(asUser(owner, (tx) => tx`
+      select public.finalize_ai_spend(${owner}::uuid, ${generation}::uuid, 1::bigint) as ok
+    `)).rejects.toThrow(/permission denied/i);
+    await expect(asUser(owner, (tx) => tx`
+      select public.release_ai_spend(${owner}::uuid, ${generation}::uuid) as ok
+    `)).rejects.toThrow(/permission denied/i);
   });
 
   it("enforces dollar spend ceilings independently of weekly credits and reconciles stale holds", async () => {

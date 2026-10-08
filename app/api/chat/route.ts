@@ -61,12 +61,13 @@ function event(type: string, data: unknown) { return `event: ${type}\ndata: ${JS
  */
 async function rejectWeeklyUsageBeforeStream(input: {
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  userId: string;
   assistantId: string;
   mode: ChatModel;
   requestId: string;
   usageKind?: UsageKind;
 }): Promise<NextResponse | null> {
-  const { supabase, assistantId, mode, requestId, usageKind = "chat" } = input;
+  const { supabase, userId, assistantId, mode, requestId, usageKind = "chat" } = input;
   const markError = async (content: string) => {
     try {
       await supabase.from("messages").update({ content, status: "error" }).eq("id", assistantId).eq("status", "streaming");
@@ -77,6 +78,7 @@ async function rejectWeeklyUsageBeforeStream(input: {
 
   const gate = await reserveUsageBeforeGeneration({
     supabase,
+    userId,
     generationId: assistantId,
     mode,
     usageKind,
@@ -297,6 +299,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   if (deepResearch) {
     const weeklyRejected = await rejectWeeklyUsageBeforeStream({
       supabase,
+      userId: user.id,
       assistantId: assistant.id,
       mode,
       requestId,
@@ -334,6 +337,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   if (webDecision.search) {
     const weeklyRejected = await rejectWeeklyUsageBeforeStream({
       supabase,
+      userId: user.id,
       assistantId: assistant.id,
       mode,
       requestId,
@@ -504,10 +508,11 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   let usageReservationMs = 0;
   let spendReservedMicros = 0;
   const releaseReservation = async () => {
-    await releaseUsageHold({ supabase, generationId: assistant.id, requestId, logicalMode: mode });
+    await releaseUsageHold({ supabase, userId: user.id, generationId: assistant.id, requestId, logicalMode: mode });
   };
   const gate = await reserveUsageBeforeGeneration({
     supabase,
+    userId: user.id,
     generationId: assistant.id,
     mode,
     usageKind,
@@ -725,6 +730,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
         );
         await finalizeGenerationSpend({
           supabase,
+          userId: user.id,
           generationId: assistant.id,
           actualMicros: costEstimate.estimatedUsdMicros,
           requestId,

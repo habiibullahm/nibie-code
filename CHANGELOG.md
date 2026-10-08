@@ -39,6 +39,7 @@ What's new in Nibie.
 
 ### Fixed
 
+- Deep Research dollar accounting now includes planner, search, and synthesis costs, so stopping or failing mid-run no longer refunds work that already ran.
 - Web Search and Deep Research no longer lose a valid weekly credit reservation between the allowance check and the reply, which could block an answer even when credits remained.
 - Web search now grounds Indonesian market condition/direction asks (for example “kondisi IHSG”, “arah pasar saham”) even when the message omits an explicit freshness word like “hari ini”, while still skipping definitional asks like “apa itu IHSG?”.
 - Web citation markers no longer appear as raw `[SOURCE:web:…]` text when the model streams a handle across chunk boundaries; they convert to clickable `[n]` markers with the Sources list.

@@ -36,6 +36,7 @@ describe("usage reservation / reconcile failure paths", () => {
     });
     const gate = await reserveUsageBeforeGeneration({
       supabase: supabase as never,
+      userId: "user-1",
       generationId: "11111111-1111-4111-8111-111111111111",
       mode: "Balanced",
       usageKind: "chat",
@@ -43,7 +44,7 @@ describe("usage reservation / reconcile failure paths", () => {
     });
     expect(gate).toMatchObject({ ok: true, creditsCharged: 3, spendReservedMicros: 150_000 });
     expect(supabase.rpc).toHaveBeenCalledWith("reserve_weekly_ai_usage", expect.objectContaining({ p_usage_kind: "chat" }));
-    expect(supabase.rpc).toHaveBeenCalledWith("reserve_ai_spend", expect.objectContaining({ p_reserved_micros: expect.any(Number) }));
+    expect(supabase.rpc).toHaveBeenCalledWith("reserve_ai_spend", expect.objectContaining({ p_user_id: "user-1", p_reserved_micros: expect.any(Number) }));
   });
 
   it("rejects when weekly credits are exhausted without calling the provider spend path further after reject", async () => {
@@ -55,6 +56,7 @@ describe("usage reservation / reconcile failure paths", () => {
     });
     const gate = await reserveUsageBeforeGeneration({
       supabase: supabase as never,
+      userId: "user-1",
       generationId: "11111111-1111-4111-8111-111111111111",
       mode: "High",
       usageKind: "research",
@@ -86,6 +88,7 @@ describe("usage reservation / reconcile failure paths", () => {
     });
     const gate = await reserveUsageBeforeGeneration({
       supabase: supabase as never,
+      userId: "user-1",
       generationId: "11111111-1111-4111-8111-111111111111",
       mode: "Balanced",
       usageKind: "chat",
@@ -116,6 +119,7 @@ describe("usage reservation / reconcile failure paths", () => {
     });
     const gate = await reserveUsageBeforeGeneration({
       supabase: supabase as never,
+      userId: "user-1",
       generationId: "22222222-2222-4222-8222-222222222222",
       mode: "High",
       usageKind: "research",
@@ -143,6 +147,7 @@ describe("usage reservation / reconcile failure paths", () => {
     });
     await releaseUsageHold({
       supabase: supabase as never,
+      userId: "user-1",
       generationId: "33333333-3333-4333-8333-333333333333",
       requestId: "req-release",
       logicalMode: "Fast",
@@ -161,6 +166,7 @@ describe("usage reservation / reconcile failure paths", () => {
     });
     const gate = await reserveUsageBeforeGeneration({
       supabase: supabase as never,
+      userId: "user-1",
       generationId: "44444444-4444-4444-8444-444444444444",
       mode: "High",
       usageKind: "research",

@@ -191,7 +191,7 @@ export async function createAutoWebActionChatResponse(input: AutoWebActionChatIn
   };
 
   const releaseReservation = async () => {
-    await releaseUsageHold({ supabase, generationId: assistant.id, requestId, logicalMode: mode });
+    await releaseUsageHold({ supabase, userId, generationId: assistant.id, requestId, logicalMode: mode });
   };
 
   const summaryMaintenance = deferThreadSummaryMaintenance({ supabase, conversationId, requestId });
@@ -397,6 +397,7 @@ export async function createAutoWebActionChatResponse(input: AutoWebActionChatIn
         if (!weeklyUsageReserved) {
           const gate = await reserveUsageBeforeGeneration({
             supabase,
+            userId,
             generationId: assistant.id,
             mode,
             usageKind: "chat",
@@ -575,6 +576,7 @@ export async function createAutoWebActionChatResponse(input: AutoWebActionChatIn
           );
           await finalizeGenerationSpend({
             supabase,
+            userId,
             generationId: assistant.id,
             actualMicros: costEstimate.estimatedUsdMicros,
             requestId,
