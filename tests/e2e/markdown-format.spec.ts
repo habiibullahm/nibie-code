@@ -39,7 +39,9 @@ for (const [width, height] of [[390, 844], [1024, 768], [1440, 900]] as const) {
     expect(result.listItem).toBe(result.body);
     expect(result.h2).toBeLessThanOrEqual(17);
     expect(result.h2).toBeGreaterThan(result.h3);
-    expect(result.h3).toBeGreaterThanOrEqual(result.body);
+    // H3 stays compact (15 desktop / 14.5 mobile) under the 15.5px answer body.
+    expect(result.h3).toBeGreaterThanOrEqual(14);
+    expect(result.h3).toBeLessThanOrEqual(result.body);
     expect(result.inlineCode).toBeLessThan(result.body);
     // Long code lines scroll inside the block; the table never grows past the answer.
     expect(result.codeScrollsInside).toBe(true);
