@@ -11,8 +11,9 @@ import { POST as retiredMultipart } from "../../app/api/chat/attachments/route";
 import { POST as uploadInit } from "../../app/api/chat/attachments/upload-init/route";
 import { POST as finalizeUpload } from "../../app/api/chat/attachments/finalize/route";
 import { DELETE } from "../../app/api/chat/attachments/[attachmentId]/route";
+import { GET as downloadAttachment } from "../../app/api/chat/attachments/[attachmentId]/download/route";
 import { addUserMessageAction, startConversationAction } from "../../app/actions/chat";
-import { MAX_ATTACHMENT_BYTES } from "../../lib/attachments/limits";
+import { CHAT_ATTACHMENTS_BUCKET, MAX_ATTACHMENT_BYTES } from "../../lib/attachments/limits";
 import { attachmentErrors } from "../../lib/attachments/rules";
 
 const owner = "7c1f8a52-4f61-4d7e-9a3e-1b2c3d4e5f60";
@@ -47,7 +48,9 @@ function jsonRequest(url: string, body: unknown, headers: Record<string, string>
 function sessionClient(options: {
   fromResults?: Record<string, unknown[]>;
   signed?: { data: { signedUrl: string; token: string; path: string } | null; error: unknown };
+  signedDownload?: { data: { signedUrl: string } | null; error: unknown };
   download?: { data: Blob | null; error: unknown };
+  uploadError?: unknown;
   removeError?: unknown;
   calls?: unknown[][];
 } = {}) {
@@ -55,7 +58,9 @@ function sessionClient(options: {
   const queues = options.fromResults ?? {};
   const storage = {
     createSignedUploadUrl: vi.fn(async () => options.signed ?? { data: { signedUrl: "https://storage.example/sign", token: "tok", path: stagingPath }, error: null }),
+    createSignedUrl: vi.fn(async () => options.signedDownload ?? { data: { signedUrl: "https://storage.example/download?token=1" }, error: null }),
     download: vi.fn(async () => options.download ?? { data: new Blob(["hello"]), error: null }),
+    upload: vi.fn(async () => ({ error: options.uploadError ?? null })),
     remove: vi.fn(async () => ({ data: null, error: options.removeError ?? null })),
   };
   return {
@@ -148,7 +153,7 @@ describe("POST /api/chat/attachments/upload-init", () => {
 describe("POST /api/chat/attachments/finalize", () => {
   beforeEach(() => { createClient.mockReset(); });
 
-  it("downloads staging bytes, saves extracted text, and removes the object", async () => {
+  it("downloads staging bytes, persists the original, saves extracted text, and removes staging", async () => {
     const text = "The internal codename for this test document is Cedar Harbor.";
     const size = new TextEncoder().encode(text).byteLength;
     const calls: unknown[][] = [];
@@ -169,7 +174,7 @@ describe("POST /api/chat/attachments/finalize", () => {
         { data: null, error: null },
       ],
       message_attachments: [
-        { data: null, error: null },
+        { data: [], error: null },
         { data: null, error: null, count: 0 },
         { data: { id: attachmentId, original_name: "attachment-a.txt", mime_type: "text/plain", size_bytes: size, truncated: false, page_count: null }, error: null },
       ],
@@ -187,9 +192,12 @@ describe("POST /api/chat/attachments/finalize", () => {
     expect(body).toEqual({ attachment: { id: attachmentId, name: "attachment-a.txt", mimeType: "text/plain", sizeBytes: size, truncated: false, pageCount: null } });
     expect(JSON.stringify(body)).not.toContain("Cedar Harbor");
     expect(client._storage.download).toHaveBeenCalledWith(stagingPath);
+    expect(client._storage.upload).toHaveBeenCalled();
+    expect(calls).toContainEqual(["storage.from", CHAT_ATTACHMENTS_BUCKET]);
     expect(client._storage.remove).toHaveBeenCalledWith([stagingPath]);
     const insert = calls.find((call) => call[0] === "insert" && typeof call[1] === "object" && call[1] && "extracted_text" in (call[1] as object))![1] as Record<string, unknown>;
     expect(insert.extracted_text).toBe(text);
+    expect(insert.storage_path).toMatch(new RegExp(`^${owner}/attachments/[0-9a-f-]+/[0-9a-f-]+\\.txt$`));
     expect(insert).not.toHaveProperty("message_id");
   });
 
@@ -296,14 +304,74 @@ describe("POST /api/chat/attachments/finalize", () => {
 describe("DELETE /api/chat/attachments/[attachmentId]", () => {
   beforeEach(() => { createClient.mockReset(); });
 
-  it("removes only the owner's unsent draft", async () => {
+  it("removes only the owner's unsent draft and its durable object", async () => {
     const calls: unknown[][] = [];
-    createClient.mockResolvedValue({ auth: signedIn, from: (name: string) => { calls.push(["from", name]); return table([{ data: { id: attachmentId }, error: null }], calls); } });
+    const durablePath = `${owner}/attachments/${attachmentId}/${attachmentId}.txt`;
+    const client = sessionClient({
+      calls,
+      fromResults: {
+        message_attachments: [
+          { data: { id: attachmentId, storage_path: durablePath }, error: null },
+          { data: { id: attachmentId }, error: null },
+        ],
+      },
+    });
+    createClient.mockResolvedValue(client);
     const request = new Request(`http://localhost/api/chat/attachments/${attachmentId}`, { method: "DELETE" });
     const response = await DELETE(request, { params: Promise.resolve({ attachmentId }) });
     expect(response.status).toBe(200);
-    expect(calls).toEqual([["from", "message_attachments"], ["delete"], ["eq", "id", attachmentId], ["is", "message_id", null], ["select", "id"]]);
+    expect(calls).toContainEqual(["storage.from", CHAT_ATTACHMENTS_BUCKET]);
+    expect(client._storage.remove).toHaveBeenCalledWith([durablePath]);
+    expect(calls).toContainEqual(["delete"]);
+    expect(calls).toContainEqual(["eq", "id", attachmentId]);
+    expect(calls).toContainEqual(["is", "message_id", null]);
     expect((await DELETE(request, { params: Promise.resolve({ attachmentId: "../x" }) })).status).toBe(400);
+  });
+});
+
+describe("GET /api/chat/attachments/[attachmentId]/download", () => {
+  beforeEach(() => { createClient.mockReset(); });
+
+  it("requires a session", async () => {
+    createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: null, error: new Error("none") }) }, from: vi.fn(), storage: { from: vi.fn() } });
+    const response = await downloadAttachment(new Request(`http://localhost/api/chat/attachments/${attachmentId}/download`), { params: Promise.resolve({ attachmentId }) });
+    expect(response.status).toBe(401);
+  });
+
+  it("redirects the owner to a short-lived signed URL for a sent attachment", async () => {
+    const durablePath = `${owner}/attachments/${attachmentId}/${attachmentId}.txt`;
+    const signedUrl = "https://storage.example/download?token=abc";
+    const client = sessionClient({
+      fromResults: {
+        message_attachments: [
+          { data: { id: attachmentId, user_id: owner, storage_path: durablePath, original_name: "attachment-a.txt", message_id: message }, error: null },
+        ],
+      },
+      signedDownload: { data: { signedUrl }, error: null },
+    });
+    createClient.mockResolvedValue(client);
+    const response = await downloadAttachment(new Request(`http://localhost/api/chat/attachments/${attachmentId}/download`), { params: Promise.resolve({ attachmentId }) });
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(signedUrl);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(client._storage.createSignedUrl).toHaveBeenCalledWith(durablePath, 60, { download: "attachment-a.txt" });
+    expect(client._calls).toContainEqual(["storage.from", CHAT_ATTACHMENTS_BUCKET]);
+  });
+
+  it("refuses a non-owner, draft, or missing durable original with the same unavailable response", async () => {
+    for (const row of [
+      null,
+      { id: attachmentId, user_id: stranger, storage_path: `${stranger}/attachments/${attachmentId}/${attachmentId}.txt`, original_name: "x.txt", message_id: message },
+      { id: attachmentId, user_id: owner, storage_path: `${owner}/attachments/${attachmentId}/${attachmentId}.txt`, original_name: "x.txt", message_id: null },
+      { id: attachmentId, user_id: owner, storage_path: null, original_name: "x.txt", message_id: message },
+    ]) {
+      const client = sessionClient({ fromResults: { message_attachments: [{ data: row, error: null }] } });
+      createClient.mockResolvedValue(client);
+      const response = await downloadAttachment(new Request(`http://localhost/api/chat/attachments/${attachmentId}/download`), { params: Promise.resolve({ attachmentId }) });
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({ error: attachmentErrors.unavailable });
+      expect(client._storage.createSignedUrl).not.toHaveBeenCalled();
+    }
   });
 });
 

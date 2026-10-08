@@ -23,6 +23,9 @@ export const DRAFT_ATTACHMENT_TTL_MS = 24 * 60 * 60 * 1000;
 export const CHAT_ATTACHMENT_STAGING_BUCKET = "chat-attachment-staging";
 /** @deprecated Use CHAT_ATTACHMENT_STAGING_BUCKET */
 export const CHAT_ATTACHMENT_UPLOADS_BUCKET = CHAT_ATTACHMENT_STAGING_BUCKET;
+// Durable private bucket for original bytes (owner download). Staging remains ephemeral.
+export const CHAT_ATTACHMENTS_BUCKET = "chat-attachments";
+export const ATTACHMENT_DOWNLOAD_URL_TTL_SECONDS = 60;
 export const ATTACHMENT_UPLOAD_SESSION_TTL_MS = 2 * 60 * 60 * 1000;
 // Supabase TUS recommended chunk size (must be ≤6 MiB for the hosted Storage TUS endpoint).
 export const ATTACHMENT_TUS_CHUNK_SIZE = 6 * 1024 * 1024;
