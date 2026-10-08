@@ -1039,7 +1039,7 @@ describe("Supabase row-level security", () => {
       const message = randomUUID();
       await expect(send(owner, thread, message, [missing])).rejects.toMatchObject({ code: "PT409" });
       expect(await sql`select id from public.messages where id = ${message}`).toHaveLength(0);
-      const big = [await draft(owner, "a.txt", 3_000_000), await draft(owner, "b.txt", 3_000_000), await draft(owner, "c.txt", 3_000_000)];
+      const big = [await draft(owner, "a.txt", 7_000_000), await draft(owner, "b.txt", 7_000_000), await draft(owner, "c.txt", 7_000_000)];
       const tooLarge = randomUUID();
       await expect(send(owner, thread, tooLarge, big)).rejects.toMatchObject({ code: "PT413" });
       expect(await sql`select id from public.messages where id = ${tooLarge}`).toHaveLength(0);

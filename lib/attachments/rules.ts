@@ -5,10 +5,10 @@ import { ATTACHMENT_TYPES, IMAGE_EXTENSIONS, MAX_ATTACHMENT_BYTES, MAX_ATTACHMEN
 export const attachmentErrors = {
   unsupported: "That file type isn't supported. Attach text, Markdown, CSV, JSON, code, or a PDF.",
   image: "Images aren't supported yet. Attach text, code, or a PDF.",
-  tooLarge: "That file is larger than 4 MB.",
+  tooLarge: "That file is larger than 10 MB.",
   empty: "That file is empty.",
   tooMany: `You can attach up to ${MAX_ATTACHMENTS_PER_MESSAGE} files.`,
-  totalTooLarge: "Attachments can be up to 8 MB together.",
+  totalTooLarge: "Attachments can be up to 20 MB together.",
   badName: "Choose a file with a clear name.",
   longName: "That file name is too long.",
   notText: "That file isn't readable text.",

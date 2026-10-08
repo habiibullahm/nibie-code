@@ -2,11 +2,11 @@
 
 export const MAX_ATTACHMENTS_PER_MESSAGE = 3;
 
-// Kept under the 4.5 MB request-body limit of a serverless function, since each file is one upload request.
-export const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
+// Per-file upload cap. Each file is its own upload request.
+export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
-// All attachments of one message together.
-export const MAX_ATTACHMENTS_TOTAL_BYTES = 8 * 1024 * 1024;
+// All attachments of one message together (2× the per-file cap).
+export const MAX_ATTACHMENTS_TOTAL_BYTES = 20 * 1024 * 1024;
 
 // Text kept per attachment. Longer files are cut here and marked truncated.
 export const MAX_ATTACHMENT_TEXT_CHARS = 24_000;

@@ -478,7 +478,7 @@ export const messageAttachments = pgTable(
       "message_attachments_mime_allowlist",
       sql`${table.mimeType} in ('text/plain', 'text/markdown', 'text/csv', 'application/json', 'application/pdf', 'text/x-typescript', 'text/javascript', 'text/x-python', 'text/x-java', 'text/x-go', 'text/x-rust', 'application/sql', 'text/html', 'text/css', 'application/yaml', 'application/xml')`,
     ),
-    check("message_attachments_size_bounds", sql`${table.sizeBytes} between 1 and 4194304`),
+    check("message_attachments_size_bounds", sql`${table.sizeBytes} between 1 and 10485760`),
     check("message_attachments_text_bounds", sql`char_length(${table.extractedText}) between 1 and 24000`),
     check("message_attachments_page_bounds", sql`${table.pageCount} IS NULL OR ${table.pageCount} between 1 and 100000`),
   ],
