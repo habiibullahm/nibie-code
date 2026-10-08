@@ -74,15 +74,16 @@ test("a long High reply streams, settles idle with Copy, and the saved text surv
   // Streamed tokens render while the generation is live.
   await expect(assistant).toContainText("Building block 1");
   await expect(page.getByRole("button", { name: "Stop response" })).toBeVisible();
-  // Responding status is visually-hidden (clip); Playwright treats it as hidden — assert attachment, not visibility.
-  await expect(assistant.getByRole("status", { name: "Nibie is responding", includeHidden: true })).toBeAttached();
+  // SR responding copy is visually-hidden (clip); Chromium drops it from the accessible name, so assert the DOM node.
+  const responding = assistant.locator(".visually-hidden[role='status']");
+  await expect(responding).toHaveText("Nibie is responding");
   await expect(assistant.getByRole("button", { name: "Copy response" })).toHaveCount(0);
 
   await page.evaluate(() => window.highStream!.release());
   await expect(assistant).toContainText(longReplyEnd);
   // The generation is idle: no Stop, no responding indicator, Copy available, and the composer accepts the next message.
   await expect(page.getByRole("button", { name: "Stop response" })).toHaveCount(0);
-  await expect(assistant.getByRole("status", { name: "Nibie is responding", includeHidden: true })).toHaveCount(0);
+  await expect(responding).toHaveCount(0);
   await expect(assistant.getByRole("button", { name: "Copy response" })).toBeVisible();
   await page.getByRole("textbox", { name: "Message Nibie" }).fill("Thanks");
   await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();
@@ -107,7 +108,8 @@ test("a reply still generating when the thread loads settles from the server wit
   await page.evaluate(() => { window.loadedOnce = true; });
   const assistant = page.locator(".message-row.assistant");
   // The claim placeholder reads as the responding indicator, never as a literal "…" answer.
-  await expect(assistant.getByRole("status", { name: "Nibie is responding", includeHidden: true })).toBeAttached();
+  const responding = assistant.locator(".visually-hidden[role='status']");
+  await expect(responding).toHaveText("Nibie is responding");
   await expect(assistant.locator(".message-content")).not.toContainText("…");
   await expect(assistant.getByRole("button", { name: "Copy response" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Stop response" })).toHaveCount(0);
@@ -115,7 +117,7 @@ test("a reply still generating when the thread loads settles from the server wit
   // The server finishes the reply (another tab, or a stream this page lost); the open page picks it up by itself.
   await saveThread(page, userMessage, { content: longReplyFixtureId, status: "complete" });
   await expect(assistant).toContainText(longReplyEnd, { timeout: 15_000 });
-  await expect(assistant.getByRole("status", { name: "Nibie is responding", includeHidden: true })).toHaveCount(0);
+  await expect(responding).toHaveCount(0);
   await expect(assistant.getByRole("button", { name: "Copy response" })).toBeVisible();
   await page.getByRole("textbox", { name: "Message Nibie" }).fill("Next");
   await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();
