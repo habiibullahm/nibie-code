@@ -3,6 +3,10 @@ import { fileURLToPath } from "node:url";
 
 export const DIMENSIONS = ["accuracy", "completeness", "whyHow", "example", "continuity", "tradeoffs", "grounding", "brevity"];
 export const MODES = ["Fast", "Balanced", "High"];
+/** Minimum comparable pairs per mode before a PASS claim is allowed. */
+export const MIN_FAIR_PAIRS_PER_MODE = 5;
+/** Minimum total comparable pairs across modes. */
+export const MIN_FAIR_PAIRS_TOTAL = 15;
 const fixturePath = fileURLToPath(new URL("../tests/fixtures/response-quality-v2.json", import.meta.url));
 
 export function loadCases() {
@@ -26,6 +30,7 @@ function validateRun(run, cases) {
     !Number.isFinite(run.latencyMs) || run.latencyMs < 0 ||
     !Number.isInteger(run.outputTokens) || run.outputTokens < 0 ||
     typeof run.contextTruncated !== "boolean" || !run.reviewer?.trim() || !run.reviewNotes?.trim() ||
+    run.sourceFidelity !== "human_reviewed" ||
     typeof run.critical !== "boolean") throw new Error("Incomplete actual-model output metadata for " + run.caseId);
   for (const key of testcase.dimensions) {
     if (![0, 1, 2].includes(run.ratings?.[key])) throw new Error("Missing human rating " + key + " for " + run.caseId);
@@ -64,11 +69,17 @@ export function comparePhases(baseline, after, cases = loadCases()) {
       baselineBrevity: prior.ratings.brevity, afterBrevity: item.ratings.brevity });
   }
   const fair = pairs.filter((p) => p.comparable);
+  const fairCoverage = Object.fromEntries(MODES.map((mode) => [mode, fair.filter((p) => p.mode === mode).length]));
+  const coverageOk = fair.length >= MIN_FAIR_PAIRS_TOTAL &&
+    MODES.every((mode) => fairCoverage[mode] >= MIN_FAIR_PAIRS_PER_MODE);
   const baselineRatio = fair.length ? fair.reduce((n, p) => n + p.baseline, 0) / fair.length : null;
   const afterRatio = fair.length ? fair.reduce((n, p) => n + p.after, 0) / fair.length : null;
   const regressedBrevity = fair.filter((p) => p.baselineBrevity !== undefined && p.afterBrevity < p.baselineBrevity).length;
-  const passes = fair.length > 0 && afterRatio >= 0.8 && next.critical === 0 && next.brevityFailures === 0 && regressedBrevity === 0;
-  return { before, after: next, pairs, fairPairs: fair.length, baselineRatio, afterRatio, regressedBrevity, passes };
+  const passes = coverageOk && afterRatio >= 0.8 && next.critical === 0 && next.brevityFailures === 0 && regressedBrevity === 0;
+  return {
+    before, after: next, pairs, fairPairs: fair.length, fairCoverage, coverageOk,
+    baselineRatio, afterRatio, regressedBrevity, passes,
+  };
 }
 
 const percent = (v) => v === null ? "N/A" : (v * 100).toFixed(1) + "%";
@@ -81,7 +92,10 @@ export function formatReport(result) {
     "",
     "Human-scored observed provider responses, NOT prompt assertions or model-generated grading. Scores use only case-relevant rubric dimensions (0 = absent/wrong, 1 = partial, 2 = good). Never score by word count.",
     "",
-    "- Comparable pairs: " + result.fairPairs,
+    "- Comparable pairs: " + result.fairPairs +
+      " (min " + MIN_FAIR_PAIRS_TOTAL + " total; min " + MIN_FAIR_PAIRS_PER_MODE + " per mode: " +
+      MODES.map((m) => m + "=" + (result.fairCoverage?.[m] ?? 0)).join(", ") +
+      "; coverageOk=" + result.coverageOk + ")",
     "- Baseline (comparable pairs): " + percent(result.baselineRatio),
     "- After (comparable pairs): " + percent(result.afterRatio),
     "- Baseline coverage: " + coverage(result.before),
@@ -89,13 +103,15 @@ export function formatReport(result) {
     "- Critical issues after: " + result.after.critical,
     "- Brevity failures after: " + result.after.brevityFailures,
     "- Brevity regressions: " + result.regressedBrevity,
-    "- Quality gate (>=80%, zero critical/brevity regressions): " + (result.passes ? "PASS" : "FAIL"),
+    "- Quality gate (>=80%, coverage floors, human_reviewed fidelity, zero critical/brevity regressions): " + (result.passes ? "PASS" : "FAIL"),
     "",
     "| Case | Mode | Before | After | Comparable |",
     "| --- | --- | ---: | ---: | --- |",
     rows || "| No matched cases | — | — | — | no |",
     "",
-    "A PASS is meaningful only for the reviewed and comparable cases. Configuration, prompt version, context diagnostics, timestamp, source provenance, token/cost and reviewer identity should be retained separately in private evaluation records. Do not commit raw production conversations.",
+    "A PASS requires human_reviewed source fidelity on every run, matched model/provider/effort/truncation, " +
+      "at least " + MIN_FAIR_PAIRS_PER_MODE + " comparable pairs per mode and " + MIN_FAIR_PAIRS_TOTAL +
+      " total, >=80% after score, and zero critical or brevity regressions. Retain prompt version, context diagnostics, cost, and reviewer identity privately. Do not commit raw production conversations.",
     ""
   ].join("\n");
 }
