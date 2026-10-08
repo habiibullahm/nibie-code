@@ -25,6 +25,10 @@
   --text-2: #c7c7c7;
   --text-3: #a6a6a6;
   --text-4: #8f8f8f;
+  --text-body: #d0d0d0;
+  --text-item: #bdbdbd;
+  --text-label: #a6a6a6;
+  --text-placeholder: #a0a0a0;
   --accent: #d97757;
   --accent-hover: #e18768;
   --accent-fg: #171717;
@@ -76,6 +80,10 @@
   --text-2: #4c4b43;
   --text-3: #6b695f;
   --text-4: #747165;
+  --text-body: var(--text-2);
+  --text-item: var(--text-3);
+  --text-label: var(--text-4);
+  --text-placeholder: var(--text-4);
   --accent: #626a53;
   --accent-hover: #4f5842;
   --accent-fg: #fcfbf9;
@@ -173,19 +181,23 @@ a.sidebar-workbench { margin-top: 8px; color: inherit; text-decoration: none; }
 .history-nav::-webkit-scrollbar-thumb:hover { background: var(--text-4); }
 .history-nav::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 .history-group { margin-bottom: 22px; }
-.history-group h2 { margin: 0 9px 8px; color: #999999; font-size: 10px; line-height: 1.4; letter-spacing: .09em; text-transform: uppercase; font-weight: 600; }
+.history-group h2 { margin: 0 9px 8px; color: var(--text-label); font-size: 10px; line-height: 1.4; letter-spacing: .09em; text-transform: uppercase; font-weight: 600; }
 .history-group h2 .history-time-toggle { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 24px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; letter-spacing: inherit; text-align: left; text-transform: inherit; cursor: pointer; }
 .history-group h2 .history-time-toggle:hover { color: var(--text-3); }
 .history-time-toggle svg { flex: none; }
-.history-item { display: flex; align-items: center; gap: 9px; width: 100%; height: 35px; padding: 0 9px; border: 0; border-radius: 8px; background: transparent; color: var(--text-3); text-align: left; cursor: pointer; font-size: 12.5px; font-weight: 450; }
+.history-item { display: flex; align-items: center; gap: 9px; width: 100%; height: 35px; padding: 0 9px; border: 0; border-radius: 8px; background: transparent; color: var(--text-item); text-align: left; cursor: pointer; font-size: 12.5px; font-weight: 450; }
 .history-item svg { flex: none; color: var(--text-4); }
 .history-item span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .history-item:hover { background: var(--hover); color: var(--text); }
 .history-item.is-active { background: var(--active); color: var(--text); font-weight: 500; }
 .history-item.is-active svg { color: var(--emphasis); }
 .archived-item { cursor: default; }
-.history-entry { display: flex; align-items: center; }
+.history-entry { display: flex; align-items: center; border-radius: 8px; }
 .history-entry .history-item { flex: 1; min-width: 0; }
+/* Hover and selected surfaces sit on the whole row (title + action buttons), so the highlight spans the full width. */
+.history-entry:hover { background: var(--hover); }
+.history-entry:has(.history-item.is-active) { background: var(--active); }
+.history-entry .history-item:hover, .history-entry .history-item.is-active { background: transparent; }
 .room-entry { position: relative; }
 .room-action-menu { position: absolute; z-index: 21; top: calc(100% + 3px); right: 2px; display: flex; flex-direction: column; width: 168px; padding: 5px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--bg-raised); box-shadow: var(--shadow-menu); }
 .room-action-menu.is-context-menu { position: fixed; right: auto; }
@@ -366,7 +378,7 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .message-status.is-danger { color: var(--danger); }
 .message-time { margin-left: 8px; color: var(--text-4); font-size: 10px; font-weight: 500; letter-spacing: .01em; white-space: nowrap; }
 .message-column.user .message-time { display: block; margin: 2px 2px 0 0; text-align: right; }
-.message-content p { margin: 0; color: var(--text-2); font-size: 15px; line-height: 1.72; overflow-wrap: anywhere; white-space: pre-wrap; }
+.message-content p { margin: 0; color: var(--text-body); font-size: 15px; line-height: 1.72; overflow-wrap: anywhere; white-space: pre-wrap; }
 .message-content.user { max-width: 100%; padding: 11px 15px; border: 1px solid var(--border); border-radius: 14px 4px 14px 14px; background: var(--user-bubble); }
 .message-column.user { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; min-width: 0; max-width: min(78%, 540px); }
 .message-content.user p { color: var(--text); font-size: 13.5px; line-height: 1.65; }
@@ -411,7 +423,7 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .composer textarea::-webkit-scrollbar-track { background: transparent; }
 .composer textarea::-webkit-scrollbar-thumb { border-radius: 999px; background: var(--border-strong); }
 .composer textarea:focus-visible { outline: none; }
-.composer textarea::placeholder { color: var(--text-4); }
+.composer textarea::placeholder { color: var(--text-placeholder); }
 .composer-actions { grid-area: actions; display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; min-height: 32px; }
 .composer-tools { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .composer-left-tools { position: relative; display: flex; flex: 1; flex-wrap: wrap; align-items: center; gap: 5px; min-width: 0; }
@@ -488,7 +500,7 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 
 /* M5: Markdown, code blocks, and last-turn controls */
 /* Assistant Markdown. A chat answer, not a document page: compact headings, calm lists, quiet code and tables. */
-.markdown { --md-gap: 12px; --md-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; min-width: 0; color: var(--text-2); font-size: 15.5px; line-height: 1.72; overflow-wrap: anywhere; }
+.markdown { --md-gap: 12px; --md-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; min-width: 0; color: var(--text-body); font-size: 15.5px; line-height: 1.72; overflow-wrap: anywhere; }
 .markdown.is-streaming { white-space: pre-wrap; }
 .markdown > :first-child { margin-top: 0; }
 .markdown > :last-child { margin-bottom: 0; }
