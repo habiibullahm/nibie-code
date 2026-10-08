@@ -20,7 +20,10 @@ import type {
 import { logError } from "@/lib/observability/logger";
 import { operationalCodes } from "@/lib/observability/codes";
 
-/** V1 bound: at most one Action execution per generation. */
+/**
+ * V1 bound: at most one Action execution per generation.
+ * Applies to web.search and all GitHub Read Actions — no multi-tool loops in V1.
+ */
 export const MAX_ACTIONS_PER_GENERATION = 1;
 
 /** Default Action wall-clock timeout (ms). */

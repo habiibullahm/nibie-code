@@ -1,0 +1,18 @@
+{
+  "total_count": 1,
+  "workflow_runs": [
+    {
+      "id": 1001,
+      "name": "PR Guard",
+      "display_title": "feat: something",
+      "status": "completed",
+      "conclusion": "success",
+      "event": "pull_request",
+      "head_branch": "feat/example",
+      "head_sha": "abcdef0123456789abcdef0123456789abcdef01",
+      "html_url": "https://github.com/habiibullahm/nibie-code/actions/runs/1001",
+      "created_at": "2026-10-08T09:00:00Z",
+      "updated_at": "2026-10-08T09:05:00Z"
+    }
+  ]
+}

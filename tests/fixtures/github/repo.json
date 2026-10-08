@@ -1,0 +1,16 @@
+{
+  "id": 1,
+  "name": "nibie-code",
+  "full_name": "habiibullahm/nibie-code",
+  "private": false,
+  "owner": { "login": "habiibullahm", "html_url": "https://github.com/habiibullahm" },
+  "html_url": "https://github.com/habiibullahm/nibie-code",
+  "description": "Nibie personal AI workspace",
+  "default_branch": "main",
+  "language": "TypeScript",
+  "stargazers_count": 3,
+  "forks_count": 0,
+  "open_issues_count": 2,
+  "pushed_at": "2026-10-08T12:00:00Z",
+  "updated_at": "2026-10-08T12:00:00Z"
+}
