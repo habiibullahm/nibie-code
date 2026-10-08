@@ -38,7 +38,7 @@ describe("attachment rules", () => {
   it("limits the number and combined size of one message's attachments", () => {
     expect(checkAttachmentSet([1, 2, 3])).toBeNull();
     expect(checkAttachmentSet([1, 2, 3, 4])).toEqual({ error: attachmentErrors.tooMany });
-    expect(checkAttachmentSet([4 * 1024 * 1024, 4 * 1024 * 1024, 1])).toEqual({ error: attachmentErrors.totalTooLarge });
+    expect(checkAttachmentSet([10 * 1024 * 1024, 10 * 1024 * 1024, 1])).toEqual({ error: attachmentErrors.totalTooLarge });
   });
 
   it("accepts only 1–3 distinct attachment ids", () => {

@@ -5,6 +5,7 @@ import { FileText, RotateCcw, X } from "lucide-react";
 import { attachmentTypeLabel, ATTACHMENT_TYPES, formatBytes, MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENTS_TOTAL_BYTES } from "@/lib/attachments/limits";
 import { attachmentErrors, checkAttachmentFile } from "@/lib/attachments/rules";
 import type { AttachmentSummary } from "@/lib/attachments/types";
+import { putFileViaSignedTus, type TusUploadTicket } from "@/lib/attachments/upload-client";
 
 export type DraftAttachment = {
   key: string;
@@ -13,16 +14,28 @@ export type DraftAttachment = {
   typeLabel: string;
   status: "uploading" | "ready" | "error";
   error?: string;
-  // A failure the same file may get past on a second try (network or service), as opposed to a rejected file.
   retryable: boolean;
   file?: File;
   attachment?: AttachmentSummary;
+  uploadId?: string;
 };
 
 const failedUpload = "We couldn't attach that file. Please try again.";
 
-// Draft attachments of the composer. Each file is validated here, uploaded once, and re-checked by the server, which
-// extracts its text and keeps it as an unsent draft until the message that carries it is saved.
+type UploadInitResponse = {
+  upload?: TusUploadTicket & { uploadId: string };
+  error?: string;
+};
+
+async function cancelStaging(uploadId: string) {
+  await fetch("/api/chat/attachments/finalize", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ uploadId, cancel: true }),
+  }).catch(() => undefined);
+}
+
+// Draft attachments: validate → upload-init → TUS to Storage → finalize (extract text; drop staging bytes).
 export function useDraftAttachments() {
   const [items, setItems] = useState<DraftAttachment[]>([]);
   const [notice, setNotice] = useState("");
@@ -36,19 +49,67 @@ export function useDraftAttachments() {
   const upload = useCallback(async (key: string, file: File) => {
     const controller = new AbortController();
     controllers.current.set(key, controller);
-    const body = new FormData();
-    body.set("file", file);
+    let uploadId: string | undefined;
     try {
-      const response = await fetch("/api/chat/attachments", { method: "POST", body, signal: controller.signal });
-      const payload = await response.json().catch(() => null) as { attachment?: AttachmentSummary; error?: string } | null;
+      const initResponse = await fetch("/api/chat/attachments/upload-init", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: file.name, size: file.size, type: file.type }),
+        signal: controller.signal,
+      });
+      const initPayload = await initResponse.json().catch(() => null) as UploadInitResponse | null;
       if (controller.signal.aborted) return;
-      if (response.ok && payload?.attachment) {
-        update(key, { status: "ready", attachment: payload.attachment, error: undefined, file: undefined, name: payload.attachment.name, typeLabel: attachmentTypeLabel(payload.attachment.mimeType) });
-      } else {
-        update(key, { status: "error", error: payload?.error ?? failedUpload, retryable: response.status >= 500 || response.status === 409 });
+      if (!initResponse.ok || !initPayload?.upload) {
+        update(key, {
+          status: "error",
+          error: initPayload?.error ?? failedUpload,
+          retryable: initResponse.status >= 500 || initResponse.status === 409,
+        });
+        return;
       }
-    } catch {
-      if (!controller.signal.aborted) update(key, { status: "error", error: failedUpload, retryable: true });
+      uploadId = initPayload.upload.uploadId;
+      update(key, { uploadId });
+
+      const put = await putFileViaSignedTus(file, initPayload.upload, controller.signal);
+      if (controller.signal.aborted) {
+        if (uploadId) void cancelStaging(uploadId);
+        return;
+      }
+      if (!put.ok) {
+        if (uploadId) void cancelStaging(uploadId);
+        update(key, { status: "error", error: failedUpload, retryable: true });
+        return;
+      }
+
+      const finalizeResponse = await fetch("/api/chat/attachments/finalize", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ uploadId }),
+        signal: controller.signal,
+      });
+      const finalizePayload = await finalizeResponse.json().catch(() => null) as { attachment?: AttachmentSummary; error?: string } | null;
+      if (controller.signal.aborted) return;
+      if (finalizeResponse.ok && finalizePayload?.attachment) {
+        update(key, {
+          status: "ready",
+          attachment: finalizePayload.attachment,
+          error: undefined,
+          file: undefined,
+          uploadId: undefined,
+          name: finalizePayload.attachment.name,
+          typeLabel: attachmentTypeLabel(finalizePayload.attachment.mimeType),
+        });
+      } else {
+        update(key, {
+          status: "error",
+          error: finalizePayload?.error ?? failedUpload,
+          retryable: finalizeResponse.status >= 500 || finalizeResponse.status === 409,
+        });
+      }
+    } catch (error) {
+      if (uploadId) void cancelStaging(uploadId);
+      if (controller.signal.aborted || (error instanceof DOMException && error.name === "AbortError")) return;
+      update(key, { status: "error", error: failedUpload, retryable: true });
     } finally {
       if (controllers.current.get(key) === controller) controllers.current.delete(key);
     }
@@ -86,7 +147,7 @@ export function useDraftAttachments() {
     controllers.current.get(key)?.abort();
     controllers.current.delete(key);
     const item = items.find((entry) => entry.key === key);
-    // An unsent draft is deleted right away; if this request fails, the server removes it when the draft expires.
+    if (item?.uploadId && item.status === "uploading") void cancelStaging(item.uploadId);
     if (item?.attachment) void fetch(`/api/chat/attachments/${item.attachment.id}`, { method: "DELETE" }).catch(() => undefined);
     setItems((current) => current.filter((entry) => entry.key !== key));
   }, [items]);
@@ -94,12 +155,10 @@ export function useDraftAttachments() {
   const retry = useCallback((key: string) => {
     const item = items.find((entry) => entry.key === key);
     if (!item?.file || !item.retryable) return;
-    update(key, { status: "uploading", error: undefined });
+    update(key, { status: "uploading", error: undefined, uploadId: undefined });
     void upload(key, item.file);
   }, [items, update, upload]);
 
-  // Sending reads the ready attachments; they leave the composer only when the sent message clears it, and a failed
-  // send puts them back. The drafts themselves are not deleted: the sent message now owns them.
   const ready = items.flatMap((item) => item.attachment && item.status === "ready" ? [item.attachment] : []);
   const reset = useCallback(() => {
     for (const controller of controllers.current.values()) controller.abort();

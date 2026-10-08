@@ -447,6 +447,31 @@ export const workbenchDocuments = pgTable(
 );
 
 // A chat attachment: text extracted from a file the owner attached to one of their messages.
+// Short-lived staging metadata for direct-to-storage chat uploads. Bytes live in Storage only until finalize/cancel/TTL.
+export const attachmentUploadSessions = pgTable(
+  "attachment_upload_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    storagePath: text("storage_path").notNull(),
+    originalName: text("original_name").notNull(),
+    mimeType: text("mime_type").notNull(),
+    declaredSize: integer("declared_size").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("attachment_upload_sessions_user_expires_idx").on(table.userId, table.expiresAt),
+    check("attachment_upload_sessions_name_length", sql`char_length(${table.originalName}) between 1 and 120 and ${table.originalName} = btrim(${table.originalName})`),
+    check(
+      "attachment_upload_sessions_mime_allowlist",
+      sql`${table.mimeType} in ('text/plain', 'text/markdown', 'text/csv', 'application/json', 'application/pdf', 'text/x-typescript', 'text/javascript', 'text/x-python', 'text/x-java', 'text/x-go', 'text/x-rust', 'application/sql', 'text/html', 'text/css', 'application/yaml', 'application/xml')`,
+    ),
+    check("attachment_upload_sessions_size_bounds", sql`${table.declaredSize} between 1 and 10485760`),
+    check("attachment_upload_sessions_owner_path", sql`${table.storagePath} like (${table.userId})::text || '/%'`),
+  ],
+);
+
 // A draft has no conversation or message yet. Once sent, the same-owner composite key ties it to exactly one user
 // message in one conversation. It is not room knowledge and is never shared with other threads.
 export const messageAttachments = pgTable(
@@ -478,7 +503,7 @@ export const messageAttachments = pgTable(
       "message_attachments_mime_allowlist",
       sql`${table.mimeType} in ('text/plain', 'text/markdown', 'text/csv', 'application/json', 'application/pdf', 'text/x-typescript', 'text/javascript', 'text/x-python', 'text/x-java', 'text/x-go', 'text/x-rust', 'application/sql', 'text/html', 'text/css', 'application/yaml', 'application/xml')`,
     ),
-    check("message_attachments_size_bounds", sql`${table.sizeBytes} between 1 and 4194304`),
+    check("message_attachments_size_bounds", sql`${table.sizeBytes} between 1 and 10485760`),
     check("message_attachments_text_bounds", sql`char_length(${table.extractedText}) between 1 and 24000`),
     check("message_attachments_page_bounds", sql`${table.pageCount} IS NULL OR ${table.pageCount} between 1 and 100000`),
   ],
