@@ -14,6 +14,7 @@ export {
   assertRegisteredAction,
   getAction,
   isRegisteredAction,
+  listGitHubReadActions,
   listRegisteredActions,
   UnknownActionError,
 } from "@/lib/actions/registry";
@@ -46,7 +47,17 @@ export {
   actionUsedLabel,
 } from "@/lib/actions/labels";
 
-export { WEB_SEARCH_ACTION_ID } from "@/lib/actions/ids";
+export {
+  GITHUB_COMMITS_LIST_ACTION_ID,
+  GITHUB_ISSUES_LIST_ACTION_ID,
+  GITHUB_PULL_REQUEST_GET_ACTION_ID,
+  GITHUB_PULL_REQUESTS_LIST_ACTION_ID,
+  GITHUB_READ_ACTION_IDS,
+  GITHUB_REPO_GET_ACTION_ID,
+  GITHUB_WORKFLOW_RUNS_LIST_ACTION_ID,
+  WEB_SEARCH_ACTION_ID,
+  type GitHubReadActionId,
+} from "@/lib/actions/ids";
 
 export {
   loadMessageActionsByConversation,
@@ -58,3 +69,25 @@ export {
   webSearchInputSchema,
   webSourcesFromActionResult,
 } from "@/lib/actions/tools/web-search";
+
+export { githubRepoGetAction, githubRepoGetInputSchema } from "@/lib/actions/tools/github-repo-get";
+export {
+  githubCommitsListAction,
+  githubCommitsListInputSchema,
+} from "@/lib/actions/tools/github-commits-list";
+export {
+  githubPullRequestGetAction,
+  githubPullRequestGetInputSchema,
+} from "@/lib/actions/tools/github-pull-request-get";
+export {
+  githubPullRequestsListAction,
+  githubPullRequestsListInputSchema,
+} from "@/lib/actions/tools/github-pull-requests-list";
+export {
+  githubIssuesListAction,
+  githubIssuesListInputSchema,
+} from "@/lib/actions/tools/github-issues-list";
+export {
+  githubWorkflowRunsListAction,
+  githubWorkflowRunsListInputSchema,
+} from "@/lib/actions/tools/github-workflow-runs-list";

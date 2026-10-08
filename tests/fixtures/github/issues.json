@@ -1,0 +1,25 @@
+[
+  {
+    "number": 10,
+    "title": "Improve citation markers",
+    "state": "open",
+    "html_url": "https://github.com/habiibullahm/nibie-code/issues/10",
+    "user": { "login": "habiibullahm" },
+    "labels": [{ "name": "ux" }],
+    "created_at": "2026-10-01T12:00:00Z",
+    "updated_at": "2026-10-02T12:00:00Z",
+    "body": "Citations should stay quiet."
+  },
+  {
+    "number": 63,
+    "title": "AI Cost & Usage Guard",
+    "state": "open",
+    "html_url": "https://github.com/habiibullahm/nibie-code/pull/63",
+    "user": { "login": "habiibullahm" },
+    "labels": [],
+    "created_at": "2026-10-07T12:00:00Z",
+    "updated_at": "2026-10-08T12:00:00Z",
+    "body": "PR disguised as issue",
+    "pull_request": { "url": "https://api.github.com/repos/habiibullahm/nibie-code/pulls/63" }
+  }
+]
