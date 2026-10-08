@@ -1,6 +1,7 @@
 -- Chat attachments: raise per-file limit to 10 MB / combined total to 20 MB, and add transient
--- direct-to-storage staging (signed upload → confirm/extract → delete) so uploads bypass the
--- Vercel Function ≈4.5 MB request-body limit. Durable store remains extracted text only.
+-- direct-to-storage staging (upload-init → TUS signed upload → finalize/extract → delete) so
+-- uploads bypass the Vercel Function ≈4.5 MB request-body limit. Durable store remains extracted text only.
+-- Keep as 0025 while Chat Roles #69 is open with its own 0025; renumber to 0026 after #69 merges.
 
 ALTER TABLE "message_attachments" DROP CONSTRAINT "message_attachments_size_bounds";--> statement-breakpoint
 ALTER TABLE "message_attachments" ADD CONSTRAINT "message_attachments_size_bounds" CHECK ("message_attachments"."size_bytes" between 1 and 10485760);--> statement-breakpoint
@@ -61,15 +62,15 @@ CREATE POLICY attachment_upload_sessions_insert_own ON public.attachment_upload_
 CREATE POLICY attachment_upload_sessions_delete_own ON public.attachment_upload_sessions FOR DELETE TO authenticated USING (user_id = (SELECT auth.uid()));--> statement-breakpoint
 GRANT SELECT, INSERT, DELETE ON public.attachment_upload_sessions TO authenticated;--> statement-breakpoint
 
-DO $chat_attachment_uploads$
+DO $chat_attachment_staging$
 BEGIN
 	IF to_regclass('storage.buckets') IS NULL OR to_regclass('storage.objects') IS NULL THEN
 		RETURN;
 	END IF;
 	INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 	VALUES (
-		'chat-attachment-uploads',
-		'chat-attachment-uploads',
+		'chat-attachment-staging',
+		'chat-attachment-staging',
 		false,
 		10485760,
 		ARRAY[
@@ -82,18 +83,18 @@ BEGIN
 		SET public = false,
 			file_size_limit = EXCLUDED.file_size_limit,
 			allowed_mime_types = EXCLUDED.allowed_mime_types;
-	IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'chat_attachment_uploads_select') THEN
-		CREATE POLICY chat_attachment_uploads_select ON storage.objects FOR SELECT TO authenticated
-			USING (bucket_id = 'chat-attachment-uploads' AND (storage.foldername(name))[1] = (SELECT auth.uid())::text);
+	IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'chat_attachment_staging_select') THEN
+		CREATE POLICY chat_attachment_staging_select ON storage.objects FOR SELECT TO authenticated
+			USING (bucket_id = 'chat-attachment-staging' AND (storage.foldername(name))[1] = (SELECT auth.uid())::text);
 	END IF;
-	IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'chat_attachment_uploads_insert') THEN
-		CREATE POLICY chat_attachment_uploads_insert ON storage.objects FOR INSERT TO authenticated
-			WITH CHECK (bucket_id = 'chat-attachment-uploads' AND (storage.foldername(name))[1] = (SELECT auth.uid())::text);
+	IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'chat_attachment_staging_insert') THEN
+		CREATE POLICY chat_attachment_staging_insert ON storage.objects FOR INSERT TO authenticated
+			WITH CHECK (bucket_id = 'chat-attachment-staging' AND (storage.foldername(name))[1] = (SELECT auth.uid())::text);
 	END IF;
-	IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'chat_attachment_uploads_delete') THEN
-		CREATE POLICY chat_attachment_uploads_delete ON storage.objects FOR DELETE TO authenticated
-			USING (bucket_id = 'chat-attachment-uploads' AND (storage.foldername(name))[1] = (SELECT auth.uid())::text);
+	IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'chat_attachment_staging_delete') THEN
+		CREATE POLICY chat_attachment_staging_delete ON storage.objects FOR DELETE TO authenticated
+			USING (bucket_id = 'chat-attachment-staging' AND (storage.foldername(name))[1] = (SELECT auth.uid())::text);
 	END IF;
 END
-$chat_attachment_uploads$;--> statement-breakpoint
+$chat_attachment_staging$;--> statement-breakpoint
 NOTIFY pgrst, 'reload schema';

@@ -119,6 +119,7 @@ describe("Supabase row-level security", () => {
     await sql`drop table if exists public.message_research cascade`;
     await sql`drop table if exists public.message_sources cascade`;
     await sql`drop type if exists public.citation_source_kind cascade`;
+    await sql`drop table if exists public.attachment_upload_sessions cascade`;
     await sql`drop table if exists public.message_attachments cascade`;
     await sql`drop table if exists public.workbench_documents cascade`;
     // Chunks reference room_files; drop them first so a re-migrate after incomplete cleanup cannot hit 42P07.
@@ -1052,6 +1053,36 @@ describe("Supabase row-level security", () => {
       await send(owner, otherThread, randomUUID(), [id], "In the other thread");
       await asUser(owner, (tx) => tx`delete from public.conversations where id = ${otherThread}`);
       expect(await sql`select id from public.message_attachments where id = ${id}`).toHaveLength(0);
+    });
+
+    it("keeps attachment upload sessions private and owner-path constrained", async () => {
+      expect(await sql`select relrowsecurity, relforcerowsecurity from pg_class where oid = 'public.attachment_upload_sessions'::regclass`).toEqual([{ relrowsecurity: true, relforcerowsecurity: true }]);
+      const sessionId = randomUUID();
+      const path = `${owner}/drafts/${sessionId}/${sessionId}.txt`;
+      await asUser(owner, (tx) => tx`insert into public.attachment_upload_sessions (id, user_id, storage_path, original_name, mime_type, declared_size, expires_at)
+        values (${sessionId}, ${owner}, ${path}, 'notes.txt', 'text/plain', 12, now() + interval '1 hour')`);
+      expect(await asUser(owner, (tx) => tx`select id, storage_path from public.attachment_upload_sessions where id = ${sessionId}`)).toEqual([{ id: sessionId, storage_path: path }]);
+      expect(await asUser(stranger, (tx) => tx`select id from public.attachment_upload_sessions where id = ${sessionId}`)).toHaveLength(0);
+      expect(await asUser(stranger, (tx) => tx`delete from public.attachment_upload_sessions where id = ${sessionId} returning id`)).toHaveLength(0);
+      const ownerPath = `${owner}/drafts/x/x.txt`;
+      await expect(asUser(stranger, (tx) => tx`insert into public.attachment_upload_sessions (user_id, storage_path, original_name, mime_type, declared_size, expires_at)
+        values (${owner}, ${ownerPath}, 'x.txt', 'text/plain', 1, now() + interval '1 hour')`)).rejects.toThrow();
+      await expect(asUser(owner, (tx) => tx`insert into public.attachment_upload_sessions (user_id, storage_path, original_name, mime_type, declared_size, expires_at)
+        values (${owner}, ${"other-user/drafts/x/x.txt"}, 'x.txt', 'text/plain', 1, now() + interval '1 hour')`)).rejects.toThrow();
+      await expect(asUser(owner, (tx) => tx`insert into public.attachment_upload_sessions (user_id, storage_path, original_name, mime_type, declared_size, expires_at)
+        values (${owner}, ${ownerPath}, 'x.txt', 'text/plain', 10485761, now() + interval '1 hour')`)).rejects.toThrow();
+      expect(await asUser(owner, (tx) => tx`delete from public.attachment_upload_sessions where id = ${sessionId} returning id`)).toEqual([{ id: sessionId }]);
+      expect(await sql`select id from public.attachment_upload_sessions where id = ${sessionId}`).toHaveLength(0);
+    });
+
+    it("accepts a 10 MB draft and refuses more than 20 MB linked together", async () => {
+      const ten = await draft(owner, "ten.txt", 10_485_760);
+      expect(ten).toBeTruthy();
+      const a = await draft(owner, "a.txt", 10_485_760);
+      const b = await draft(owner, "b.txt", 10_485_760);
+      const tooLarge = randomUUID();
+      await expect(send(owner, thread, tooLarge, [a, b])).rejects.toMatchObject({ code: "PT413" });
+      expect(await sql`select id from public.messages where id = ${tooLarge}`).toHaveLength(0);
     });
   });
 

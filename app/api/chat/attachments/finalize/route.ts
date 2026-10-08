@@ -3,17 +3,16 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getAuthenticatedUser } from "@/lib/auth/get-user";
 import { attachmentErrors } from "@/lib/attachments/rules";
 import { attachmentsUnavailable, tooManyDrafts } from "@/lib/attachments/service";
-import { abortAttachmentUpload, confirmAttachmentUpload, type AttachmentUploadClient } from "@/lib/attachments/storage";
+import { cancelAttachmentUpload, finalizeAttachmentUpload, type AttachmentUploadClient } from "@/lib/attachments/storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// PDF extract on a 10 MB upload can take a while; body stays tiny (JSON only).
 export const maxDuration = 60;
 
-const forbiddenFields = ["user_id", "userId", "message_id", "messageId", "conversation_id", "conversationId", "extracted_text", "extractedText"];
+const forbiddenFields = ["user_id", "userId", "message_id", "messageId", "conversation_id", "conversationId", "extracted_text", "extractedText", "path", "storage_path", "storagePath"];
 
-// After the browser PUTs bytes to Storage, download → extract → draft row → delete staging object.
-// Pass `{ uploadId, abort: true }` to drop a staging object without extracting.
+// Authenticated finalize: verify owner/path/size → extract (24k) → draft → delete staging.
+// Pass `{ uploadId, cancel: true }` (or abort: true) to drop staging without extracting.
 export async function POST(request: Request) {
   try {
     const supabase = await createSupabaseServerClient();
@@ -34,22 +33,22 @@ export async function POST(request: Request) {
     const uploadId = typeof record.uploadId === "string" ? record.uploadId : "";
     if (!uploadId) return NextResponse.json({ error: attachmentErrors.unavailable }, { status: 400 });
 
-    if (record.abort === true) {
-      const aborted = await abortAttachmentUpload(supabase as unknown as AttachmentUploadClient, user.id, uploadId);
-      if (aborted.error) return NextResponse.json({ error: aborted.error }, { status: 503 });
+    if (record.cancel === true || record.abort === true) {
+      const cancelled = await cancelAttachmentUpload(supabase as unknown as AttachmentUploadClient, user.id, uploadId);
+      if (cancelled.error) return NextResponse.json({ error: cancelled.error }, { status: 503 });
       return NextResponse.json({ ok: true }, { status: 200 });
     }
 
-    const confirmed = await confirmAttachmentUpload(supabase as unknown as AttachmentUploadClient, user.id, uploadId);
-    if (confirmed.error || !confirmed.data) {
-      const status = confirmed.error === attachmentErrors.tooLarge ? 413
-        : confirmed.error === tooManyDrafts ? 409
-        : confirmed.error === attachmentsUnavailable || confirmed.error === attachmentErrors.saveFailed ? 503
-        : confirmed.error === attachmentErrors.unavailable ? 409
+    const finalized = await finalizeAttachmentUpload(supabase as unknown as AttachmentUploadClient, user.id, uploadId);
+    if (finalized.error || !finalized.data) {
+      const status = finalized.error === attachmentErrors.tooLarge ? 413
+        : finalized.error === tooManyDrafts ? 409
+        : finalized.error === attachmentsUnavailable || finalized.error === attachmentErrors.saveFailed ? 503
+        : finalized.error === attachmentErrors.unavailable ? 409
         : 400;
-      return NextResponse.json({ error: confirmed.error ?? attachmentErrors.saveFailed }, { status });
+      return NextResponse.json({ error: finalized.error ?? attachmentErrors.saveFailed }, { status });
     }
-    return NextResponse.json({ attachment: confirmed.data }, { status: 201 });
+    return NextResponse.json({ attachment: finalized.data }, { status: 201 });
   } catch {
     return NextResponse.json({ error: attachmentErrors.saveFailed }, { status: 503 });
   }

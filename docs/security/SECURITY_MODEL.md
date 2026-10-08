@@ -857,8 +857,8 @@ Chat attachments store the extracted text of a file a person attached to their o
 - The owner is `auth.uid()` from the session. The upload route refuses owner, message, conversation, and text fields.
 - Row-level security is enabled and forced. Policies allow reading own rows, inserting unlinked drafts only, deleting own unsent drafts only, and linking a draft once. Only `conversation_id` and `message_id` are updatable.
 - A composite foreign key ties a sent attachment to one of the owner's messages in the same conversation, so another person's message or another conversation cannot claim it.
-- The extension and bytes decide the type; images, binary content, and anything else are refused. PDF text is read without scripts, forms, or network access. Durable storage keeps extracted text only; originals are not retained after confirm.
-- Uploads use a short-lived signed URL into the private `chat-attachment-uploads` bucket (owner-folder RLS) so file bytes do not pass through the Vercel Function body. Confirm downloads, extracts, then deletes the staging object. Session metadata lives in `attachment_upload_sessions` with owner-only RLS.
+- The extension and bytes decide the type; images, binary content, and anything else are refused. PDF text is read without scripts, forms, or network access. Durable storage keeps extracted text only; originals are not retained after finalize.
+- Uploads use a short-lived signed TUS token into the private `chat-attachment-staging` bucket (10 MiB, owner-folder RLS) so file bytes do not pass through the Vercel Function body. Finalize verifies owner/path/size/type, downloads, extracts (24k), then deletes the staging object. Session metadata lives in `attachment_upload_sessions` with owner-only RLS.
 - Attachment text is untrusted context inside explicit boundaries, never part of the product-policy prompt, never sent to the browser, and never logged.
 
 ---

@@ -1,10 +1,19 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import { ATTACHMENT_TYPES, ATTACHMENT_UPLOAD_SESSION_TTL_MS, CHAT_ATTACHMENT_UPLOADS_BUCKET, DRAFT_ATTACHMENT_TTL_MS, MAX_ATTACHMENT_BYTES, MAX_DRAFT_ATTACHMENTS, type AttachmentExtension } from "@/lib/attachments/limits";
+import {
+  ATTACHMENT_TYPES,
+  ATTACHMENT_UPLOAD_SESSION_TTL_MS,
+  CHAT_ATTACHMENT_STAGING_BUCKET,
+  DRAFT_ATTACHMENT_TTL_MS,
+  MAX_ATTACHMENT_BYTES,
+  MAX_DRAFT_ATTACHMENTS,
+  type AttachmentExtension,
+} from "@/lib/attachments/limits";
 import { attachmentErrors, attachmentName, checkAttachmentFile } from "@/lib/attachments/rules";
 import { attachmentsUnavailable, saveDraftAttachment, tooManyDrafts, type AttachmentClient } from "@/lib/attachments/service";
 import type { AttachmentSummary } from "@/lib/attachments/types";
+import { getSupabasePublicConfig } from "@/lib/config/supabase";
 import { schemaUnavailable } from "@/lib/chat/schema-error";
 import { operationalCodes } from "@/lib/observability/codes";
 import { logError } from "@/lib/observability/logger";
@@ -31,11 +40,12 @@ export type AttachmentUploadClient = AttachmentClient & {
   storage: { from: (bucket: string) => StorageBucket };
 };
 
-export type UploadSessionTicket = {
+export type UploadInitTicket = {
   uploadId: string;
   path: string;
   token: string;
-  signedUrl: string;
+  bucket: string;
+  tusEndpoint: string;
   contentType: string;
 };
 
@@ -56,14 +66,21 @@ function sessions(client: AttachmentUploadClient) {
 }
 
 function buildStagingPath(ownerId: string, uploadId: string, extension: AttachmentExtension) {
+  // Server-generated path only: first folder is auth.uid() for Storage RLS.
   return `${ownerId}/drafts/${uploadId}/${uploadId}.${extension}`;
 }
 
-async function removeStaging(client: AttachmentUploadClient, path: string) {
-  await client.storage.from(CHAT_ATTACHMENT_UPLOADS_BUCKET).remove([path]).then(() => undefined, () => undefined);
+function tusSignedEndpoint() {
+  const { url } = getSupabasePublicConfig();
+  return `${url.replace(/\/$/, "")}/storage/v1/upload/resumable/sign`;
 }
 
-async function cleanupExpiredSessions(client: AttachmentUploadClient, ownerId: string, now: number) {
+async function removeStaging(client: AttachmentUploadClient, path: string) {
+  await client.storage.from(CHAT_ATTACHMENT_STAGING_BUCKET).remove([path]).then(() => undefined, () => undefined);
+}
+
+/** Drop expired staging sessions + objects for this owner (TTL reconcile for abandoned uploads). */
+export async function reconcileAbandonedAttachmentUploads(client: AttachmentUploadClient, ownerId: string, now = Date.now()) {
   const expired = await sessions(client)
     .select("id,storage_path")
     .eq("user_id", ownerId)
@@ -73,27 +90,26 @@ async function cleanupExpiredSessions(client: AttachmentUploadClient, ownerId: s
     await removeStaging(client, row.storage_path);
     await Promise.resolve(sessions(client).delete().eq("id", row.id)).then(() => undefined, () => undefined);
   }
-  // Abandoned extracted drafts stay on the existing TTL path in saveDraftAttachment.
   await Promise.resolve(
     client.from("message_attachments").delete().is("message_id", null).lt("created_at", new Date(now - DRAFT_ATTACHMENT_TTL_MS).toISOString()),
   ).then(() => undefined, () => undefined);
 }
 
-export async function createAttachmentUploadSession(
+export async function initAttachmentUpload(
   client: AttachmentUploadClient,
   ownerId: string,
   file: { name: string; size: number; type: string },
   now = Date.now(),
-): Promise<{ data?: UploadSessionTicket; error?: string }> {
+): Promise<{ data?: UploadInitTicket; error?: string }> {
   const checked = checkAttachmentFile(file);
   if ("error" in checked) return { error: checked.error };
 
-  await cleanupExpiredSessions(client, ownerId, now);
+  await reconcileAbandonedAttachmentUploads(client, ownerId, now);
 
   const draftCount = await client.from("message_attachments").select("id", { count: "exact", head: true }).is("message_id", null);
   if (schemaUnavailable(draftCount.error)) return { error: attachmentsUnavailable };
   if (draftCount.error) {
-    logError("attachment.session.failed", { code: operationalCodes.attachmentSaveFailed, stage: "count" });
+    logError("attachment.init.failed", { code: operationalCodes.attachmentSaveFailed, stage: "count" });
     return { error: attachmentErrors.saveFailed };
   }
   if ((draftCount.count ?? 0) >= MAX_DRAFT_ATTACHMENTS) return { error: tooManyDrafts };
@@ -114,14 +130,14 @@ export async function createAttachmentUploadSession(
   }).select("id").maybeSingle();
   if (schemaUnavailable(inserted.error)) return { error: attachmentsUnavailable };
   if (inserted.error || !inserted.data) {
-    logError("attachment.session.failed", { code: operationalCodes.attachmentSaveFailed, stage: "insert" });
+    logError("attachment.init.failed", { code: operationalCodes.attachmentSaveFailed, stage: "insert" });
     return { error: attachmentErrors.saveFailed };
   }
 
-  const signed = await client.storage.from(CHAT_ATTACHMENT_UPLOADS_BUCKET).createSignedUploadUrl(path);
-  if (signed.error || !signed.data?.signedUrl || !signed.data.token) {
+  const signed = await client.storage.from(CHAT_ATTACHMENT_STAGING_BUCKET).createSignedUploadUrl(path);
+  if (signed.error || !signed.data?.token) {
     await Promise.resolve(sessions(client).delete().eq("id", uploadId)).then(() => undefined, () => undefined);
-    logError("attachment.session.failed", { code: operationalCodes.attachmentSaveFailed, stage: "sign" });
+    logError("attachment.init.failed", { code: operationalCodes.attachmentSaveFailed, stage: "sign" });
     return { error: attachmentErrors.saveFailed };
   }
 
@@ -130,13 +146,14 @@ export async function createAttachmentUploadSession(
       uploadId,
       path: signed.data.path || path,
       token: signed.data.token,
-      signedUrl: signed.data.signedUrl,
+      bucket: CHAT_ATTACHMENT_STAGING_BUCKET,
+      tusEndpoint: tusSignedEndpoint(),
       contentType: mimeType,
     },
   };
 }
 
-export async function confirmAttachmentUpload(
+export async function finalizeAttachmentUpload(
   client: AttachmentUploadClient,
   ownerId: string,
   uploadId: string,
@@ -147,7 +164,7 @@ export async function confirmAttachmentUpload(
   const loaded = await sessions(client).select("id,user_id,storage_path,original_name,mime_type,declared_size,expires_at").eq("id", uploadId).maybeSingle();
   if (schemaUnavailable(loaded.error)) return { error: attachmentsUnavailable };
   if (loaded.error) {
-    logError("attachment.confirm.failed", { code: operationalCodes.attachmentSaveFailed, stage: "session" });
+    logError("attachment.finalize.failed", { code: operationalCodes.attachmentSaveFailed, stage: "session" });
     return { error: attachmentErrors.saveFailed };
   }
   const session = loaded.data as SessionRow | null;
@@ -162,14 +179,14 @@ export async function confirmAttachmentUpload(
     return { error: attachmentErrors.saveFailed };
   }
 
-  const downloaded = await client.storage.from(CHAT_ATTACHMENT_UPLOADS_BUCKET).download(session.storage_path);
+  const downloaded = await client.storage.from(CHAT_ATTACHMENT_STAGING_BUCKET).download(session.storage_path);
   if (downloaded.error || !downloaded.data) {
     await Promise.resolve(sessions(client).delete().eq("id", uploadId)).then(() => undefined, () => undefined);
     return { error: attachmentErrors.unavailable };
   }
 
   const bytes = new Uint8Array(await downloaded.data.arrayBuffer());
-  // Always drop staging bytes after read (success and failure).
+  // Always delete staging after read (success and failure paths).
   await removeStaging(client, session.storage_path);
   await Promise.resolve(sessions(client).delete().eq("id", uploadId)).then(() => undefined, () => undefined);
 
@@ -180,6 +197,7 @@ export async function confirmAttachmentUpload(
   const named = attachmentName(session.original_name);
   if ("error" in named) return { error: named.error };
 
+  // extractAttachment (inside saveDraftAttachment) re-checks type/bytes; text capped at 24k chars.
   return saveDraftAttachment(client, ownerId, {
     filename: session.original_name,
     mimeType: session.mime_type,
@@ -187,7 +205,7 @@ export async function confirmAttachmentUpload(
   }, now);
 }
 
-export async function abortAttachmentUpload(client: AttachmentUploadClient, ownerId: string, uploadId: string): Promise<{ error?: string }> {
+export async function cancelAttachmentUpload(client: AttachmentUploadClient, ownerId: string, uploadId: string): Promise<{ error?: string }> {
   if (!uuidPattern.test(uploadId)) return { error: attachmentErrors.saveFailed };
   const loaded = await sessions(client).select("id,user_id,storage_path").eq("id", uploadId).maybeSingle();
   if (loaded.error && !schemaUnavailable(loaded.error)) return { error: attachmentErrors.saveFailed };
@@ -197,3 +215,10 @@ export async function abortAttachmentUpload(client: AttachmentUploadClient, owne
   await Promise.resolve(sessions(client).delete().eq("id", uploadId)).then(() => undefined, () => undefined);
   return {};
 }
+
+/** @deprecated Prefer initAttachmentUpload */
+export const createAttachmentUploadSession = initAttachmentUpload;
+/** @deprecated Prefer finalizeAttachmentUpload */
+export const confirmAttachmentUpload = finalizeAttachmentUpload;
+/** @deprecated Prefer cancelAttachmentUpload */
+export const abortAttachmentUpload = cancelAttachmentUpload;

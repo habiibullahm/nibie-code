@@ -2,7 +2,7 @@
 
 export const MAX_ATTACHMENTS_PER_MESSAGE = 3;
 
-// Per-file upload cap. Bytes go client → Supabase Storage (signed URL), then the server downloads to extract text.
+// Per-file upload cap. Bytes go client → Supabase Storage (signed TUS), then the server downloads to extract text.
 // They must not pass through the Vercel Function request body (≈4.5 MB platform limit).
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
@@ -19,9 +19,13 @@ export const MAX_PDF_PAGES = 50;
 export const MAX_DRAFT_ATTACHMENTS = 20;
 export const DRAFT_ATTACHMENT_TTL_MS = 24 * 60 * 60 * 1000;
 
-// Transient staging bucket for direct-to-storage uploads. Objects are removed after extract (or when the session expires).
-export const CHAT_ATTACHMENT_UPLOADS_BUCKET = "chat-attachment-uploads";
+// Private staging bucket for TUS direct uploads. Objects are removed after finalize/fail/cancel or session TTL.
+export const CHAT_ATTACHMENT_STAGING_BUCKET = "chat-attachment-staging";
+/** @deprecated Use CHAT_ATTACHMENT_STAGING_BUCKET */
+export const CHAT_ATTACHMENT_UPLOADS_BUCKET = CHAT_ATTACHMENT_STAGING_BUCKET;
 export const ATTACHMENT_UPLOAD_SESSION_TTL_MS = 2 * 60 * 60 * 1000;
+// Supabase TUS recommended chunk size (must be ≤6 MiB for the hosted Storage TUS endpoint).
+export const ATTACHMENT_TUS_CHUNK_SIZE = 6 * 1024 * 1024;
 
 export const ATTACHMENT_ACCEPT = ".txt,.md,.markdown,.json,.csv,.pdf,.ts,.tsx,.js,.jsx,.py,.java,.go,.rs,.sql,.html,.css,.yaml,.yml,.xml";
 

@@ -447,7 +447,7 @@ export const workbenchDocuments = pgTable(
 );
 
 // A chat attachment: text extracted from a file the owner attached to one of their messages.
-// Short-lived staging metadata for direct-to-storage chat uploads. Bytes live in Storage only until confirm/abort/TTL.
+// Short-lived staging metadata for direct-to-storage chat uploads. Bytes live in Storage only until finalize/cancel/TTL.
 export const attachmentUploadSessions = pgTable(
   "attachment_upload_sessions",
   {
