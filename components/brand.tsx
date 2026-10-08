@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { getProductName, getWordmark } from "@/lib/config/branding";
-import { logoBodyPath, logoCap, logoFoldPath, logoViewBox } from "@/lib/config/logo-mark";
+import { logoBodyPath, logoFoldPath, logoViewBox } from "@/lib/config/logo-mark";
 
 type Props = {
   variant?: "lockup" | "mark" | "wordmark";
@@ -20,9 +20,8 @@ export function BrandMark({ activity = "idle" }: { activity?: BrandActivity }) {
 
 function LogoMark() {
   return <svg viewBox={logoViewBox}>
-    <path fill="var(--logo-fold)" d={logoFoldPath} />
-    <path fill="var(--logo-body)" d={logoBodyPath} />
-    <rect fill="var(--logo-body)" x={logoCap.x} y={logoCap.y} width={logoCap.width} height={logoCap.height} rx={logoCap.rx} />
+    <path className="logo-fold" fill="var(--logo-fold)" d={logoFoldPath} />
+    <path className="logo-body" fill="var(--logo-body)" d={logoBodyPath} />
   </svg>;
 }
 

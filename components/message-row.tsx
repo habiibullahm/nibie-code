@@ -25,6 +25,8 @@ type Props = {
   disabled: boolean;
   editing: boolean;
   responseFailed?: boolean;
+  // Label for the pre-first-token indicator (Responding… / Thinking… / Researching…); only the in-flight reply receives it.
+  waitLabel?: string;
   onRegenerate: () => void;
   onStartEdit: (id: string) => void;
   onCancelEdit: () => void;
@@ -63,16 +65,31 @@ function MessageTime({ value }: { value: string | undefined }) {
 }
 
 // Memoized per message: while a reply streams, only the row whose message object changed re-renders.
-export const MessageRow = memo(function MessageRow({ message, initial, isLast, isLastUser, canMutate, disabled, editing, responseFailed = false, onRegenerate, onStartEdit, onCancelEdit, onSaveEdit }: Props) {
+export const MessageRow = memo(function MessageRow({ message, initial, isLast, isLastUser, canMutate, disabled, editing, responseFailed = false, waitLabel, onRegenerate, onStartEdit, onCancelEdit, onSaveEdit }: Props) {
   if (message.role === "assistant") {
     const waiting = message.status === "streaming" && (!message.content || message.content === claimPlaceholder);
     const canCopy = message.status !== "streaming" && message.status !== "error" && Boolean(message.content) && !placeholderResponses.has(message.content);
     const canRegenerate = canMutate && isLast && message.status === "complete" && canCopy;
     const canRetry = canMutate && isLast && (message.status === "error" || message.status === "interrupted");
+    const responseStatus = message.researchStage ? `Nibie is ${RESEARCH_STAGE_LABELS[message.researchStage].toLowerCase()}` : "Nibie is responding";
+    // No author header. Before the first token a status label shows (after a 300ms grace period, in CSS); once text arrives it renders as-is, without motion.
+    // Status labels (Deep Research, Stopped, errors) and the optional timestamp keep a small meta line.
+    const statuses = [
+      message.research ? `Deep Research${message.research.status === "incomplete" ? " · Incomplete" : message.research.status === "failed" ? " · Failed" : ""}` : null,
+      message.status === "interrupted" ? "Stopped" : null,
+    ].filter(Boolean).join(" · ");
+    const failed = message.status === "error";
     return <article className="message-row assistant">
       <div className="message-content assistant">
-        <div className="message-author">Nibie{message.research ? <span className="message-status"> · Deep Research{message.research.status === "incomplete" ? " · Incomplete" : message.research.status === "failed" ? " · Failed" : ""}</span> : null}{message.status === "interrupted" ? <span className="message-status"> · Stopped</span> : message.status === "error" ? <span className="message-status is-danger">{" · Couldn't respond"}</span> : null}<MessageTime value={message.created_at} /></div>
-        {waiting ? <span className="research-wait" role="status" aria-label={message.researchStage ? `Nibie is ${RESEARCH_STAGE_LABELS[message.researchStage].toLowerCase()}` : "Nibie is responding"}>{message.researchStage ? <span className="research-stage">{RESEARCH_STAGE_LABELS[message.researchStage]}</span> : null}<span className="thinking-dots"><i /><i /><i /></span></span> : <><MessageMarkdown content={message.content} sources={message.sources} />{message.status === "streaming" && <span className="thinking-dots is-inline" role="status" aria-label="Nibie is responding"><i /><i /><i /></span>}</>}
+        {message.status === "streaming" ? <span className="visually-hidden" role="status">{responseStatus}</span> : null}
+        {!waiting && (statuses || failed || message.created_at) ? <div className="message-author">
+          {statuses ? <span className="message-status">{statuses}</span> : null}
+          {failed ? <span className="message-status is-danger">{statuses ? " · " : ""}{"Couldn't respond"}</span> : null}
+          <MessageTime value={message.created_at} />
+        </div> : null}
+        {waiting
+          ? <div className="response-waiting"><span className="response-thinking" aria-hidden="true">{message.researchStage ? "Researching…" : waitLabel ?? "Responding…"}</span>{message.researchStage ? <span className="research-stage">{RESEARCH_STAGE_LABELS[message.researchStage]}</span> : null}</div>
+          : <MessageMarkdown content={message.content} sources={message.sources} />}
         {message.sources?.length && !waiting ? <MessageSources sources={message.sources} /> : null}
         {(canCopy || canRegenerate || canRetry) && <div className="message-actions">
           {canCopy && <CopyButton text={message.content} label="Copy response" />}
