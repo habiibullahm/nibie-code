@@ -178,10 +178,10 @@
       "breakpoints": true
     },
     {
-      "idx": 26,
+      "idx": 25,
       "version": "7",
-      "when": 1791570000000,
-      "tag": "0026_chat_attachment_direct_upload_10mb",
+      "when": 1791560000000,
+      "tag": "0025_chat_attachment_direct_upload_10mb",
       "breakpoints": true
     }
   ]
