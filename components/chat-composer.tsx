@@ -91,6 +91,16 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
     }
     setCanExpand(fitCollapsedTextarea(element));
   }, [draft, expanded, attachments.items.length]);
+  // Remember the last focused selection so Expand/Collapse can restore it after the button steals focus.
+  useEffect(() => {
+    const onSelectionChange = () => {
+      const element = textareaRef.current;
+      if (!element || document.activeElement !== element) return;
+      selectionRef.current = { start: element.selectionStart, end: element.selectionEnd, direction: element.selectionDirection };
+    };
+    document.addEventListener("selectionchange", onSelectionChange);
+    return () => document.removeEventListener("selectionchange", onSelectionChange);
+  }, []);
   useEffect(() => {
     const element = textareaRef.current;
     if (!element) return;
@@ -197,7 +207,7 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
 
   function toggleExpanded() {
     const textarea = textareaRef.current;
-    const selection = textarea ? { start: textarea.selectionStart, end: textarea.selectionEnd, direction: textarea.selectionDirection } : null;
+    const selection = selectionRef.current ?? (textarea ? { start: textarea.selectionStart, end: textarea.selectionEnd, direction: textarea.selectionDirection } : null);
     setExpanded((value) => !value);
     requestAnimationFrame(() => {
       if (!textarea) return;
