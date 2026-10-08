@@ -484,6 +484,8 @@ export const messageAttachments = pgTable(
     originalName: text("original_name").notNull(),
     mimeType: text("mime_type").notNull(),
     sizeBytes: integer("size_bytes").notNull(),
+    // Nullable for pre-download rows; new uploads set an owner-scoped path in chat-attachments.
+    storagePath: text("storage_path"),
     extractedText: text("extracted_text").notNull(),
     truncated: boolean("truncated").notNull().default(false),
     pageCount: integer("page_count"),
@@ -497,6 +499,7 @@ export const messageAttachments = pgTable(
     }).onDelete("cascade"),
     index("message_attachments_message_idx").on(table.conversationId, table.messageId),
     index("message_attachments_draft_idx").on(table.userId, table.createdAt).where(sql`${table.messageId} IS NULL`),
+    unique("message_attachments_storage_path_key").on(table.storagePath),
     check("message_attachments_link_pair", sql`(${table.conversationId} IS NULL) = (${table.messageId} IS NULL)`),
     check("message_attachments_name_length", sql`char_length(${table.originalName}) between 1 and 120 and ${table.originalName} = btrim(${table.originalName})`),
     check(
@@ -506,6 +509,10 @@ export const messageAttachments = pgTable(
     check("message_attachments_size_bounds", sql`${table.sizeBytes} between 1 and 10485760`),
     check("message_attachments_text_bounds", sql`char_length(${table.extractedText}) between 1 and 24000`),
     check("message_attachments_page_bounds", sql`${table.pageCount} IS NULL OR ${table.pageCount} between 1 and 100000`),
+    check(
+      "message_attachments_owner_path",
+      sql`${table.storagePath} IS NULL OR ${table.storagePath} like (${table.userId})::text || '/attachments/' || (${table.id})::text || '/%'`,
+    ),
   ],
 );
 

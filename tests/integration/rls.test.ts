@@ -1055,6 +1055,18 @@ describe("Supabase row-level security", () => {
       expect(await sql`select id from public.message_attachments where id = ${id}`).toHaveLength(0);
     });
 
+    it("allows an owner-scoped durable storage_path and refuses a foreign path", async () => {
+      const id = randomUUID();
+      const path = `${owner}/attachments/${id}/${id}.txt`;
+      await asUser(owner, (tx) => tx`insert into public.message_attachments (id, user_id, original_name, mime_type, size_bytes, storage_path, extracted_text)
+        values (${id}, ${owner}, 'notes.txt', 'text/plain', 12, ${path}, 'Cedar Harbor')`);
+      expect(await asUser(owner, (tx) => tx`select storage_path from public.message_attachments where id = ${id}`)).toEqual([{ storage_path: path }]);
+      expect(await asUser(stranger, (tx) => tx`select id from public.message_attachments where id = ${id}`)).toHaveLength(0);
+      const stolen = randomUUID();
+      await expect(asUser(owner, (tx) => tx`insert into public.message_attachments (id, user_id, original_name, mime_type, size_bytes, storage_path, extracted_text)
+        values (${stolen}, ${owner}, 'x.txt', 'text/plain', 1, ${`${stranger}/attachments/${stolen}/${stolen}.txt`}, 'x')`)).rejects.toThrow();
+    });
+
     it("keeps attachment upload sessions private and owner-path constrained", async () => {
       expect(await sql`select relrowsecurity, relforcerowsecurity from pg_class where oid = 'public.attachment_upload_sessions'::regclass`).toEqual([{ relrowsecurity: true, relforcerowsecurity: true }]);
       const sessionId = randomUUID();
