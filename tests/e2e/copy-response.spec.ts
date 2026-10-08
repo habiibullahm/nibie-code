@@ -74,15 +74,17 @@ test("formatted copy falls back to plain text when ClipboardItem write is denied
   await openSample(page);
 
   await page.evaluate(() => {
-    const proto = Navigator.prototype as Navigator & { clipboard: Clipboard };
-    const original = proto.clipboard;
+    const original = navigator.clipboard;
+    const writeText = (text: string) => original.writeText(text);
+    const readText = () => original.readText();
+    const read = () => original.read();
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: {
         write: async () => { throw new Error("denied"); },
-        writeText: original.writeText.bind(original),
-        read: original.read?.bind(original),
-        readText: original.readText.bind(original),
+        writeText,
+        read,
+        readText,
       },
     });
   });
