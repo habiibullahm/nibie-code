@@ -118,6 +118,16 @@ describe("response quality rules and compatibility", () => {
     expect(policy).toMatch(/use \[duration\] instead of guessing a conventional demo length/);
   });
 
+  it("describes real tool, memory, and authorized Room retrieval without claiming unsupplied capabilities", () => {
+    const policy = toProviderMessages(buildContext(input("What information can you access?", "Balanced")))[0].content;
+    expect(policy).toContain("Use only tool results and saved memories supplied for this request");
+    expect(policy).toContain("never claim an action, live verification, or cross-conversation recall that was not performed");
+    expect(policy).toContain("Authorized Room-file excerpts may be selected or automatically retrieved");
+    expect(policy).toContain("never claim access to files outside supplied context");
+    expect(policy).not.toContain("No tools or other-conversation memory");
+    expect(policy).not.toContain("Only explicitly selected file text is used");
+  });
+
   it("counts the entire selected policy once in the core token budget", () => {
     const plan = buildContext(input("hello"));
     const core = plan.blocks.find((block) => block.id === "core")!;

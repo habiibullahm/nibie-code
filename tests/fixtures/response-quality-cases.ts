@@ -26,7 +26,7 @@ export const clinicQualityRoom: RoomContextInput = {
 
 // Human-readable output rubrics, not canned answers or brittle wording scores.
 export const responseQualityCases: ResponseQualityCase[] = [
-  { id: "simple-question", request: "What is a Room in Nibie?", expected: ["Direct, short explanation", "Separate thread histories and shared project context", "Only explicitly selected files are included"] },
+  { id: "simple-question", request: "What is a Room in Nibie?", expected: ["Direct, short explanation", "Separate thread histories and shared project context", "Only authorized Room file excerpts supplied to this request are used"] },
   { id: "coding", request: "Write a TypeScript function to debounce input.", expected: ["Usable typed code first", "Minimal explanation", "No invented APIs or execution claims"] },
   { id: "debugging", request: "Context build is 2ms but response starts after 4 seconds. Debug why my stream feels slow.", expected: ["2ms and 4 seconds are observed evidence", "Provider TTFT is a hypothesis, not a measured root cause", "Recommend first-token instrumentation before optimization"] },
   { id: "writing", request: "Draft a short outreach email offering a product demo. Give me only the final email, no explanation.", expected: ["Email only", "No generic intro, commentary, or follow-up offer", "Placeholders rather than invented recipient facts"] },
