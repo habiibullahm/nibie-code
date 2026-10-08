@@ -61,6 +61,8 @@ export type DeepResearchChatStreamInput = {
   memories: MemoryRecord[] | undefined;
   recallOperation: RecallOperationStatus;
   rows: { role: string; content: string; position: number }[];
+  /** HTTP preflight already reserved this generation; do not reserve again. */
+  weeklyUsageReserved?: boolean;
 };
 
 /**
@@ -88,6 +90,7 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
     memories,
     recallOperation,
     rows,
+    weeklyUsageReserved = false,
   } = input;
 
   const headers = { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache, no-transform" };
@@ -226,6 +229,7 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
 
       try {
         if (clientCancelled || aborter.signal.aborted) {
+          await releaseReservation();
           await persist("Response stopped.", "interrupted");
           logInfo("research.interrupted", { requestId, stage: "start", durationMs: durationMs() });
           enqueue("status", { status: "interrupted" });
@@ -274,6 +278,7 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
         // True user Stop / client cancel only. Gather-deadline "interrupted" (no user abort) must not
         // become a Stopped placeholder — with evidence it synthesizes as incomplete below.
         if (userStopped || clientCancelled || aborter.signal.aborted) {
+          await releaseReservation();
           await persist(stoppedPlaceholder, "interrupted");
           logInfo("research.interrupted", { requestId, durationMs: durationMs(), ...researchUsagePolicyFields() });
           enqueue("status", { status: "interrupted" });
@@ -290,7 +295,7 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
           research = { ...research, status: "incomplete" };
         }
 
-        // Empty collection: hard-fail. Never reserve credits or synthesize a "research" answer.
+        // Empty collection: hard-fail. Release any held preflight reservation; never synthesize.
         if (research.evidence.length === 0 || research.web.length === 0) {
           const message =
             research.incompleteNotice ??
@@ -304,6 +309,7 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
             code: operationalCodes.deepResearchFailed,
             ...researchUsagePolicyFields(),
           });
+          await releaseReservation();
           await persist(message, "error");
           enqueue("error", { error: message });
           return;
@@ -369,94 +375,97 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
           });
         } catch {
           logError("context.build.failed", { requestId, code: operationalCodes.contextBuildFailed, stage: "context", durationMs: durationMs() });
+          await releaseReservation();
           await persist("Response unavailable.", "error");
           enqueue("error", { error: safeError });
           return;
         }
 
-        // Reserve credits for synthesis only (temporary undercount of planner/search).
-        const reservationStartedAt = Date.now();
-        let reservation: {
-          accepted: boolean;
-          credits_charged: number;
-          credits_used: number;
-          credits_remaining: number;
-          reset_at: string;
-        } | null = null;
-        let reservationError: unknown = null;
-        try {
-          const result = await supabase
-            .rpc("reserve_weekly_ai_usage", {
-              p_generation_id: assistant.id,
-              p_logical_mode: mode,
-            })
-            .single<{
-              accepted: boolean;
-              credits_charged: number;
-              credits_used: number;
-              credits_remaining: number;
-              reset_at: string;
-            }>();
-          reservation = result.data;
-          reservationError = result.error;
-        } catch {
-          reservationError = new Error("Reservation request failed.");
-        }
-        usageReservationMs = Date.now() - reservationStartedAt;
+        // Credits for synthesis (temporary undercount of planner/search). Preflight may already hold them.
+        if (!weeklyUsageReserved) {
+          const reservationStartedAt = Date.now();
+          let reservation: {
+            accepted: boolean;
+            credits_charged: number;
+            credits_used: number;
+            credits_remaining: number;
+            reset_at: string;
+          } | null = null;
+          let reservationError: unknown = null;
+          try {
+            const result = await supabase
+              .rpc("reserve_weekly_ai_usage", {
+                p_generation_id: assistant.id,
+                p_logical_mode: mode,
+              })
+              .single<{
+                accepted: boolean;
+                credits_charged: number;
+                credits_used: number;
+                credits_remaining: number;
+                reset_at: string;
+              }>();
+            reservation = result.data;
+            reservationError = result.error;
+          } catch {
+            reservationError = new Error("Reservation request failed.");
+          }
+          usageReservationMs = Date.now() - reservationStartedAt;
 
-        if (
-          reservationError ||
-          !reservation ||
-          typeof reservation.accepted !== "boolean" ||
-          !Number.isInteger(reservation.credits_remaining) ||
-          reservation.credits_remaining < 0 ||
-          reservation.credits_remaining > WEEKLY_FREE_CREDIT_LIMIT ||
-          typeof reservation.reset_at !== "string" ||
-          !Number.isFinite(Date.parse(reservation.reset_at))
-        ) {
-          logError("weekly_usage.reservation.failed", {
+          if (
+            reservationError ||
+            !reservation ||
+            typeof reservation.accepted !== "boolean" ||
+            !Number.isInteger(reservation.credits_remaining) ||
+            reservation.credits_remaining < 0 ||
+            reservation.credits_remaining > WEEKLY_FREE_CREDIT_LIMIT ||
+            typeof reservation.reset_at !== "string" ||
+            !Number.isFinite(Date.parse(reservation.reset_at))
+          ) {
+            logError("weekly_usage.reservation.failed", {
+              requestId,
+              logicalMode: mode,
+              durationMs: usageReservationMs,
+              code: operationalCodes.requestFailed,
+            });
+            await releaseReservation();
+            await persist(clientCancelled ? "Response stopped." : "Response unavailable.", clientCancelled ? "interrupted" : "error");
+            enqueue("error", { error: safeError });
+            return;
+          }
+          if (!reservation.accepted) {
+            logWarn("weekly_usage.limit.rejected", {
+              requestId,
+              logicalMode: mode,
+              creditsCharged: 0,
+              creditsRemaining: reservation.credits_remaining,
+            });
+            await persist("Weekly usage limit reached.", "error");
+            enqueue("error", { error: "You've reached your weekly Nibie usage limit." });
+            return;
+          }
+          if (reservation.credits_charged !== weeklyCreditCost[mode]) {
+            logError("weekly_usage.reservation.failed", {
+              requestId,
+              logicalMode: mode,
+              durationMs: usageReservationMs,
+              reason: "policy_mismatch",
+              code: operationalCodes.requestFailed,
+            });
+            await releaseReservation();
+            await persist("Response unavailable.", "error");
+            enqueue("error", { error: safeError });
+            return;
+          }
+          logInfo("weekly_usage.reservation.accepted", {
             requestId,
             logicalMode: mode,
-            durationMs: usageReservationMs,
-            code: operationalCodes.requestFailed,
-          });
-          await releaseReservation();
-          await persist(clientCancelled ? "Response stopped." : "Response unavailable.", clientCancelled ? "interrupted" : "error");
-          enqueue("error", { error: safeError });
-          return;
-        }
-        if (!reservation.accepted) {
-          logWarn("weekly_usage.limit.rejected", {
-            requestId,
-            logicalMode: mode,
-            creditsCharged: 0,
+            creditsCharged: reservation.credits_charged,
             creditsRemaining: reservation.credits_remaining,
+            reservationLatencyMs: usageReservationMs,
+            ...researchUsagePolicyFields(),
           });
-          await persist("Weekly usage limit reached.", "error");
-          enqueue("error", { error: "You've reached your weekly Nibie usage limit." });
-          return;
         }
-        if (reservation.credits_charged !== weeklyCreditCost[mode]) {
-          logError("weekly_usage.reservation.failed", {
-            requestId,
-            logicalMode: mode,
-            durationMs: usageReservationMs,
-            reason: "policy_mismatch",
-            code: operationalCodes.requestFailed,
-          });
-          await releaseReservation();
-          await persist("Response unavailable.", "error");
-          enqueue("error", { error: safeError });
-          return;
-        }
-        logInfo("weekly_usage.reservation.accepted", {
-          requestId,
-          logicalMode: mode,
-          creditsCharged: reservation.credits_charged,
-          creditsRemaining: reservation.credits_remaining,
-          reservationLatencyMs: usageReservationMs,
-          ...researchUsagePolicyFields(),
-        });
 
         if (aborter.signal.aborted || clientCancelled || userStopped) {
           await releaseReservation();
@@ -685,6 +694,11 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
           durationMs: durationMs(),
           code: operationalCodes.deepResearchFailed,
         });
+        try {
+          await releaseReservation();
+        } catch {
+          /* ignore */
+        }
         try {
           await persist("Response unavailable.", "error");
         } catch {

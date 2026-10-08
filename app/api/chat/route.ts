@@ -57,10 +57,13 @@ type WeeklyReservationRow = {
 };
 
 /**
- * Shared HTTP weekly-usage gate for paths that open SSE before the normal reserve point
+ * Shared HTTP weekly-usage gate for paths that open SSE before synthesis
  * (Action/web.search and Deep Research). Exhausted accounts get the same 429 JSON as Fast path
- * so the client can set weeklyLimitResetAt. On accept, the reservation is released so those
- * streams keep their existing reserve → start → release lifecycle.
+ * so the client can set weeklyLimitResetAt.
+ *
+ * On accept, the reservation is kept held for this generation id. Downstream streams must not
+ * release-then-re-reserve: `reserve_weekly_ai_usage` returns accepted=false once released_at is set.
+ * Pass `weeklyUsageReserved: true` and skip a second reserve; release only on early failure before start.
  */
 async function rejectWeeklyUsageBeforeStream(input: {
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
@@ -145,7 +148,14 @@ async function rejectWeeklyUsageBeforeStream(input: {
     return NextResponse.json({ error: safeError }, { status: 503 });
   }
 
-  await release();
+  logInfo("weekly_usage.reservation.accepted", {
+    requestId,
+    logicalMode: mode,
+    creditsCharged: reservation.credits_charged,
+    creditsRemaining: reservation.credits_remaining,
+    reservationLatencyMs: usageReservationMs,
+    heldForStream: true,
+  });
   return null;
 }
 
@@ -362,6 +372,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       memories,
       recallOperation,
       rows,
+      weeklyUsageReserved: true,
     });
   }
 
@@ -397,6 +408,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       recallOperation,
       rows,
       webRouteReason: webDecision.reason,
+      weeklyUsageReserved: true,
     });
   }
   logInfo("web.route.decided", { requestId, search: false, reason: webDecision.reason });

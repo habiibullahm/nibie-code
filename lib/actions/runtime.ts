@@ -17,6 +17,8 @@ import type {
   ActionRunStatus,
   ActionRuntimeOutcome,
 } from "@/lib/actions/types";
+import { logError } from "@/lib/observability/logger";
+import { operationalCodes } from "@/lib/observability/codes";
 
 /** V1 bound: at most one Action execution per generation. */
 export const MAX_ACTIONS_PER_GENERATION = 1;
@@ -137,6 +139,8 @@ export async function executeAction(input: ExecuteActionInput): Promise<ActionRu
       ? AbortSignal.any([input.ctx.signal, timeout])
       : input.ctx.signal;
 
+  // When a persistence client is provided, require an audit row before execute.
+  // Mutating Actions (future) and V1 reads both fail closed so successful work cannot lose its trail.
   let runId: string | null = null;
   if (input.supabase) {
     const row = await insertActionRun({
@@ -151,8 +155,25 @@ export async function executeAction(input: ExecuteActionInput): Promise<ActionRu
       status: "running",
     });
     runId = row?.id ?? null;
+    if (!runId) {
+      logError("action.audit.insert_failed", {
+        requestId: input.ctx.requestId,
+        actionId: action.id,
+        capability: action.capability,
+        code: operationalCodes.requestFailed,
+      });
+      return finalizeWithoutAudit({
+        actionId: action.id,
+        capability: action.capability,
+        startedAt,
+        status: "failed",
+        result: failedResult("execution_failed", "Action audit could not be recorded."),
+        runId: randomUUID(),
+      });
+    }
+  } else {
+    runId = randomUUID();
   }
-  if (!runId) runId = randomUUID();
 
   try {
     const result = await action.execute(input.ctx, parsed.data, combined);

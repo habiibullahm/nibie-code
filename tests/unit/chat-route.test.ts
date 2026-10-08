@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc, modelOptions, contextCapabilities, withoutAttachments, attachmentState, stopState, messageSourceInserts } = vi.hoisted(() => {
   const createClient = vi.fn(); const stream = vi.fn(); const claim = vi.fn(); const usageReserve = vi.fn(); const usageStart = vi.fn(); const usageRelease = vi.fn();
-  const rpc = vi.fn((name: string, args: unknown) => name === "search_room_file_chunks" ? Promise.resolve({ data: [], error: null }) : name === "reserve_weekly_ai_usage" ? usageReserve(args) : name === "start_weekly_ai_usage" ? usageStart(args) : name === "release_weekly_ai_usage" ? usageRelease(args) : claim(name, args));
+  const insertActionRun = () => query({ data: { id: "a1111111-1111-4111-8111-111111111111", status: "running", started_at: new Date().toISOString() }, error: null });
+  const completeActionRun = () => query({ data: true, error: null });
+  const rpc = vi.fn((name: string, args: unknown) => name === "search_room_file_chunks" ? Promise.resolve({ data: [], error: null }) : name === "insert_action_run" ? insertActionRun() : name === "complete_action_run" ? completeActionRun() : name === "reserve_weekly_ai_usage" ? usageReserve(args) : name === "start_weekly_ai_usage" ? usageStart(args) : name === "release_weekly_ai_usage" ? usageRelease(args) : claim(name, args));
   const attachmentState: { result: { data: unknown; error: unknown }; reads: unknown[][] } = { result: { data: [], error: null }, reads: [] };
   const stopState = { status: "streaming" as string | null, reads: 0 };
   const messageSourceInserts: unknown[] = [];
@@ -978,7 +980,7 @@ describe("POST /api/chat", () => {
     const question = "What does our deployment pipeline do?";
 
     afterEach(() => {
-      rpc.mockImplementation((name: string, args: unknown) => name === "search_room_file_chunks" ? Promise.resolve({ data: [], error: null }) : name === "reserve_weekly_ai_usage" ? usageReserve(args) : name === "start_weekly_ai_usage" ? usageStart(args) : name === "release_weekly_ai_usage" ? usageRelease(args) : claim(name, args));
+      rpc.mockImplementation((name: string, args: unknown) => name === "search_room_file_chunks" ? Promise.resolve({ data: [], error: null }) : name === "insert_action_run" ? query({ data: { id: "a1111111-1111-4111-8111-111111111111", status: "running", started_at: new Date().toISOString() }, error: null }) : name === "complete_action_run" ? query({ data: true, error: null }) : name === "reserve_weekly_ai_usage" ? usageReserve(args) : name === "start_weekly_ai_usage" ? usageStart(args) : name === "release_weekly_ai_usage" ? usageRelease(args) : claim(name, args));
     });
 
     function roomClient(userContent: string, writes: unknown[] = []) {
@@ -1182,6 +1184,10 @@ describe("POST /api/chat", () => {
         ]);
         expect(JSON.stringify(info.mock.calls)).not.toContain("test-key");
         expect(JSON.stringify(info.mock.calls)).not.toContain("Node.js 22 is the current release line");
+        // Preflight holds the reservation through Action + synthesis; never release-then-re-reserve.
+        expect(usageReserve).toHaveBeenCalledOnce();
+        expect(usageStart).toHaveBeenCalledOnce();
+        expect(usageRelease).not.toHaveBeenCalled();
       } finally {
         info.mockRestore();
       }
@@ -1269,6 +1275,9 @@ describe("POST /api/chat", () => {
       expect(buffer).toMatch(/event: status[\s\S]*"status":"interrupted"/);
       expect(stream).not.toHaveBeenCalled();
       expect(webMocks.runWebSearchPipeline).toHaveBeenCalledOnce();
+      expect(usageReserve).toHaveBeenCalledOnce();
+      expect(usageRelease).toHaveBeenCalledOnce();
+      expect(usageStart).not.toHaveBeenCalled();
     });
 
     it("transforms citation handles in the stream and rejects unknown ids", async () => {
@@ -1550,7 +1559,7 @@ describe("POST /api/chat", () => {
       const response = await POST(deepRequest());
       expect(response.status).toBe(200);
       await expect(Array.fromAsync(readChatSse(response.body!))).rejects.toThrow(/could not collect usable sources/i);
-      // Preflight weekly gate reserves then releases; synthesis never reserves again on empty fail.
+      // Preflight holds the reservation; empty gather releases it and never re-reserves or synthesizes.
       expect(usageReserve).toHaveBeenCalledOnce();
       expect(usageRelease).toHaveBeenCalledOnce();
       expect(stream).not.toHaveBeenCalled();

@@ -64,6 +64,8 @@ describe("Supabase row-level security", () => {
     await sql`drop table if exists public.weekly_usage_reservations cascade`;
     await sql`drop table if exists public.weekly_ai_usage cascade`;
     await sql`drop type if exists public.weekly_usage_mode cascade`;
+    await sql`drop function if exists public.insert_action_run(uuid, text, text, text, text, uuid, uuid, jsonb) cascade`;
+    await sql`drop function if exists public.complete_action_run(uuid, text, text, jsonb) cascade`;
     await sql`drop table if exists public.action_runs cascade`;
     await sql`drop table if exists public.message_research cascade`;
     await sql`drop table if exists public.message_sources cascade`;
@@ -204,6 +206,24 @@ describe("Supabase row-level security", () => {
     const [usage] = await asUser(owner, (tx) => tx`select credits_used, balanced_requests from public.weekly_ai_usage`);
     expect(usage).toEqual({ credits_used: 0, balanced_requests: 0 });
     await expect(sql`update public.weekly_ai_usage set credits_used = -1 where user_id = ${owner}`).rejects.toThrow();
+  });
+
+  it("rejects re-reserve after release for the same generation, but allows a held reservation to be re-read", async () => {
+    const owner = await createUsageUser();
+    const generation = await createGeneration(owner);
+    const [first] = await reserveUsage(owner, generation, "Fast");
+    expect(first).toMatchObject({ accepted: true, credits_charged: 1, credits_used: 1 });
+    // Held reservation: a second reserve for the same generation must stay accepted (idempotent read).
+    const [held] = await reserveUsage(owner, generation, "Fast");
+    expect(held).toMatchObject({ accepted: true, credits_charged: 1, credits_used: 1 });
+    await expect(asUser(owner, (tx) => tx`select public.release_weekly_ai_usage(${generation}::uuid) AS released`)).resolves.toEqual([
+      { released: true },
+    ]);
+    // After release, reserve_weekly_ai_usage must not accept again for this generation id.
+    const [again] = await reserveUsage(owner, generation, "Fast");
+    expect(again).toMatchObject({ accepted: false, credits_charged: 0 });
+    const [usage] = await asUser(owner, (tx) => tx`select credits_used, fast_requests from public.weekly_ai_usage`);
+    expect(usage).toEqual({ credits_used: 0, fast_requests: 0 });
   });
 
   it("refuses to refund a reservation after provider execution starts", async () => {
@@ -1048,15 +1068,12 @@ describe("Supabase row-level security", () => {
     expect(await sql`select message_id from public.message_research where message_id = ${assistantStranger}`).toHaveLength(1);
   });
 
-  it("keeps action_runs owner-scoped; persists success/failed/cancelled; stores no secrets", async () => {
+  it("keeps action_runs owner-scoped and server-written; rejects client forge/mutate/delete", async () => {
     const owner = randomUUID();
     const stranger = randomUUID();
     const thread = randomUUID();
     const strangerThread = randomUUID();
     const assistantOwn = randomUUID();
-    const runCompleted = randomUUID();
-    const runFailed = randomUUID();
-    const runCancelled = randomUUID();
     const runStranger = randomUUID();
 
     expect(await sql`select relrowsecurity, relforcerowsecurity from pg_class where oid = 'public.action_runs'::regclass`).toEqual([
@@ -1070,14 +1087,36 @@ describe("Supabase row-level security", () => {
     await sql`insert into public.messages (id, conversation_id, user_id, role, content, status, position) values
       (${assistantOwn}, ${thread}, ${owner}, 'assistant', 'reply', 'complete', 1)`;
 
-    await asUser(owner, (tx) => tx`
-      insert into public.action_runs (
-        id, user_id, conversation_id, message_id, action_id, capability, input_summary, status, started_at, completed_at
-      ) values
-        (${runCompleted}, ${owner}, ${thread}, ${assistantOwn}, 'web.search', 'read', '{"query":"latest Node.js"}', 'completed', now(), now()),
-        (${runFailed}, ${owner}, ${thread}, ${assistantOwn}, 'web.search', 'read', '{"query":"news"}', 'failed', now(), now()),
-        (${runCancelled}, ${owner}, ${thread}, ${assistantOwn}, 'web.search', 'read', '{"query":"stopped"}', 'cancelled', now(), now())
+    // Trusted backend path: insert non-terminal via RPC, then complete.
+    const inserted = await asUser(owner, (tx) => tx`
+      select * from public.insert_action_run(
+        ${thread}::uuid, 'web.search', 'read', '{"query":"latest Node.js"}', 'running',
+        null::uuid, ${assistantOwn}::uuid, null::jsonb
+      )
     `);
+    expect(inserted).toHaveLength(1);
+    const runCompleted = inserted[0].id as string;
+    await expect(asUser(owner, (tx) => tx`
+      select public.complete_action_run(${runCompleted}::uuid, 'completed', null, ${JSON.stringify({ itemCount: 1 })}::jsonb) as ok
+    `)).resolves.toEqual([{ ok: true }]);
+
+    const failedInsert = await asUser(owner, (tx) => tx`
+      select * from public.insert_action_run(
+        ${thread}::uuid, 'web.search', 'read', '{"query":"news"}', 'running', null::uuid, ${assistantOwn}::uuid, null::jsonb
+      )
+    `);
+    const runFailed = failedInsert[0].id as string;
+    await asUser(owner, (tx) => tx`select public.complete_action_run(${runFailed}::uuid, 'failed', 'execution_failed', null::jsonb)`);
+
+    const cancelledInsert = await asUser(owner, (tx) => tx`
+      select * from public.insert_action_run(
+        ${thread}::uuid, 'web.search', 'read', '{"query":"stopped"}', 'running', null::uuid, ${assistantOwn}::uuid, null::jsonb
+      )
+    `);
+    const runCancelled = cancelledInsert[0].id as string;
+    await asUser(owner, (tx) => tx`select public.complete_action_run(${runCancelled}::uuid, 'cancelled', 'aborted', null::jsonb)`);
+
+    // Superuser seed for stranger row (simulates another owner's server write).
     await sql`
       insert into public.action_runs (
         id, user_id, conversation_id, action_id, capability, input_summary, status, started_at, completed_at
@@ -1098,39 +1137,55 @@ describe("Supabase row-level security", () => {
     `);
     expect(hidden).toHaveLength(0);
 
+    // Direct client INSERT/UPDATE/DELETE must be rejected (no table grants / no forge path).
     await expect(asUser(owner, (tx) => tx`
       insert into public.action_runs (
         user_id, conversation_id, action_id, capability, input_summary, status
-      ) values (${stranger}, ${strangerThread}, 'web.search', 'read', 'x', 'completed')
-    `)).rejects.toThrow();
+      ) values (${owner}, ${thread}, 'web.search', 'read', '{"query":"forged"}', 'completed')
+    `)).rejects.toThrow(/permission denied/i);
 
-    const stolen = await asUser(owner, (tx) => tx`
-      update public.action_runs set status = 'failed' where id = ${runStranger} returning id
-    `);
-    expect(stolen).toHaveLength(0);
-
-    // Reject overlong / secret-looking summaries at the DB check when over 240 chars.
     await expect(asUser(owner, (tx) => tx`
-      insert into public.action_runs (
-        user_id, conversation_id, action_id, capability, input_summary, status
-      ) values (${owner}, ${thread}, 'web.search', 'read', ${"x".repeat(241)}, 'running')
+      update public.action_runs set status = 'failed' where id = ${runCompleted} returning id
+    `)).rejects.toThrow(/permission denied/i);
+
+    await expect(asUser(owner, (tx) => tx`
+      delete from public.action_runs where id = ${runCompleted} returning id
+    `)).rejects.toThrow(/permission denied/i);
+
+    // RPC must not accept a forged terminal insert status.
+    await expect(asUser(owner, (tx) => tx`
+      select * from public.insert_action_run(
+        ${thread}::uuid, 'web.search', 'read', '{"query":"x"}', 'completed', null::uuid, null::uuid, null::jsonb
+      )
     `)).rejects.toThrow();
 
-    // Foreign room_id / message_id must fail INSERT WITH CHECK after 0020.
+    // Completing an already-terminal row is a no-op (append-only).
+    await expect(asUser(owner, (tx) => tx`
+      select public.complete_action_run(${runCompleted}::uuid, 'failed', 'x', null::jsonb) as ok
+    `)).resolves.toEqual([{ ok: false }]);
+
+    // Reject overlong summaries at the DB check when over 240 chars.
+    await expect(asUser(owner, (tx) => tx`
+      select * from public.insert_action_run(
+        ${thread}::uuid, 'web.search', 'read', ${"x".repeat(241)}, 'running', null::uuid, null::uuid, null::jsonb
+      )
+    `)).rejects.toThrow();
+
+    // Foreign room_id / message_id must fail ownership checks in the RPC.
     const foreignRoom = randomUUID();
     const foreignMessage = randomUUID();
     await sql`insert into public.rooms (id, user_id, name) values (${foreignRoom}, ${stranger}, 'Other room')`;
     await sql`insert into public.messages (id, conversation_id, user_id, role, content, status, position) values
       (${foreignMessage}, ${strangerThread}, ${stranger}, 'assistant', 'x', 'complete', 1)`;
     await expect(asUser(owner, (tx) => tx`
-      insert into public.action_runs (
-        user_id, conversation_id, room_id, action_id, capability, input_summary, status
-      ) values (${owner}, ${thread}, ${foreignRoom}, 'web.search', 'read', '{"query":"x"}', 'completed')
+      select * from public.insert_action_run(
+        ${thread}::uuid, 'web.search', 'read', '{"query":"x"}', 'running', ${foreignRoom}::uuid, null::uuid, null::jsonb
+      )
     `)).rejects.toThrow();
     await expect(asUser(owner, (tx) => tx`
-      insert into public.action_runs (
-        user_id, conversation_id, message_id, action_id, capability, input_summary, status
-      ) values (${owner}, ${thread}, ${foreignMessage}, 'web.search', 'read', '{"query":"x"}', 'completed')
+      select * from public.insert_action_run(
+        ${thread}::uuid, 'web.search', 'read', '{"query":"x"}', 'running', null::uuid, ${foreignMessage}::uuid, null::jsonb
+      )
     `)).rejects.toThrow();
   });
 });

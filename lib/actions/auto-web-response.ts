@@ -63,6 +63,8 @@ export type AutoWebActionChatInput = {
   recallOperation: RecallOperationStatus;
   rows: { role: string; content: string; position: number }[];
   webRouteReason: string;
+  /** HTTP preflight already reserved this generation; do not reserve again. */
+  weeklyUsageReserved?: boolean;
 };
 
 /**
@@ -91,6 +93,7 @@ export async function createAutoWebActionChatResponse(input: AutoWebActionChatIn
     recallOperation,
     rows,
     webRouteReason,
+    weeklyUsageReserved = false,
   } = input;
 
   const headers = { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache, no-transform" };
@@ -218,6 +221,7 @@ export async function createAutoWebActionChatResponse(input: AutoWebActionChatIn
 
       try {
         if (clientCancelled || aborter.signal.aborted) {
+          await releaseReservation();
           await persist("Response stopped.", "interrupted");
           enqueue("status", { status: "interrupted" });
           return;
@@ -256,6 +260,7 @@ export async function createAutoWebActionChatResponse(input: AutoWebActionChatIn
             status: "cancelled",
             errorCode: "aborted",
           });
+          await releaseReservation();
           await persist(stoppedPlaceholder, "interrupted");
           enqueue("status", { status: "interrupted" });
           return;
@@ -369,103 +374,109 @@ export async function createAutoWebActionChatResponse(input: AutoWebActionChatIn
           });
         } catch {
           logError("context.build.failed", { requestId, code: operationalCodes.contextBuildFailed, stage: "context", durationMs: durationMs() });
+          await releaseReservation();
           await persist("Response unavailable.", "error");
           enqueue("error", { error: safeError });
           return;
         }
 
         if (!prompt || !context) {
+          await releaseReservation();
           await persist("Response unavailable.", "error");
           enqueue("error", { error: safeError });
           return;
         }
 
         if (clientCancelled || aborter.signal.aborted || userStopped) {
+          await releaseReservation();
           await persist(stoppedPlaceholder, "interrupted");
           enqueue("status", { status: "interrupted" });
           return;
         }
 
-        const reservationStartedAt = Date.now();
-        let reservation: {
-          accepted: boolean;
-          credits_charged: number;
-          credits_used: number;
-          credits_remaining: number;
-          reset_at: string;
-        } | null = null;
-        let reservationError: unknown = null;
-        try {
-          const result = await supabase
-            .rpc("reserve_weekly_ai_usage", {
-              p_generation_id: assistant.id,
-              p_logical_mode: mode,
-            })
-            .single<{
-              accepted: boolean;
-              credits_charged: number;
-              credits_used: number;
-              credits_remaining: number;
-              reset_at: string;
-            }>();
-          reservation = result.data;
-          reservationError = result.error;
-        } catch {
-          reservationError = new Error("Reservation request failed.");
-        }
-        usageReservationMs = Date.now() - reservationStartedAt;
-        if (
-          reservationError ||
-          !reservation ||
-          typeof reservation.accepted !== "boolean" ||
-          !Number.isInteger(reservation.credits_remaining) ||
-          reservation.credits_remaining < 0 ||
-          reservation.credits_remaining > WEEKLY_FREE_CREDIT_LIMIT ||
-          typeof reservation.reset_at !== "string" ||
-          !Number.isFinite(Date.parse(reservation.reset_at))
-        ) {
-          logError("weekly_usage.reservation.failed", {
+        // Preflight may already hold this generation's reservation; never release-then-re-reserve.
+        if (!weeklyUsageReserved) {
+          const reservationStartedAt = Date.now();
+          let reservation: {
+            accepted: boolean;
+            credits_charged: number;
+            credits_used: number;
+            credits_remaining: number;
+            reset_at: string;
+          } | null = null;
+          let reservationError: unknown = null;
+          try {
+            const result = await supabase
+              .rpc("reserve_weekly_ai_usage", {
+                p_generation_id: assistant.id,
+                p_logical_mode: mode,
+              })
+              .single<{
+                accepted: boolean;
+                credits_charged: number;
+                credits_used: number;
+                credits_remaining: number;
+                reset_at: string;
+              }>();
+            reservation = result.data;
+            reservationError = result.error;
+          } catch {
+            reservationError = new Error("Reservation request failed.");
+          }
+          usageReservationMs = Date.now() - reservationStartedAt;
+          if (
+            reservationError ||
+            !reservation ||
+            typeof reservation.accepted !== "boolean" ||
+            !Number.isInteger(reservation.credits_remaining) ||
+            reservation.credits_remaining < 0 ||
+            reservation.credits_remaining > WEEKLY_FREE_CREDIT_LIMIT ||
+            typeof reservation.reset_at !== "string" ||
+            !Number.isFinite(Date.parse(reservation.reset_at))
+          ) {
+            logError("weekly_usage.reservation.failed", {
+              requestId,
+              logicalMode: mode,
+              durationMs: usageReservationMs,
+              code: operationalCodes.requestFailed,
+            });
+            await releaseReservation();
+            await persist(clientCancelled ? "Response stopped." : "Response unavailable.", clientCancelled ? "interrupted" : "error");
+            enqueue("error", { error: safeError });
+            return;
+          }
+          if (!reservation.accepted) {
+            logWarn("weekly_usage.limit.rejected", {
+              requestId,
+              logicalMode: mode,
+              creditsCharged: 0,
+              creditsRemaining: reservation.credits_remaining,
+            });
+            await persist("Weekly usage limit reached.", "error");
+            enqueue("error", { error: "You've reached your weekly Nibie usage limit." });
+            return;
+          }
+          if (reservation.credits_charged !== weeklyCreditCost[mode]) {
+            logError("weekly_usage.reservation.failed", {
+              requestId,
+              logicalMode: mode,
+              durationMs: usageReservationMs,
+              reason: "policy_mismatch",
+              code: operationalCodes.requestFailed,
+            });
+            await releaseReservation();
+            await persist("Response unavailable.", "error");
+            enqueue("error", { error: safeError });
+            return;
+          }
+          logInfo("weekly_usage.reservation.accepted", {
             requestId,
             logicalMode: mode,
-            durationMs: usageReservationMs,
-            code: operationalCodes.requestFailed,
-          });
-          await releaseReservation();
-          await persist(clientCancelled ? "Response stopped." : "Response unavailable.", clientCancelled ? "interrupted" : "error");
-          enqueue("error", { error: safeError });
-          return;
-        }
-        if (!reservation.accepted) {
-          logWarn("weekly_usage.limit.rejected", {
-            requestId,
-            logicalMode: mode,
-            creditsCharged: 0,
+            creditsCharged: reservation.credits_charged,
             creditsRemaining: reservation.credits_remaining,
+            reservationLatencyMs: usageReservationMs,
           });
-          await persist("Weekly usage limit reached.", "error");
-          enqueue("error", { error: "You've reached your weekly Nibie usage limit." });
-          return;
         }
-        if (reservation.credits_charged !== weeklyCreditCost[mode]) {
-          logError("weekly_usage.reservation.failed", {
-            requestId,
-            logicalMode: mode,
-            durationMs: usageReservationMs,
-            reason: "policy_mismatch",
-            code: operationalCodes.requestFailed,
-          });
-          await releaseReservation();
-          await persist("Response unavailable.", "error");
-          enqueue("error", { error: safeError });
-          return;
-        }
-        logInfo("weekly_usage.reservation.accepted", {
-          requestId,
-          logicalMode: mode,
-          creditsCharged: reservation.credits_charged,
-          creditsRemaining: reservation.credits_remaining,
-          reservationLatencyMs: usageReservationMs,
-        });
 
         if (clientCancelled || aborter.signal.aborted || userStopped) {
           await releaseReservation();
@@ -638,6 +649,11 @@ export async function createAutoWebActionChatResponse(input: AutoWebActionChatIn
         }
       } catch {
         logError("chat.response.failed", { requestId, code: operationalCodes.requestFailed, stage: "action", durationMs: durationMs() });
+        try {
+          await releaseReservation();
+        } catch {
+          /* ignore */
+        }
         try {
           await persist("Response unavailable.", "error");
         } catch {

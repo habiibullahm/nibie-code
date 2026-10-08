@@ -62,7 +62,7 @@ export type InsertActionRunInput = {
   actionId: string;
   capability: ActionCapability;
   inputSummary: string;
-  status?: ActionRunStatus;
+  status?: Extract<ActionRunStatus, "requested" | "running" | "waiting_for_confirmation">;
   metadata?: Record<string, unknown> | null;
 };
 
@@ -72,25 +72,26 @@ export type ActionRunRow = {
   started_at: string;
 };
 
-/** Insert a new action_runs row (status requested/running). Soft-fails for callers. */
+/**
+ * Insert a new action_runs row via server-controlled RPC (non-terminal statuses only).
+ * Soft-fails for callers that still need a truthful in-memory outcome when persistence is down.
+ */
 export async function insertActionRun(input: InsertActionRunInput): Promise<ActionRunRow | null> {
+  const status = input.status ?? "running";
   const { data, error } = await input.supabase
-    .from("action_runs")
-    .insert({
-      user_id: input.userId,
-      room_id: input.roomId ?? null,
-      conversation_id: input.conversationId,
-      message_id: input.messageId ?? null,
-      action_id: input.actionId,
-      capability: input.capability,
-      input_summary: input.inputSummary.slice(0, MAX_SUMMARY_LEN),
-      status: input.status ?? "running",
-      metadata: sanitizeMetadata(input.metadata ?? null),
+    .rpc("insert_action_run", {
+      p_conversation_id: input.conversationId,
+      p_action_id: input.actionId,
+      p_capability: input.capability,
+      p_input_summary: input.inputSummary.slice(0, MAX_SUMMARY_LEN),
+      p_status: status,
+      p_room_id: input.roomId ?? null,
+      p_message_id: input.messageId ?? null,
+      p_metadata: sanitizeMetadata(input.metadata ?? null),
     })
-    .select("id,status,started_at")
-    .maybeSingle();
-  if (error || !data) return null;
-  return data as ActionRunRow;
+    .single<ActionRunRow>();
+  if (error || !data?.id) return null;
+  return data;
 }
 
 export type CompleteActionRunInput = {
@@ -102,23 +103,15 @@ export type CompleteActionRunInput = {
   metadata?: Record<string, unknown> | null;
 };
 
+/** Finalize a non-terminal action_runs row via server-controlled RPC. */
 export async function completeActionRun(input: CompleteActionRunInput): Promise<boolean> {
-  const patch: Record<string, unknown> = {
-    status: input.status,
-    completed_at: new Date().toISOString(),
-    error_code: input.errorCode ?? null,
-  };
-  if (input.metadata) {
-    patch.metadata = sanitizeMetadata(input.metadata);
-  }
-  const { data, error } = await input.supabase
-    .from("action_runs")
-    .update(patch)
-    .eq("id", input.runId)
-    .eq("user_id", input.userId)
-    .select("id")
-    .maybeSingle();
-  return Boolean(!error && data);
+  const { data, error } = await input.supabase.rpc("complete_action_run", {
+    p_run_id: input.runId,
+    p_status: input.status,
+    p_error_code: input.errorCode ?? null,
+    p_metadata: sanitizeMetadata(input.metadata ?? null),
+  });
+  return Boolean(!error && data === true);
 }
 
 function sanitizeMetadata(metadata: Record<string, unknown> | null): Record<string, unknown> | null {

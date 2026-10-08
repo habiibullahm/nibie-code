@@ -182,6 +182,34 @@ describe("Actions runtime", () => {
     expect(pipelineMock.runWebSearchPipeline).toHaveBeenCalledOnce();
   });
 
+  it("fails closed before execute when audit insert fails and supabase is provided", async () => {
+    pipelineMock.runWebSearchPipeline.mockResolvedValue({
+      sources: [{ url: "https://example.com", title: "X", domain: "example.com", retrieval: "web_search", text: "x" }],
+      degraded: false,
+      searchResultCount: 1,
+      pagesFetched: 1,
+    });
+    const supabase = {
+      rpc: vi.fn(() => ({
+        single: async () => ({ data: null, error: { message: "insert failed" } }),
+      })),
+    };
+    const outcome = await executeAction({
+      actionId: WEB_SEARCH_ACTION_ID,
+      rawInput: { query: "latest news" },
+      ctx: ctx(),
+      supabase: supabase as never,
+    });
+    expect(outcome.status).toBe("failed");
+    expect(outcome.result.errorCode).toBe("execution_failed");
+    expect(outcome.result.errorMessage).toMatch(/audit/i);
+    expect(pipelineMock.runWebSearchPipeline).not.toHaveBeenCalled();
+    expect(supabase.rpc).toHaveBeenCalledWith(
+      "insert_action_run",
+      expect.objectContaining({ p_action_id: WEB_SEARCH_ACTION_ID, p_status: "running" }),
+    );
+  });
+
   it("returns structured failure when pipeline is empty", async () => {
     pipelineMock.runWebSearchPipeline.mockResolvedValue({
       sources: [],
