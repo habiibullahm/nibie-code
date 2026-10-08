@@ -574,7 +574,7 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 @media (max-width: 760px) {
   .markdown { --md-gap: 10px; font-size: 15.5px; }
   .markdown h1, .markdown h2 { font-size: 16.5px; }
-  .markdown h3 { font-size: 14.5px; }
+  .markdown h3 { font-size: 16px; }
   .markdown table { font-size: 13px; }
   .code-block pre { padding: 11px 12px; }
   .code-block pre code { font-size: 13px; line-height: 1.6; }
