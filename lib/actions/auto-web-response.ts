@@ -16,6 +16,7 @@ import { citationInstructionFor } from "@/lib/citations/prepare";
 import type { SourceReference } from "@/lib/citations/types";
 import { buildContext } from "@/lib/context/build-context";
 import { CONTEXT_POLICY_VERSION } from "@/lib/context/context-policy";
+import type { ChatRoleContextInput } from "@/lib/chat-roles/context";
 import type { AttachmentContextInput, FileContextInput, ThreadSummary } from "@/lib/context/context-types";
 import type { RoomContextInput } from "@/lib/context/room-context";
 import { deferThreadSummaryMaintenance } from "@/lib/context/thread-summary-store";
@@ -61,6 +62,7 @@ type AutoActionChatBase = {
   preferences: UserPreferences;
   preferenceReadFailed: boolean;
   summary: ThreadSummary | null;
+  chatRole?: ChatRoleContextInput | null;
   room: RoomContextInput | null;
   files: FileContextInput[] | undefined;
   attachments: AttachmentContextInput[];
@@ -137,6 +139,7 @@ async function createAutoActionChatResponse(input: ResolvedActionChat): Promise<
     preferences,
     preferenceReadFailed,
     summary,
+    chatRole = null,
     room,
     files,
     attachments,
@@ -411,6 +414,7 @@ async function createAutoActionChatResponse(input: ResolvedActionChat): Promise<
             preferences,
             preferenceReadFailed,
             summary,
+            chatRole,
             room,
             files,
             attachments,

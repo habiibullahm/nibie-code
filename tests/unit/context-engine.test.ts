@@ -58,7 +58,7 @@ describe("context engine", () => {
     expect(profile?.text).toContain('Preferred name: "Habib"');
     expect(profile?.text).toContain('User-provided context: "Builds Nibie"');
     expect(profile?.text).not.toContain("default_model");
-    expect(plan.diagnostics.sources[0]).toMatchObject({ state: "included", reason: "Language, style, name, and About you" });
+    expect(plan.diagnostics.sources.find((source) => source.type === "profile")).toMatchObject({ state: "included", reason: "Language, style, name, and About you" });
     expect(JSON.stringify(plan.diagnostics)).not.toContain("Habib");
     expect(JSON.stringify(plan.diagnostics)).not.toContain("Builds Nibie");
     const provider = toProviderMessages(plan);
@@ -70,7 +70,8 @@ describe("context engine", () => {
   it("omits product defaults and keeps the current message last", () => {
     const plan = buildContext(input());
     expect(plan.blocks.find((block) => block.id === "profile")?.included).toBe(false);
-    expect(plan.diagnostics.sources[0].reason).toBe("No extra profile details are set.");
+    expect(plan.diagnostics.sources.find((source) => source.type === "profile")?.reason).toBe("No extra profile details are set.");
+    expect(plan.diagnostics.sources.find((source) => source.type === "chat_role")?.state).toBe("not_used");
     expect(toProviderMessages(plan).at(-1)?.content).toBe("hello");
     expect(plan.policyVersion).toBe(CONTEXT_POLICY_VERSION);
   });
@@ -79,8 +80,8 @@ describe("context engine", () => {
     for (const responseLength of ["concise", "detailed"] as const) {
       const preferences: UserPreferences = { ...defaultUserPreferences(), preferredLanguage: "id", responseLength };
       const reasons = [
-        buildContext(input({ preferences })).diagnostics.sources[0].reason,
-        previewContextDiagnostics({ preferences, preferenceReadFailed: false, hasEarlierMessages: false }).sources[0].reason,
+        buildContext(input({ preferences })).diagnostics.sources.find((source) => source.type === "profile")?.reason,
+        previewContextDiagnostics({ preferences, preferenceReadFailed: false, hasEarlierMessages: false }).sources.find((source) => source.type === "profile")?.reason,
       ];
       expect(reasons).toEqual(["Language and depth", "Language and depth"]);
       expect(reasons.join(" ")).not.toMatch(/length/i);
@@ -99,7 +100,7 @@ describe("context engine", () => {
 
   it("uses a distinct reason when preferences could not be read", () => {
     const plan = buildContext(input({ preferenceReadFailed: true }));
-    expect(plan.diagnostics.sources[0].reason).toBe("Preferences couldn't be loaded, so Nibie used defaults.");
+    expect(plan.diagnostics.sources.find((source) => source.type === "profile")?.reason).toBe("Preferences couldn't be loaded, so Nibie used defaults.");
     expect(plan.blocks.find((block) => block.id === "profile")?.included).toBe(false);
   });
 

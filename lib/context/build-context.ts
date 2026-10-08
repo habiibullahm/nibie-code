@@ -1,3 +1,4 @@
+import { chatRoleDiagnosticReason, renderChatRoleContext } from "@/lib/chat-roles/context";
 import { contextPolicyFor, CONTEXT_POLICY_VERSION } from "@/lib/context/context-policy";
 import { ContextBuildError, type BuildContextInput, type ContextBlock, type ContextDiagnostics, type ContextPlan, type ContextSourceDiagnostic, type ThreadMessage } from "@/lib/context/context-types";
 import { renderAttachmentContext } from "@/lib/context/attachment-context";
@@ -12,7 +13,7 @@ import {
   WEB_VERIFICATION_UNAVAILABLE_DIAGNOSTIC_REASON,
   WEB_VERIFICATION_UNAVAILABLE_INSTRUCTION,
 } from "@/lib/context/web-context";
-import { ATTACHMENT_TOKEN_CAP, budgetLimits, estimateTokens, FILE_TOKEN_CAP, MEMORY_TOKEN_CAP, PIN_TOKEN_CAP, PROTECTED_RECENT_COUNT, ROOM_TOKEN_CAP, SUMMARY_TOKEN_CAP, WEB_TOKEN_CAP } from "@/lib/context/token-budget";
+import { ATTACHMENT_TOKEN_CAP, budgetLimits, CHAT_ROLE_TOKEN_CAP, estimateTokens, FILE_TOKEN_CAP, MEMORY_TOKEN_CAP, PIN_TOKEN_CAP, PROTECTED_RECENT_COUNT, ROOM_TOKEN_CAP, SUMMARY_TOKEN_CAP, WEB_TOKEN_CAP } from "@/lib/context/token-budget";
 
 function block(partial: ContextBlock): ContextBlock {
   return partial;
@@ -63,6 +64,23 @@ export function buildContext(input: BuildContextInput): ContextPlan {
 
   const remaining = { value: inputBudgetTokens - coreTokens - currentTokens };
   const protectedFit = takeNewest(protectedMessages, remaining);
+
+  // Soft chat role / custom instructions: after protected recent, before profile and room.
+  const chatRoleInput = input.chatRole ?? null;
+  const chatRoleCandidate = renderChatRoleContext(chatRoleInput);
+  let chatRoleText = "";
+  let chatRoleDroppedForBudget = false;
+  if (chatRoleCandidate) {
+    const tokens = estimateTokens(chatRoleCandidate);
+    const allowance = Math.min(CHAT_ROLE_TOKEN_CAP, remaining.value);
+    if (tokens <= allowance) {
+      chatRoleText = chatRoleCandidate;
+      remaining.value -= tokens;
+    } else {
+      chatRoleDroppedForBudget = true;
+    }
+  }
+
   const includedPieces: ProfilePiece[] = [];
   const droppedPieces: ProfilePiece[] = [];
   for (const piece of pieces) {
@@ -143,7 +161,7 @@ export function buildContext(input: BuildContextInput): ContextPlan {
   const olderFit = takeNewest(olderMessages.filter((message) => message.position > coveredThrough), remaining);
   const dialogue = [...olderFit.included, ...protectedFit.included, current];
   const droppedMessages = [...olderFit.dropped, ...protectedFit.dropped];
-  const truncated = droppedMessages.length > 0 || droppedPieces.length > 0 || droppedRoom.length > 0 || droppedPins.length > 0 || Boolean(renderedFiles?.truncated) || Boolean(renderedAttachments?.truncated) || Boolean(renderedWeb?.truncated) || Boolean(renderedMemories?.truncated) || summaryDroppedForBudget;
+  const truncated = droppedMessages.length > 0 || droppedPieces.length > 0 || droppedRoom.length > 0 || droppedPins.length > 0 || Boolean(renderedFiles?.truncated) || Boolean(renderedAttachments?.truncated) || Boolean(renderedWeb?.truncated) || Boolean(renderedMemories?.truncated) || summaryDroppedForBudget || chatRoleDroppedForBudget;
 
   const profileText = includedPieces.map((piece) => piece.text).join("\n");
   const roomText = includedRoom.map((piece) => piece.text).join("\n\n");
@@ -154,12 +172,23 @@ export function buildContext(input: BuildContextInput): ContextPlan {
   const memoryText = renderedMemories?.text ?? "";
   const blocks: ContextBlock[] = [
     block({ id: "core", authority: "policy", priority: 1, required: true, text: corePolicyText, tokenEstimate: coreTokens, included: true, exclusionReason: null }),
-    block({ id: "profile", authority: "untrusted_data", priority: 4, required: false, text: profileText, tokenEstimate: profileText ? estimateTokens(profileText) : 0, included: Boolean(profileText), exclusionReason: profileText ? null : input.preferenceReadFailed ? "read_failed" : droppedPieces.length && !includedPieces.length ? "budget" : "defaults_only" }),
+    block({
+      id: "chat_role",
+      authority: "untrusted_data",
+      priority: 4,
+      required: false,
+      text: chatRoleText,
+      tokenEstimate: chatRoleText ? estimateTokens(chatRoleText) : 0,
+      included: Boolean(chatRoleText),
+      exclusionReason: chatRoleText ? null : chatRoleDroppedForBudget ? "budget" : "not_needed",
+    }),
+    block({ id: "profile", authority: "untrusted_data", priority: 5, required: false, text: profileText, tokenEstimate: profileText ? estimateTokens(profileText) : 0, included: Boolean(profileText), exclusionReason: profileText ? null : input.preferenceReadFailed ? "read_failed" : droppedPieces.length && !includedPieces.length ? "budget" : "defaults_only" }),
   ];
   if (hasRoom) {
     blocks.push(block({ id: "room", authority: "untrusted_data", priority: 5, required: false, text: roomText, tokenEstimate: roomText ? estimateTokens(roomText) : 0, included: Boolean(roomText), exclusionReason: roomText ? null : droppedRoom.length ? "budget" : "not_needed" }));
     blocks.push(block({ id: "pins", authority: "untrusted_data", priority: 5, required: false, text: pinText, tokenEstimate: pinText ? estimateTokens(pinText) : 0, included: Boolean(pinText), exclusionReason: pinText ? null : droppedPins.length ? "budget" : "not_needed" }));
   }
+  // chat_role priority stays 4 (above profile/room in soft-guidance precedence); room/pins remain 5.
   if (requestedFiles) {
     blocks.push(block({ id: "file", authority: "untrusted_data", priority: 6, required: false, text: fileText, tokenEstimate: fileText ? estimateTokens(fileText) : 0, included: Boolean(fileText), exclusionReason: fileText ? null : "budget" }));
   }
@@ -188,6 +217,16 @@ export function buildContext(input: BuildContextInput): ContextPlan {
     }));
   }
 
+  const chatRoleDiagnostic: ContextSourceDiagnostic = {
+    type: "chat_role",
+    label: "Chat role",
+    state: chatRoleText ? "included" : "not_used",
+    reason: chatRoleDiagnosticReason(
+      chatRoleInput ?? { role: "general", customInstructions: null },
+      Boolean(chatRoleText),
+      chatRoleDroppedForBudget,
+    ),
+  };
   const profileDiagnostic: ContextSourceDiagnostic = profileText
     ? { type: "profile", label: "Your profile", state: "included", reason: profileReason(includedPieces.flatMap((piece) => piece.categories)) }
     : { type: "profile", label: "Your profile", state: "not_used", reason: input.preferenceReadFailed ? "Preferences couldn't be loaded, so Nibie used defaults." : "No extra profile details are set." };
@@ -236,13 +275,22 @@ export function buildContext(input: BuildContextInput): ContextPlan {
 
   let diagnostics: ContextDiagnostics;
   try {
-    const sources = [profileDiagnostic, recentDiagnostic, summaryDiagnostic];
-    if (roomDiagnostic) sources.splice(1, 0, roomDiagnostic);
-    if (pinsDiagnostic) sources.splice(roomDiagnostic ? 2 : 1, 0, pinsDiagnostic);
+    // Order: chat role → profile → room → pins → files → … → recent → summary
+    const sources = [chatRoleDiagnostic, profileDiagnostic, recentDiagnostic, summaryDiagnostic];
+    if (roomDiagnostic) {
+      const profileIndex = sources.findIndex((source) => source.type === "profile");
+      sources.splice(profileIndex + 1, 0, roomDiagnostic);
+    }
+    if (pinsDiagnostic) {
+      const roomIndex = sources.findIndex((source) => source.type === "room");
+      const profileIndex = sources.findIndex((source) => source.type === "profile");
+      sources.splice((roomIndex >= 0 ? roomIndex : profileIndex) + 1, 0, pinsDiagnostic);
+    }
     if (fileDiagnostic) {
       const pinsIndex = sources.findIndex((source) => source.type === "pins");
       const roomIndex = sources.findIndex((source) => source.type === "room");
-      const insertAt = pinsIndex >= 0 ? pinsIndex + 1 : roomIndex >= 0 ? roomIndex + 1 : 1;
+      const profileIndex = sources.findIndex((source) => source.type === "profile");
+      const insertAt = pinsIndex >= 0 ? pinsIndex + 1 : roomIndex >= 0 ? roomIndex + 1 : profileIndex + 1;
       sources.splice(insertAt, 0, fileDiagnostic);
     }
     if (attachmentDiagnostic) sources.splice(sources.findIndex((source) => source.type === "recent_messages"), 0, attachmentDiagnostic);

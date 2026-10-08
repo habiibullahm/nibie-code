@@ -1,13 +1,15 @@
 import type { UserPreferences } from "@/lib/preferences/types";
 import type { ChatModel } from "@/lib/chat/validation";
+import type { ChatRoleContextInput } from "@/lib/chat-roles/context";
 import type { RoomContextInput } from "@/lib/context/room-context";
 import type { MemoryRecord, RecallOperationStatus } from "@/lib/recall/types";
 import type { WebContextInput } from "@/lib/web/types";
 
 export type { RoomContextInput } from "@/lib/context/room-context";
 export type { WebContextInput } from "@/lib/web/types";
+export type { ChatRoleContextInput } from "@/lib/chat-roles/context";
 
-export type ContextSourceType = "core" | "profile" | "room" | "pins" | "file" | "attachment" | "web" | "memory" | "thread_summary" | "recent_messages" | "current_request";
+export type ContextSourceType = "core" | "chat_role" | "profile" | "room" | "pins" | "file" | "attachment" | "web" | "memory" | "thread_summary" | "recent_messages" | "current_request";
 
 export type ContextAuthority = "policy" | "untrusted_data";
 
@@ -28,8 +30,8 @@ export type ContextBlock = {
 };
 
 export type ContextSourceDiagnostic = {
-  type: "profile" | "room" | "pins" | "file" | "attachment" | "web" | "memory" | "thread_summary" | "recent_messages";
-  label: "Your profile" | "This room" | "Pinned context" | "File context" | "Attachments" | "Web sources" | "Saved memories" | "Thread summary" | "Recent conversation";
+  type: "profile" | "chat_role" | "room" | "pins" | "file" | "attachment" | "web" | "memory" | "thread_summary" | "recent_messages";
+  label: "Your profile" | "Chat role" | "This room" | "Pinned context" | "File context" | "Attachments" | "Web sources" | "Saved memories" | "Thread summary" | "Recent conversation";
   state: "included" | "not_used";
   reason: string;
 };
@@ -108,6 +110,8 @@ export type BuildContextInput = {
   summary: ThreadSummary | null;
   messages: ThreadMessage[];
   currentPosition: number;
+  // Soft conversation role/instructions from the owner-scoped conversation row. Never client system payloads.
+  chatRole?: ChatRoleContextInput | null;
   // Omitted or null for a general thread. Present only after the caller has authorized the room.
   room?: RoomContextInput | null;
   // Present only for files the caller already authorized for this request. Never every room file.

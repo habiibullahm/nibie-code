@@ -3,7 +3,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { PanelLeftClose, PanelLeftOpen, SquarePen, X } from "lucide-react";
-import { addUserMessageAction, archiveConversationAction, editLastUserMessageAction, moveConversationAction, renameConversationAction, restoreConversationAction, startConversationAction, updateConversationModelAction } from "@/app/actions/chat";
+import { addUserMessageAction, archiveConversationAction, editLastUserMessageAction, moveConversationAction, renameConversationAction, restoreConversationAction, startConversationAction, updateConversationModelAction, updateConversationRoleAction } from "@/app/actions/chat";
 import { createPinAction, deletePinAction, updatePinAction } from "@/app/actions/pins";
 import { createRoomAction, deleteRoomAction, updateRoomAction, updateRoomBriefAction } from "@/app/actions/rooms";
 import type { BrandActivity } from "@/components/brand";
@@ -21,6 +21,7 @@ import type { WhatsNewPreview } from "@/lib/changelog";
 import type { ConversationSummary, PersistedMessage, RoomSummary } from "@/lib/chat/read";
 import type { AttachmentSummary } from "@/lib/attachments/types";
 import type { ModelChoice, ModelOption } from "@/lib/chat/models";
+import { defaultChatRole, type ChatRole } from "@/lib/chat-roles/types";
 import { decideRestoredConversation } from "@/lib/chat/preferences";
 import { roomContextFromRows } from "@/lib/rooms/map";
 import type { PinDraft } from "@/lib/pins/types";
@@ -113,6 +114,9 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const availableModes = useMemo(() => models.map((option) => option.id), [models]);
   const [modelChoice, setModelChoice] = useState<ModelChoice>("Auto");
   const [savingMode, setSavingMode] = useState(false);
+  const [draftChatRole, setDraftChatRole] = useState<ChatRole>(defaultChatRole);
+  const [draftCustomInstructions, setDraftCustomInstructions] = useState<string | null>(null);
+  const [savingRole, setSavingRole] = useState(false);
   const [savedPreferences, setSavedPreferences] = useState(preferences ?? defaultUserPreferences());
   const [serverUpdatedAt, setServerUpdatedAt] = useState(preferences?.updatedAt ?? null);
   if (preferences && preferences.updatedAt !== serverUpdatedAt) {
@@ -631,9 +635,25 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
         // The first message of a new chat creates the conversation and saves the message in a single round trip.
         const started = await startConversationAction(mode, messageId, content, drafting ? selectedRoomId : null, ...withAttachments);
         if (started.error || !started.data) { rollback(started.error ?? "Conversation couldn't be created.", key); return; }
-        const { conversation } = started.data;
+        let { conversation } = started.data;
         saved = started.data.message;
         id = conversation.id;
+        // Persist draft role/instructions chosen before the first message (DB defaults to general).
+        if (!preview && (draftChatRole !== defaultChatRole || draftCustomInstructions)) {
+          const roleResult = await updateConversationRoleAction(conversation.id, {
+            chatRole: draftChatRole,
+            customInstructions: draftCustomInstructions,
+          });
+          if (roleResult.data) {
+            conversation = {
+              ...conversation,
+              chat_role: roleResult.data.chat_role,
+              custom_instructions: roleResult.data.custom_instructions,
+            };
+          }
+        }
+        setDraftChatRole(defaultChatRole);
+        setDraftCustomInstructions(null);
         setLocalConversations((items) => [conversation, ...items]);
         setLocalMessages((items) => { const { "": rows = [], ...rest } = items; return { ...rest, [conversation.id]: rows }; });
         setPendingId(conversation.id);
@@ -898,6 +918,52 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
       setNotice("We couldn't save that model choice. Please try again.");
     } finally { busy.current = false; setSending(false); setSavingMode(false); }
   });
+  const persistChatRole = useStableCallback(async (role: ChatRole, instructions: string | null) => {
+    if (preview || !activeConversation) {
+      setDraftChatRole(role);
+      setDraftCustomInstructions(instructions);
+      return;
+    }
+    const previousRole = activeConversation.chat_role ?? defaultChatRole;
+    const previousInstructions = activeConversation.custom_instructions ?? null;
+    const optimistic = { ...activeConversation, chat_role: role, custom_instructions: instructions };
+    setLocalConversations((items) => [optimistic, ...items.filter((item) => item.id !== optimistic.id)]);
+    busy.current = true;
+    setSavingRole(true);
+    try {
+      const result = await updateConversationRoleAction(activeConversation.id, { chatRole: role, customInstructions: instructions });
+      if (result.error) {
+        setLocalConversations((items) => [{ ...activeConversation, chat_role: previousRole, custom_instructions: previousInstructions }, ...items.filter((item) => item.id !== activeConversation.id)]);
+        setNotice(result.error);
+        return;
+      }
+      if (result.data) {
+        const saved = { ...activeConversation, chat_role: result.data.chat_role, custom_instructions: result.data.custom_instructions };
+        setLocalConversations((items) => [saved, ...items.filter((item) => item.id !== saved.id)]);
+      }
+      router.refresh();
+    } catch {
+      setLocalConversations((items) => [{ ...activeConversation, chat_role: previousRole, custom_instructions: previousInstructions }, ...items.filter((item) => item.id !== activeConversation.id)]);
+      setNotice("We couldn't save that chat role. Please try again.");
+    } finally {
+      busy.current = false;
+      setSavingRole(false);
+    }
+  });
+  const changeChatRole = useStableCallback((role: ChatRole) => {
+    if (busy.current || recovery || movePending.current) return;
+    const instructions = activeId
+      ? (activeConversation?.custom_instructions ?? null)
+      : draftCustomInstructions;
+    void persistChatRole(role, instructions);
+  });
+  const saveCustomInstructions = useStableCallback((instructions: string | null) => {
+    if (busy.current || recovery || movePending.current) return;
+    const role = activeId
+      ? (activeConversation?.chat_role ?? defaultChatRole)
+      : draftChatRole;
+    void persistChatRole(role, instructions);
+  });
   const stopStream = useStableCallback(() => stopGeneration.current?.());
   const cancelEdit = useStableCallback(() => setEditingId(null));
   const startEdit = useStableCallback((id: string) => setEditingId(id));
@@ -926,6 +992,12 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     }
     setFilePickerOpen((open) => !open);
   });
+  const activeChatRole = activeId
+    ? (activeConversation?.chat_role ?? defaultChatRole)
+    : draftChatRole;
+  const activeCustomInstructions = activeId
+    ? (activeConversation?.custom_instructions ?? null)
+    : draftCustomInstructions;
   const contextRoom = threadRoom ? roomContextFromRows({ name: threadRoom.name, instructions: threadRoom.instructions }, threadRoom.brief, threadRoom.pins) : null;
   const contextPreview = previewContextDiagnostics({
     preferences: savedPreferences,
@@ -933,6 +1005,8 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     hasEarlierMessages: messages.some((message) => message.role === "user" || message.role === "assistant"),
     room: contextRoom,
     selectedFileCount: selectedFileIds.length,
+    chatRole: activeChatRole,
+    customInstructions: activeCustomInstructions,
   });
   const accountName = accountDisplayName({ email, metadataName, preferredName: savedPreferences.preferredName });
   const greetingSource = savedPreferences.preferredName?.trim() || metadataName?.trim() || null;
@@ -941,7 +1015,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const headerRoomName = (showRoom ? activeRoom?.name : threadRoom?.name) ?? null;
   const roomThreads = activeRoom ? shownConversations.filter((item) => item.room_id === activeRoom.id) : [];
   const sidebarProps = { conversations: shownConversations, archivedConversations, rooms, activeId: history, activeRoomId: showRoom ? selectedRoomId : threadRoom?.id ?? null, busy: controlsDisabled || recovering, activity: assistantActivity, preview, email, name: accountName, releasePreview, renderedAt, settingsActive: settingsOpen, onClose: closeDrawer, onOpen: openConversation, onOpenRoom: openRoom, onNewThreadInRoom: newThreadInRoom, onDeleteRoom: deleteRoomFromSidebar, onCreateRoom: openRoomSetup, onNewChat: newChat, onOpenSettings: openSettings, onRename: rename, onArchive: archive, onRestore: restore, onMove: moveThread };
-  const composerProps = { ref: composerRef, dockRef: composerDockRef, sending: sending || recovering || movingThread !== null, streaming, mode, models, onModelChange: changeModel, researchMode, onResearchModeChange: setResearchMode, savingMode, caption, diagnostics: contextDiagnostics ?? contextPreview, onEditProfile: editProfile, onSubmit: submitMessage, onStop: stopStream, onAttach: attach, attachmentsEnabled: !preview, onRoomFiles: threadRoom && !preview ? toggleRoomFiles : undefined, roomItems, roomId: threadRoomId ?? "", roomLabel, roomSelectionNotice, roomsLoading, onRoomChange: activeId ? rooms.length ? changeComposerRoom : undefined : chooseDraftRoom, attachmentPanel: filePickerOpen && threadRoom ? <RoomFilePicker roomId={threadRoom.id} selectedIds={selectedFileIds} disabled={controlsDisabled || sending || streaming} onChange={setSelectedFileIds} /> : null };
+  const composerProps = { ref: composerRef, dockRef: composerDockRef, sending: sending || recovering || movingThread !== null, streaming, mode, models, onModelChange: changeModel, researchMode, onResearchModeChange: setResearchMode, savingMode, caption, diagnostics: contextDiagnostics ?? contextPreview, onEditProfile: editProfile, onSubmit: submitMessage, onStop: stopStream, onAttach: attach, attachmentsEnabled: !preview, onRoomFiles: threadRoom && !preview ? toggleRoomFiles : undefined, roomItems, roomId: threadRoomId ?? "", roomLabel, roomSelectionNotice, roomsLoading, onRoomChange: activeId ? rooms.length ? changeComposerRoom : undefined : chooseDraftRoom, attachmentPanel: filePickerOpen && threadRoom ? <RoomFilePicker roomId={threadRoom.id} selectedIds={selectedFileIds} disabled={controlsDisabled || sending || streaming} onChange={setSelectedFileIds} /> : null, chatRole: activeChatRole, customInstructions: activeCustomInstructions, savingRole, onChatRoleChange: changeChatRole, onCustomInstructionsSave: saveCustomInstructions };
 
   return <main className="chat-workspace">
     <ChatSidebar {...sidebarProps} collapsed={desktopSidebarCollapsed} desktopToggleRef={desktopCollapseButtonRef} desktopExpandRef={desktopExpandButtonRef} onCollapse={collapseDesktopSidebar} onExpand={expandDesktopSidebar} />

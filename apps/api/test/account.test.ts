@@ -409,7 +409,7 @@ describe("account export", () => {
     expect(ranges.map((operation) => operation.table)).toEqual(["conversations", "messages", "conversations", "messages"]);
     expect(ranges[0]).toMatchObject({
       token: "valid-token",
-      columns: "id,title,selected_model,created_at,updated_at",
+      columns: "id,title,selected_model,chat_role,custom_instructions,created_at,updated_at",
       filters: [["user_id", "user-123"]],
       orders: ["created_at", "id"],
       from: 0,

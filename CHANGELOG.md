@@ -8,6 +8,7 @@ What's new in Nibie.
 
 ### Added
 
+- Choose a Chat role (Developer, Researcher, Writer, Product Lead, or Custom) and optional custom instructions for each conversation; they guide replies without overriding safety rules or authorizing tools.
 - Ask about a public GitHub pull request or project and Nibie can check live GitHub data, show “Checking GitHub…” while it runs, and keep “Used GitHub” on the answer after reload — public projects only, one check per reply.
 - Nibie now enforces an AI spend budget separate from your weekly credits, so expensive replies stop with a clear “try again later” message when the budget is reached instead of keeping spend going.
 - Code in Nibie's answers is now syntax-highlighted in calm, muted colors for common languages, including shell commands and their flags.

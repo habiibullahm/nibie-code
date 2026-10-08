@@ -28,6 +28,7 @@ export const responseStyle = pgEnum("response_style", ["natural", "professional"
 export const weeklyUsageMode = pgEnum("weekly_usage_mode", ["Fast", "Balanced", "High"]);
 export const memoryType = pgEnum("memory_type", ["preference", "project", "instruction", "fact"]);
 export const citationSourceKind = pgEnum("citation_source_kind", ["web", "room_file", "attachment"]);
+export const chatRole = pgEnum("chat_role", ["general", "developer", "researcher", "writer", "product_lead", "custom"]);
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey(),
@@ -176,6 +177,9 @@ export const conversations = pgTable(
     roomId: uuid("room_id"),
     title: text("title").notNull().default("New chat"),
     selectedModel: text("selected_model").notNull().default("default"),
+    // Soft conversation guidance. Never elevates to product policy or authorizes Actions.
+    chatRole: chatRole("chat_role").notNull().default("general"),
+    customInstructions: text("custom_instructions"),
     archivedAt: timestamp("archived_at", { withTimezone: true, mode: "date" }),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
@@ -190,6 +194,7 @@ export const conversations = pgTable(
       columns: [table.roomId, table.userId],
       foreignColumns: [rooms.id, rooms.userId],
     }).onDelete("set null"),
+    check("conversations_custom_instructions_length", trimmedText(table.customInstructions, 1, 2000)),
   ],
 );
 

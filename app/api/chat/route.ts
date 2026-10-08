@@ -46,6 +46,8 @@ import {
 import { decideGitHubRead } from "@/lib/github/routing";
 import { decideWebSearch } from "@/lib/web/routing";
 import type { WebContextInput } from "@/lib/web/types";
+import { normalizeChatRole, normalizeCustomInstructions } from "@/lib/chat-roles/validation";
+import type { ChatRoleContextInput } from "@/lib/chat-roles/context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -159,7 +161,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   // Chat attachments of this conversation only (RLS also limits them to the owner); trimmed to the messages in context below.
   // The thread summary is optional context: a failed read is logged and the reply continues without it.
   const [{ data: loadedConversation, error: loadedConversationError }, { data: userMessage, error: messageError }, { data: recent, error: readError }, preferenceState, attachmentResult, summary] = await Promise.all([
-    supabase.from("conversations").select("id,selected_model,room_id").eq("id", parsedId.data).maybeSingle(),
+    supabase.from("conversations").select("id,selected_model,room_id,chat_role,custom_instructions").eq("id", parsedId.data).maybeSingle(),
     supabase.from("messages").select("id,position,content").eq("id", parsedMessageId.data).eq("conversation_id", parsedId.data).eq("role", "user").eq("status", "complete").maybeSingle(),
     supabase.from("messages").select("id,role,content,status,position").eq("conversation_id", parsedId.data).eq("status", "complete").order("position", { ascending: false }).limit(34),
     loadOwnerPreferences(supabase),
@@ -170,12 +172,29 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   let conversation = loadedConversation;
   let conversationError = loadedConversationError;
   if (schemaUnavailable(conversationError)) {
-    const legacy = await supabase.from("conversations").select("id,selected_model").eq("id", parsedId.data).maybeSingle();
-    conversationError = legacy.error;
-    conversation = legacy.data ? { ...(legacy.data as unknown as { id: string; selected_model: string }), room_id: null } : null;
+    const withoutRoles = await supabase.from("conversations").select("id,selected_model,room_id").eq("id", parsedId.data).maybeSingle();
+    if (!schemaUnavailable(withoutRoles.error) && withoutRoles.data) {
+      conversationError = withoutRoles.error;
+      conversation = {
+        ...(withoutRoles.data as unknown as { id: string; selected_model: string; room_id: string | null }),
+        chat_role: "general",
+        custom_instructions: null,
+      };
+    } else {
+      const legacy = await supabase.from("conversations").select("id,selected_model").eq("id", parsedId.data).maybeSingle();
+      conversationError = legacy.error;
+      conversation = legacy.data
+        ? { ...(legacy.data as unknown as { id: string; selected_model: string }), room_id: null, chat_role: "general", custom_instructions: null }
+        : null;
+    }
   }
   if (conversationError) return NextResponse.json({ error: safeError }, { status: 503 });
   if (!conversation) return NextResponse.json({ error: "Conversation unavailable." }, { status: 404 });
+  // Owner-scoped soft guidance only. Never trust client system/developer message arrays.
+  const chatRoleContext: ChatRoleContextInput = {
+    role: normalizeChatRole((conversation as { chat_role?: unknown }).chat_role),
+    customInstructions: normalizeCustomInstructions((conversation as { custom_instructions?: unknown }).custom_instructions),
+  };
   let room: RoomContextInput | null = null;
   if (conversation.room_id) {
     const [{ data: roomRow, error: roomError }, { data: briefRow, error: briefError }, { data: pinRows, error: pinError }] = await Promise.all([
@@ -325,6 +344,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       preferences: preferenceState.preferences,
       preferenceReadFailed: Boolean(preferenceState.error),
       summary,
+      chatRole: chatRoleContext,
       room,
       files,
       attachments,
@@ -361,6 +381,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       preferences: preferenceState.preferences,
       preferenceReadFailed: Boolean(preferenceState.error),
       summary,
+      chatRole: chatRoleContext,
       room,
       files,
       attachments,
@@ -402,6 +423,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       preferences: preferenceState.preferences,
       preferenceReadFailed: Boolean(preferenceState.error),
       summary,
+      chatRole: chatRoleContext,
       room,
       files,
       attachments,
@@ -474,6 +496,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       preferences: preferenceState.preferences,
       preferenceReadFailed: Boolean(preferenceState.error),
       summary,
+      chatRole: chatRoleContext,
       room,
       files,
       attachments,

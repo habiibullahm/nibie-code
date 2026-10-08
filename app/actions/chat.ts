@@ -10,9 +10,20 @@ import { logError, logInfo } from "@/lib/observability/logger";
 import { operationalCodes } from "@/lib/observability/codes";
 import { attachmentErrors, parseAttachmentIds } from "@/lib/attachments/rules";
 import { parseStopRequest, parseStopRequests, stopDecision, stoppedContent, type StopRequest } from "@/lib/chat/stop";
+import { parseChatRolePatch } from "@/lib/chat-roles/validation";
+import { defaultChatRole, type ChatRole } from "@/lib/chat-roles/types";
 
 export type ChatActionResult<T = undefined> = { data?: T; error?: string };
-type ConversationRow = { id: string; title: string; selected_model: string; room_id: string | null; created_at: string; updated_at: string };
+type ConversationRow = {
+  id: string;
+  title: string;
+  selected_model: string;
+  room_id: string | null;
+  chat_role?: ChatRole;
+  custom_instructions?: string | null;
+  created_at: string;
+  updated_at: string;
+};
 type SavedMessage = { id: string; position: number };
 type Supabase = Awaited<ReturnType<typeof createSupabaseServerClient>>;
 
@@ -174,6 +185,43 @@ export async function updateConversationModelAction(id: unknown, model: unknown)
     if (error) return failure();
     if (!data) return { error: "That conversation is no longer available." };
     return {};
+  } catch {
+    return { error: "Your session has expired or the service is unavailable. Please try again." };
+  }
+}
+
+/** Owner-scoped chat role + optional custom instructions. Never accepts client system/developer payloads. */
+export async function updateConversationRoleAction(
+  id: unknown,
+  patch: unknown,
+): Promise<ChatActionResult<{ chat_role: ChatRole; custom_instructions: string | null }>> {
+  const parsedId = validateConversationId(id);
+  const parsed = parseChatRolePatch(patch);
+  if (!parsedId.success) return { error: "Choose a valid conversation." };
+  if ("error" in parsed) return { error: parsed.error };
+  try {
+    const { supabase } = await authenticatedClient();
+    const updated = await supabase
+      .from("conversations")
+      .update({
+        chat_role: parsed.data.chatRole,
+        custom_instructions: parsed.data.customInstructions,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", parsedId.data)
+      .select("id,chat_role,custom_instructions")
+      .maybeSingle();
+    if (schemaUnavailable(updated.error)) {
+      return { error: "Chat roles aren't available yet on this workspace." };
+    }
+    if (updated.error) return failure();
+    if (!updated.data) return { error: "That conversation is no longer available." };
+    return {
+      data: {
+        chat_role: (updated.data.chat_role as ChatRole | null) ?? defaultChatRole,
+        custom_instructions: (updated.data.custom_instructions as string | null) ?? null,
+      },
+    };
   } catch {
     return { error: "Your session has expired or the service is unavailable. Please try again." };
   }

@@ -3,12 +3,14 @@
 import { memo, useEffect, useImperativeHandle, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import { ArrowUp, FileText, Maximize2, Minimize2, Paperclip, Plus, X } from "lucide-react";
 import { ComposerAttachments, useDraftAttachments } from "@/components/composer-attachments";
+import { ChatRoleControls } from "@/components/chat-role-controls";
 import { ComposerMenu, type MenuItem } from "@/components/composer-menu";
 import { ContextIndicator } from "@/components/context-indicator";
 import { useChatFlag } from "@/components/use-chat-preferences";
 import { composerEnterAction } from "@/lib/chat/preferences";
 import type { ModelOption } from "@/lib/chat/models";
 import type { ChatModel } from "@/lib/chat/validation";
+import type { ChatRole } from "@/lib/chat-roles/types";
 import type { ContextDiagnostics } from "@/lib/context/context-types";
 import { ATTACHMENT_ACCEPT } from "@/lib/attachments/limits";
 import type { AttachmentSummary } from "@/lib/attachments/types";
@@ -45,6 +47,11 @@ type Props = {
   roomSelectionNotice: string | null;
   roomsLoading: boolean;
   onRoomChange?: (id: string) => void;
+  chatRole: ChatRole;
+  customInstructions: string | null;
+  savingRole?: boolean;
+  onChatRoleChange: (role: ChatRole) => void;
+  onCustomInstructionsSave: (instructions: string | null) => void;
   centered?: boolean;
 };
 
@@ -56,7 +63,7 @@ function fitCollapsedTextarea(element: HTMLTextAreaElement) {
 }
 
 // The draft lives here, not in the workspace: typing re-renders only this component, never the message list or sidebar.
-export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, streaming, mode, models, onModelChange, researchMode, onResearchModeChange, savingMode, caption, diagnostics, onEditProfile, onSubmit, onStop, onAttach, attachmentsEnabled = false, onRoomFiles, attachmentPanel = null, roomItems, roomId, roomLabel, roomSelectionNotice, roomsLoading, onRoomChange, centered = false }: Props) {
+export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, streaming, mode, models, onModelChange, researchMode, onResearchModeChange, savingMode, caption, diagnostics, onEditProfile, onSubmit, onStop, onAttach, attachmentsEnabled = false, onRoomFiles, attachmentPanel = null, roomItems, roomId, roomLabel, roomSelectionNotice, roomsLoading, onRoomChange, chatRole, customInstructions, savingRole = false, onChatRoleChange, onCustomInstructionsSave, centered = false }: Props) {
   const [draft, setDraft] = useState("");
   const [expanded, setExpanded] = useState(false);
   const [canExpand, setCanExpand] = useState(false);
@@ -257,6 +264,14 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
         {onRoomChange ? <ComposerMenu name="Room" description="Choose where this conversation belongs." value={roomId} items={roomItems} onChange={onRoomChange} disabled={sending || streaming || roomsLoading} disabledReason={roomsLoading ? "Loading rooms" : "Message is being sent"} /> : <span className="composer-room-context" aria-label={`Room context: ${roomLabel}`} title={roomLabel}>{roomLabel}</span>}
         <ComposerMenu name="Model" description="Choose how Nibie answers: Fast, Balanced, or High." value={mode} items={modelItems} onChange={onModelChange} disabled={sending || streaming || !models.length} disabledReason={!models.length ? "No models are configured" : savingMode ? "Saving…" : "A response is running"} />
         <ComposerMenu name="Research" description="Choose how far Nibie should research before answering." value={researchMode} items={researchItems} onChange={onResearchModeChange} disabled={sending || streaming} disabledReason="A response is running" emphasizedValue="deep" />
+        <ChatRoleControls
+          role={chatRole}
+          instructions={customInstructions}
+          disabled={sending || streaming}
+          saving={savingRole}
+          onRoleChange={onChatRoleChange}
+          onInstructionsSave={onCustomInstructionsSave}
+        />
       </div>
     </div>
     {caption ? <p className="composer-caption" role="status">{caption}</p> : null}

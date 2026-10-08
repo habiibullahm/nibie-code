@@ -16,11 +16,11 @@ import { citationViewsFromPrepared, persistMessageSources } from "@/lib/citation
 import type { SourceReference } from "@/lib/citations/types";
 import { buildContext } from "@/lib/context/build-context";
 import { CONTEXT_POLICY_VERSION } from "@/lib/context/context-policy";
-import type { AttachmentContextInput, FileContextInput } from "@/lib/context/context-types";
+import type { ChatRoleContextInput } from "@/lib/chat-roles/context";
+import type { AttachmentContextInput, FileContextInput, ThreadSummary } from "@/lib/context/context-types";
 import type { RoomContextInput } from "@/lib/context/room-context";
 import { RESEARCH_WEB_TOKEN_CAP } from "@/lib/context/token-budget";
 import { deferThreadSummaryMaintenance } from "@/lib/context/thread-summary-store";
-import type { ThreadSummary } from "@/lib/context/context-types";
 import { operationalCodes } from "@/lib/observability/codes";
 import { logError, logInfo, logWarn } from "@/lib/observability/logger";
 import type { UserPreferences } from "@/lib/preferences/types";
@@ -64,6 +64,7 @@ export type DeepResearchChatStreamInput = {
   preferences: UserPreferences;
   preferenceReadFailed: boolean;
   summary: ThreadSummary | null;
+  chatRole?: ChatRoleContextInput | null;
   room: RoomContextInput | null;
   files: FileContextInput[] | undefined;
   attachments: AttachmentContextInput[];
@@ -93,6 +94,7 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
     preferences,
     preferenceReadFailed,
     summary,
+    chatRole = null,
     room,
     files,
     attachments,
@@ -355,6 +357,7 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
             preferences,
             preferenceReadFailed,
             summary,
+            chatRole,
             room,
             files,
             attachments,

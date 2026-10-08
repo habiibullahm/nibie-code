@@ -1,3 +1,5 @@
+import { chatRoleDiagnosticReason } from "@/lib/chat-roles/context";
+import type { ChatRole } from "@/lib/chat-roles/types";
 import type { ContextDiagnostics, ContextSourceDiagnostic } from "@/lib/context/context-types";
 import { pinPieces } from "@/lib/context/pin-context";
 import { roomPieces, roomReason, type RoomContextInput } from "@/lib/context/room-context";
@@ -63,29 +65,49 @@ export function profileReason(categories: ProfileCategory[]) {
 const summaryUnused: ContextSourceDiagnostic = { type: "thread_summary", label: "Thread summary", state: "not_used", reason: "Not needed yet." };
 
 // Preview cannot know whether this turn will search the web, so web diagnostics appear only on the reply start event.
-export function previewContextDiagnostics(input: { preferences: UserPreferences; preferenceReadFailed: boolean; hasEarlierMessages: boolean; room?: RoomContextInput | null; selectedFileCount?: number }): ContextDiagnostics {
+export function previewContextDiagnostics(input: {
+  preferences: UserPreferences;
+  preferenceReadFailed: boolean;
+  hasEarlierMessages: boolean;
+  room?: RoomContextInput | null;
+  selectedFileCount?: number;
+  chatRole?: ChatRole;
+  customInstructions?: string | null;
+}): ContextDiagnostics {
   const pieces = input.preferenceReadFailed ? [] : profilePieces(input.preferences);
+  const role = input.chatRole ?? "general";
+  const custom = input.customInstructions?.trim() || null;
+  const roleActive = role !== "general" || Boolean(custom);
+  const chatRole: ContextSourceDiagnostic = {
+    type: "chat_role",
+    label: "Chat role",
+    state: roleActive ? "included" : "not_used",
+    reason: chatRoleDiagnosticReason({ role, customInstructions: custom }, roleActive, false),
+  };
   const profile: ContextSourceDiagnostic = pieces.length
     ? { type: "profile", label: "Your profile", state: "included", reason: profileReason(pieces.flatMap((piece) => piece.categories)) }
     : { type: "profile", label: "Your profile", state: "not_used", reason: input.preferenceReadFailed ? "Preferences couldn't be loaded, so Nibie used defaults." : "No extra profile details are set." };
   const recent: ContextSourceDiagnostic = input.hasEarlierMessages
     ? { type: "recent_messages", label: "Recent conversation", state: "included", reason: "The latest messages in this thread." }
     : { type: "recent_messages", label: "Recent conversation", state: "not_used", reason: "No earlier messages yet." };
-  const sources: ContextSourceDiagnostic[] = [profile, recent, summaryUnused];
+  const sources: ContextSourceDiagnostic[] = [chatRole, profile, recent, summaryUnused];
   if (input.room) {
     const roomParts = roomPieces(input.room);
-    sources.splice(1, 0, roomParts.length
+    const profileIndex = sources.findIndex((source) => source.type === "profile");
+    sources.splice(profileIndex + 1, 0, roomParts.length
       ? { type: "room", label: "This room", state: "included", reason: roomReason(roomParts.flatMap((piece) => piece.categories)) }
       : { type: "room", label: "This room", state: "not_used", reason: "No room instructions or brief are set." });
     const pins = pinPieces(input.room.pins);
-    sources.splice(2, 0, pins.length
+    const roomIndex = sources.findIndex((source) => source.type === "room");
+    sources.splice(roomIndex + 1, 0, pins.length
       ? { type: "pins", label: "Pinned context", state: "included", reason: "This room" }
       : { type: "pins", label: "Pinned context", state: "not_used", reason: "No pins in this room." });
   }
   if (input.selectedFileCount) {
     const pinsIndex = sources.findIndex((source) => source.type === "pins");
     const roomIndex = sources.findIndex((source) => source.type === "room");
-    const insertAt = pinsIndex >= 0 ? pinsIndex + 1 : roomIndex >= 0 ? roomIndex + 1 : 1;
+    const profileIndex = sources.findIndex((source) => source.type === "profile");
+    const insertAt = pinsIndex >= 0 ? pinsIndex + 1 : roomIndex >= 0 ? roomIndex + 1 : profileIndex + 1;
     sources.splice(insertAt, 0, {
       type: "file",
       label: "File context",

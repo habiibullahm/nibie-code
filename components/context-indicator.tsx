@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { BookOpenText, Brain, DoorOpen, FileText, Globe, Info, MessagesSquare, Paperclip, Pin, UserRound, type LucideIcon } from "lucide-react";
+import { BookOpenText, Brain, DoorOpen, FileText, Globe, Info, MessagesSquare, Paperclip, Pin, UserCog, UserRound, type LucideIcon } from "lucide-react";
 import type { ContextDiagnostics, ContextSourceDiagnostic } from "@/lib/context/context-types";
 
 const sourceIcons: Record<ContextSourceDiagnostic["type"], LucideIcon> = {
+  chat_role: UserCog,
   profile: UserRound,
   room: DoorOpen,
   pins: Pin,

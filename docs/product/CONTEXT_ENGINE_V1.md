@@ -349,10 +349,12 @@ Authority is a rule about conflict. It is not “whichever text appears last.”
 | --- | --- | --- | --- |
 | 1 | System and security rules | Policy. Server-owned. | Always win. |
 | 2 | Product behavior | Policy. Server-owned. | Always wins over user content. |
-| 3 | Current explicit user request | Untrusted dialogue, highest user rank. | Overrides soft profile preferences. |
-| 4 | Profile preferences | Untrusted data. Soft. | Apply when the current message does not say otherwise. |
-| 5 | Thread summary | Untrusted data. Compression of older turns. | Yields to the current message and to newer included messages. |
-| 6 | Recent messages | Untrusted dialogue. | The current message is one of these turns and keeps rank 3. Older turns yield to it. |
+| 3 | Current explicit user request | Untrusted dialogue, highest user rank. | Overrides soft chat role / profile preferences. |
+| 4 | Chat role / custom instructions | Untrusted data. Soft, thread-scoped. | Yield to current request; never authorize tools. |
+| 5 | Room guidance / pins | Untrusted data. Soft, room-scoped. | Yield to current request and chat role. |
+| 6 | Profile preferences | Untrusted data. Soft. | Apply when the current message does not say otherwise. |
+| 7 | Thread summary | Untrusted data. Compression of older turns. | Yields to the current message and to newer included messages. |
+| 8 | Recent messages | Untrusted dialogue. | The current message is one of these turns and keeps rank 3. Older turns yield to it. |
 
 Soft preferences are language, response depth, response style, and preferred name. About you is background the user wrote. It is not a preference toggle and it is not an instruction channel. If About you conflicts with the current message, the current message wins. If anything in profile, summary, or messages conflicts with policy, policy wins.
 
@@ -368,7 +370,7 @@ Prompt order, which is separate from rank:
 
 ```text
 1. Policy system message          (core)
-2. Untrusted context data         (profile, then summary, when included)
+2. Untrusted context data         (chat role, profile, room, pins, files, web, memory, summary when included)
 3. Dialogue, oldest to newest     (ends with the current user message)
 ```
 

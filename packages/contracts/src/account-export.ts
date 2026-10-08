@@ -23,6 +23,8 @@ export type ExportConversationRow = {
   id: string;
   title: string;
   selected_model: string;
+  chat_role?: string | null;
+  custom_instructions?: string | null;
   created_at: string | Date;
   updated_at: string | Date;
 };
@@ -52,6 +54,8 @@ export type ExportedConversation = {
   id: string;
   title: string;
   selectedModel: string;
+  chatRole?: string;
+  customInstructions?: string | null;
   createdAt: string;
   updatedAt: string;
   messages: ExportedMessage[];
@@ -153,6 +157,8 @@ export function buildConversationExport(input: {
       id: conversation.id,
       title: conversation.title,
       selectedModel: conversation.selected_model,
+      chatRole: conversation.chat_role ?? "general",
+      customInstructions: conversation.custom_instructions ?? null,
       createdAt,
       updatedAt,
       messages: grouped.get(conversation.id) ?? [],
