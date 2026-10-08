@@ -23,11 +23,14 @@ import {
   ACTION_FAILED_TRUTHFULNESS_INSTRUCTION,
   actionSucceeded,
   executeAction,
+  formatActionResultForModel,
+  getAction,
   MAX_ACTIONS_PER_GENERATION,
   WEB_SEARCH_ACTION_ID,
   webSourcesFromActionResult,
 } from "@/lib/actions/index";
 import type { ActionRuntimeOutcome } from "@/lib/actions/types";
+import { CONTEXT_DATA_PREAMBLE } from "@/lib/context/context-policy";
 import { operationalCodes } from "@/lib/observability/codes";
 import { logError, logInfo, logWarn } from "@/lib/observability/logger";
 import type { UserPreferences } from "@/lib/preferences/types";
@@ -44,7 +47,7 @@ function event(type: string, data: unknown) {
   return `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
-export type AutoWebActionChatInput = {
+type AutoActionChatBase = {
   request: Request;
   requestId: string;
   requestStartedAt: number;
@@ -64,16 +67,62 @@ export type AutoWebActionChatInput = {
   memories: MemoryRecord[] | undefined;
   recallOperation: RecallOperationStatus;
   rows: { role: string; content: string; position: number }[];
-  webRouteReason: string;
   /** HTTP preflight already reserved this generation; do not reserve again. */
   weeklyUsageReserved?: boolean;
+};
+
+export type AutoWebActionChatInput = AutoActionChatBase & {
+  webRouteReason: string;
+};
+
+export type AutoGitHubActionChatInput = AutoActionChatBase & {
+  githubActionId: string;
+  githubRawInput: unknown;
+  githubRouteReason: string;
+  githubActionTitle?: string;
+};
+
+type ResolvedActionChat = AutoActionChatBase & {
+  actionId: string;
+  actionTitle: string;
+  rawInput: unknown;
+  routeReason: string;
+  fold: "web" | "github";
 };
 
 /**
  * Automatic Web Search via Action Runtime: early SSE (action_start → execute → action_result),
  * then context + provider synthesis. One Action per generation. Stop cancels the Action.
+ * Shares the Cost Guard reserve → start → finalize path with GitHub Read.
  */
 export async function createAutoWebActionChatResponse(input: AutoWebActionChatInput): Promise<Response> {
+  return createAutoActionChatResponse({
+    ...input,
+    actionId: WEB_SEARCH_ACTION_ID,
+    actionTitle: "Web Search",
+    rawInput: { query: input.userMessage.content },
+    routeReason: input.webRouteReason,
+    fold: "web",
+  });
+}
+
+/**
+ * GitHub Read via the same Action Runtime + Cost Guard path as web.search.
+ * One allowlisted github.* Action per generation. Public repos only (enforced in tools).
+ */
+export async function createAutoGitHubActionChatResponse(input: AutoGitHubActionChatInput): Promise<Response> {
+  const registered = getAction(input.githubActionId);
+  return createAutoActionChatResponse({
+    ...input,
+    actionId: input.githubActionId,
+    actionTitle: input.githubActionTitle ?? registered?.title ?? "GitHub",
+    rawInput: input.githubRawInput,
+    routeReason: input.githubRouteReason,
+    fold: "github",
+  });
+}
+
+async function createAutoActionChatResponse(input: ResolvedActionChat): Promise<Response> {
   const {
     request,
     requestId,
@@ -94,8 +143,12 @@ export async function createAutoWebActionChatResponse(input: AutoWebActionChatIn
     memories,
     recallOperation,
     rows,
-    webRouteReason,
     weeklyUsageReserved = false,
+    actionId,
+    actionTitle,
+    rawInput,
+    routeReason,
+    fold,
   } = input;
 
   const headers = { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache, no-transform" };
@@ -210,12 +263,12 @@ export async function createAutoWebActionChatResponse(input: AutoWebActionChatIn
         if (!clientCancelled) controller.enqueue(encoder.encode(event(type, data)));
       };
 
-      // Early start so the client can show Action status while web.search runs.
+      // Early start so the client can show Action status while the Action runs.
       enqueue("start", { id: assistant.id, position: assistant.position });
       enqueue("action_start", {
-        actionId: WEB_SEARCH_ACTION_ID,
+        actionId,
         runId: null,
-        title: "Web Search",
+        title: actionTitle,
       });
 
       try {
@@ -227,12 +280,16 @@ export async function createAutoWebActionChatResponse(input: AutoWebActionChatIn
         }
 
         const generationActionCount = { current: 0 };
-        logInfo("web.route.decided", { requestId, search: true, reason: webRouteReason });
-        logInfo("action.started", { requestId, actionId: WEB_SEARCH_ACTION_ID });
+        if (fold === "web") {
+          logInfo("web.route.decided", { requestId, search: true, reason: routeReason });
+        } else {
+          logInfo("github.route.decided", { requestId, use: true, reason: routeReason, actionId });
+        }
+        logInfo("action.started", { requestId, actionId });
         const actionStartedAt = Date.now();
         const outcome: ActionRuntimeOutcome = await executeAction({
-          actionId: WEB_SEARCH_ACTION_ID,
-          rawInput: { query: userMessage.content },
+          actionId,
+          rawInput,
           ctx: {
             userId,
             conversationId,
@@ -252,9 +309,9 @@ export async function createAutoWebActionChatResponse(input: AutoWebActionChatIn
 
         const actionDurationMs = Date.now() - actionStartedAt;
         if (outcome.status === "cancelled" || aborter.signal.aborted || userStopped || clientCancelled) {
-          logInfo("action.cancelled", { requestId, actionId: WEB_SEARCH_ACTION_ID, durationMs: actionDurationMs });
+          logInfo("action.cancelled", { requestId, actionId, durationMs: actionDurationMs });
           enqueue("action_error", {
-            actionId: WEB_SEARCH_ACTION_ID,
+            actionId,
             runId: outcome.runId,
             status: "cancelled",
             errorCode: "aborted",
@@ -268,12 +325,12 @@ export async function createAutoWebActionChatResponse(input: AutoWebActionChatIn
         if (outcome.status === "completed" && outcome.result.ok) {
           logInfo("action.completed", {
             requestId,
-            actionId: WEB_SEARCH_ACTION_ID,
+            actionId,
             itemCount: outcome.result.items.length,
             durationMs: actionDurationMs,
           });
           enqueue("action_result", {
-            actionId: WEB_SEARCH_ACTION_ID,
+            actionId,
             runId: outcome.runId,
             status: "completed",
             summary: outcome.result.summary,
@@ -281,13 +338,13 @@ export async function createAutoWebActionChatResponse(input: AutoWebActionChatIn
         } else {
           logWarn("action.failed", {
             requestId,
-            actionId: WEB_SEARCH_ACTION_ID,
+            actionId,
             errorCode: outcome.result.errorCode ?? "execution_failed",
             durationMs: actionDurationMs,
-            code: operationalCodes.webSearchFailed,
+            code: fold === "web" ? operationalCodes.webSearchFailed : operationalCodes.requestFailed,
           });
           enqueue("action_error", {
-            actionId: WEB_SEARCH_ACTION_ID,
+            actionId,
             runId: outcome.runId,
             status: outcome.status === "failed" ? "failed" : outcome.status,
             errorCode: outcome.result.errorCode ?? "execution_failed",
@@ -297,35 +354,56 @@ export async function createAutoWebActionChatResponse(input: AutoWebActionChatIn
         let web: WebContextInput[] | undefined;
         let preparedCitationSources: SourceReference[] = [];
         let webVerificationUnavailable = false;
-        const sources = webSourcesFromActionResult(outcome.result);
-        if (sources.length && actionSucceeded(outcome)) {
-          const attached = attachWebCitationHandles(sources);
-          web = attached.web.length ? attached.web : undefined;
-          preparedCitationSources = attached.sources;
-          if (!web?.length) webVerificationUnavailable = true;
-          logInfo("web.search.succeeded", {
-            requestId,
-            resultCount: outcome.result.metadata && typeof outcome.result.metadata === "object" && "searchResultCount" in outcome.result.metadata
-              ? Number((outcome.result.metadata as { searchResultCount?: number }).searchResultCount ?? sources.length)
-              : sources.length,
-            durationMs: actionDurationMs,
-          });
-          logInfo("web.context.included", { requestId, sourceCount: web?.length ?? 0, snippetOnlyCount: (web ?? []).filter((s) => s.retrieval === "web_snippet_only").length });
+        let githubActionText: string | null = null;
+        if (fold === "web") {
+          const sources = webSourcesFromActionResult(outcome.result);
+          if (sources.length && actionSucceeded(outcome)) {
+            const attached = attachWebCitationHandles(sources);
+            web = attached.web.length ? attached.web : undefined;
+            preparedCitationSources = attached.sources;
+            if (!web?.length) webVerificationUnavailable = true;
+            logInfo("web.search.succeeded", {
+              requestId,
+              resultCount: outcome.result.metadata && typeof outcome.result.metadata === "object" && "searchResultCount" in outcome.result.metadata
+                ? Number((outcome.result.metadata as { searchResultCount?: number }).searchResultCount ?? sources.length)
+                : sources.length,
+              durationMs: actionDurationMs,
+            });
+            logInfo("web.context.included", { requestId, sourceCount: web?.length ?? 0, snippetOnlyCount: (web ?? []).filter((s) => s.retrieval === "web_snippet_only").length });
+          } else {
+            webVerificationUnavailable = true;
+            logWarn("web.search.failed", {
+              requestId,
+              category: outcome.result.errorMessage ?? outcome.result.errorCode ?? "empty",
+              durationMs: actionDurationMs,
+              code: operationalCodes.webSearchFailed,
+            });
+          }
         } else {
-          webVerificationUnavailable = true;
-          logWarn("web.search.failed", {
-            requestId,
-            category: outcome.result.errorMessage ?? outcome.result.errorCode ?? "empty",
-            durationMs: actionDurationMs,
-            code: operationalCodes.webSearchFailed,
-          });
+          githubActionText = formatActionResultForModel(outcome);
+          if (actionSucceeded(outcome)) {
+            logInfo("github.action.succeeded", {
+              requestId,
+              actionId,
+              itemCount: outcome.result.items.length,
+              durationMs: actionDurationMs,
+            });
+          } else {
+            logWarn("github.action.failed", {
+              requestId,
+              actionId,
+              category: outcome.result.errorMessage ?? outcome.result.errorCode ?? "empty",
+              durationMs: actionDurationMs,
+              code: operationalCodes.requestFailed,
+            });
+          }
         }
 
         let prompt: ReturnType<typeof toProviderMessages> | undefined;
         let context: ReturnType<typeof buildContext>["diagnostics"] | undefined;
         try {
           const started = Date.now();
-          // Truthfulness stays in authoritative policy; Action/web bodies stay in untrusted web fences.
+          // Truthfulness stays in authoritative policy; Action/web bodies stay in untrusted fences.
           const extraPolicy = !actionSucceeded(outcome) ? ACTION_FAILED_TRUTHFULNESS_INSTRUCTION : null;
           const plan = buildContext({
             responseMode: mode,
@@ -358,6 +436,23 @@ export async function createAutoWebActionChatResponse(input: AutoWebActionChatIn
               prompt = [{ role: "system", content: `${prompt[0].content}\n\n${citationRules}` }, ...prompt.slice(1)];
             }
           }
+          if (githubActionText) {
+            const dataIdx = prompt.findIndex((message, index) => index > 0 && message.role === "system");
+            if (dataIdx >= 0) {
+              const existing = prompt[dataIdx]!;
+              prompt = [
+                ...prompt.slice(0, dataIdx),
+                { role: "system", content: `${existing.content}\n\n${githubActionText}` },
+                ...prompt.slice(dataIdx + 1),
+              ];
+            } else if (prompt[0]?.role === "system") {
+              prompt = [
+                prompt[0],
+                { role: "system", content: `${CONTEXT_DATA_PREAMBLE}\n\n${githubActionText}` },
+                ...prompt.slice(1),
+              ];
+            }
+          }
           // Early start omitted diagnostics; send them now so the context panel matches ordinary chat.
           enqueue("context", { context });
           logInfo("context.built", {
@@ -365,6 +460,7 @@ export async function createAutoWebActionChatResponse(input: AutoWebActionChatIn
             durationMs: Date.now() - started,
             webIncluded: plan.blocks.some((b) => b.id === "web" && b.included),
             webCount: web?.length ?? 0,
+            githubActionIncluded: Boolean(githubActionText),
             sourceCount: plan.blocks.filter((b) => b.included).length,
             recentMessageCount: plan.diagnostics.recentMessageCount,
             estimatedTokens: plan.budget.estimatedTokens,
@@ -598,7 +694,7 @@ export async function createAutoWebActionChatResponse(input: AutoWebActionChatIn
             usageReservationMs,
             spendReservedMicros,
             spendAccepted: true,
-            actionId: WEB_SEARCH_ACTION_ID,
+            actionId,
           });
         }
       } catch {

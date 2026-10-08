@@ -71,7 +71,15 @@ function buildUrl(config: GitHubConfig, path: string, query?: GitHubRequestOptio
   if (path.includes("..") || path.includes("//")) {
     throw new GitHubApiError("validation", "GitHub path is invalid.");
   }
-  const url = new URL(`${config.apiBaseUrl}${path}`);
+  let url: URL;
+  try {
+    url = new URL(`${config.apiBaseUrl}${path}`);
+  } catch {
+    throw new GitHubApiError("validation", "GitHub API base URL is invalid.");
+  }
+  if (url.protocol !== "https:" || url.hostname.toLowerCase() !== "api.github.com") {
+    throw new GitHubApiError("validation", "GitHub API host is not allowed.");
+  }
   if (query) {
     for (const [key, value] of Object.entries(query)) {
       if (value === undefined || value === null || value === "") continue;

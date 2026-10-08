@@ -10,6 +10,7 @@ import {
   type GitHubActionDeps,
 } from "@/lib/actions/tools/github-shared";
 import {
+  assertPublicRepository,
   getGitHubConfig,
   githubPerPageSchema,
   githubRepoRefSchema,
@@ -53,7 +54,7 @@ export function createGitHubWorkflowRunsListAction(
   return {
     id: GITHUB_WORKFLOW_RUNS_LIST_ACTION_ID,
     title: "GitHub Workflow Runs",
-    description: "List recent GitHub Actions workflow runs for a repository. Read-only.",
+    description: "List recent GitHub Actions workflow runs for a public repository. Read-only.",
     capability: "read",
     requiresConfirmation: false,
     inputSchema: githubWorkflowRunsListInputSchema,
@@ -70,6 +71,11 @@ export function createGitHubWorkflowRunsListAction(
       const config = deps.config ?? getGitHubConfig();
       const perPage = Math.min(input.perPage, config.maxPerPage);
       try {
+        await assertPublicRepository(input.owner, input.repo, {
+          signal,
+          config,
+          fetchImpl: deps.fetchImpl,
+        });
         const { data, rateLimit } = await githubReadJson<WorkflowRunsPayload>({
           path: `/repos/${input.owner}/${input.repo}/actions/runs`,
           query: {

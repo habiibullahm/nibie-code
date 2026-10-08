@@ -1,19 +1,15 @@
-# GitHub Read Actions V1 — Phase A
+# GitHub Read Actions V1
 
-Status: **Phase A foundation** on `feat/github-read-actions-v1`. Server-owned read-only GitHub Actions registered in the Action Runtime. **Not wired into chat** (Phase B waits for Cost Guard / usage path finalization).
+Status: **Phase A on `main` (`3f74cac`)** · **Phase B chat wiring on `feat/github-read-phase-b-chat`**.
 
-## Goal
+Server-owned read-only GitHub Actions. Public repositories only. No mutations. One Action per generation.
 
-Give Nibie a bounded, auditable path to read public GitHub repository state (repo metadata, commits, PRs, issues, workflow runs) without mutations, chat wiring, or multi-tool loops.
+## Phases
 
-## Phase boundary
-
-| Phase | Scope |
-| --- | --- |
-| **A (this PR)** | Client, schemas, normalize, registry, labels, unit tests, docs |
-| **B (later)** | Chat routing / SSE / “Used GitHub” UX — only after Cost Guard merge boundary clears |
-
-**Hard no-touch in Phase A:** `app/api/chat/route.ts`, spend reservations, provider usage accounting, `lib/actions/auto-web-response.ts`, generalized model tool loop.
+| Phase | Scope | State |
+| --- | --- | --- |
+| **A** | Client, schemas, normalize, registry, labels, unit tests, docs | Shipped on `main` |
+| **B** | Deterministic chat routing + Cost Guard Action stream + “Used GitHub” | This branch |
 
 ## Registered Actions (all `capability: "read"`)
 
@@ -23,35 +19,39 @@ Give Nibie a bounded, auditable path to read public GitHub repository state (rep
 | `github.commits.list` | `GET /repos/{owner}/{repo}/commits` |
 | `github.pull_request.get` | `GET /repos/{owner}/{repo}/pulls/{number}` |
 | `github.pull_requests.list` | `GET /repos/{owner}/{repo}/pulls` |
-| `github.issues.list` | `GET /repos/{owner}/{repo}/issues` (PRs filtered out) |
+| `github.issues.list` | `GET /repos/{owner}/{repo}/issues` (PRs filtered; multi-page) |
 | `github.workflow_runs.list` | `GET /repos/{owner}/{repo}/actions/runs` |
 
-## Invariants
+## Security (P0)
 
-- **One Action per generation** — `MAX_ACTIONS_PER_GENERATION = 1` in `lib/actions/runtime.ts` (already enforced; documented for GitHub Read).
-- **Read-only** — GitHub HTTP client only allows `GET`. No push/commit/create/comment/merge/close/update/delete/`workflow_dispatch`.
-- **Permissions** — V1 `evaluateActionPermission` enables `read` only; mutating capabilities stay denied.
-- **Allowlist** — unknown Action ids rejected; no dynamic import from model text.
-- **Secrets** — `GITHUB_TOKEN` (optional) stays server-env only; never logged; `sanitizeActionInputSummary` redacts `ghp_` / `github_pat_` / Bearer / token keys from `action_runs`.
-- **Honest errors** — 404/401/403/429/timeout/abort map to clear user-facing summaries; rate-limit surfaces retry hint when available.
-- **Public repos** — token optional for dogfood; unauthenticated calls use GitHub’s public rate limit.
+- **Public-only** — every Action calls `assertPublicRepository` before nested reads. Private repos return honest `private_repo` (never leak payload).
+- **Token opt-in** — dogfood defaults to unauthenticated public reads. `GITHUB_TOKEN` is attached only when `GITHUB_READ_USE_TOKEN=true`, and still cannot serve private repos.
+- **API host lock** — only `https://api.github.com` (invalid overrides ignored / rejected).
+- **GET-only client** — no push/commit/create/comment/merge/close/update/delete/`workflow_dispatch`.
+- Secrets never logged or stored in `action_runs` (`ghp_` / `github_pat_` redacted).
 
-## Modules
+## Phase B chat path
 
-| Path | Role |
-| --- | --- |
-| `lib/github/config.ts` | Env (`GITHUB_TOKEN`, timeout, base URL) |
-| `lib/github/client.ts` | Bounded GET-only REST adapter |
-| `lib/github/normalize.ts` | Safe normalized summaries (no emails/tokens) |
-| `lib/github/schemas.ts` | Owner/repo/ref Zod validation |
-| `lib/actions/tools/github-*.ts` | Six Action definitions |
-| `lib/actions/registry.ts` | Allowlist registration |
+```text
+Deep Research?
+  → research Cost Guard path
+else decideGitHubRead (deterministic, one of six Actions)?
+  → rejectWeeklyUsageBeforeStream (usageKind: chat)
+  → createAutoGitHubActionChatResponse (weeklyUsageReserved: true)
+       → action_start → executeAction → action_result|error
+       → fold formatActionResultForModel into untrusted context
+       → provider stream → startWeeklyUsage → finalizeGenerationSpend
+else decideWebSearch?
+  → existing web.search Action path
+else normal chat
+```
 
-## Labels (ready for Phase B UI)
+Labels: “Checking GitHub…” / “Used GitHub” (hydrated from `action_runs` on reload). Stop aborts the Action via the shared AbortController.
 
-- Running: “Checking GitHub…”
-- Completed: “Used GitHub”
+## One Action per generation
 
-## Out of scope (Phase A)
+`MAX_ACTIONS_PER_GENERATION = 1`. Compound asks (main + PRs + CI) pick **one** repo intent per turn (e.g. open PRs); aggregate overview is deferred.
 
-Chat integration, Connectors dashboard, private-repo OAuth/App install, mutations, multi-Action generations, agent loops.
+## Out of scope
+
+Private-repo OAuth/App, Connectors dashboard, mutations, multi-Action / autonomous tool loops, inventing a second spend path.

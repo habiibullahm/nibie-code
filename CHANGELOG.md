@@ -8,6 +8,7 @@ What's new in Nibie.
 
 ### Added
 
+- Ask about a public GitHub pull request or project and Nibie can check live GitHub data, show “Checking GitHub…” while it runs, and keep “Used GitHub” on the answer after reload — public projects only, one check per reply.
 - Nibie now enforces an AI spend budget separate from your weekly credits, so expensive replies stop with a clear “try again later” message when the budget is reached instead of keeping spend going.
 - Code in Nibie's answers is now syntax-highlighted in calm, muted colors for common languages, including shell commands and their flags.
 - When Nibie searches the web for a reply, you can see “Searching the web…” while it runs and “Used Web Search” on the finished answer — a first step toward clear, stoppable Actions without changing ordinary chat.

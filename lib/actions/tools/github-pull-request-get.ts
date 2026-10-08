@@ -10,6 +10,7 @@ import {
   type GitHubActionDeps,
 } from "@/lib/actions/tools/github-shared";
 import {
+  assertPublicRepository,
   githubPullNumberSchema,
   githubRepoRefSchema,
   normalizePullRequest,
@@ -27,7 +28,7 @@ export function createGitHubPullRequestGetAction(
   return {
     id: GITHUB_PULL_REQUEST_GET_ACTION_ID,
     title: "GitHub Pull Request",
-    description: "Read one pull request from a GitHub repository. Read-only.",
+    description: "Read one pull request from a public GitHub repository. Read-only.",
     capability: "read",
     requiresConfirmation: false,
     inputSchema: githubPullRequestGetInputSchema,
@@ -42,6 +43,11 @@ export function createGitHubPullRequestGetAction(
         };
       }
       try {
+        await assertPublicRepository(input.owner, input.repo, {
+          signal,
+          config: deps.config,
+          fetchImpl: deps.fetchImpl,
+        });
         const { data, rateLimit } = await githubReadJson<unknown>({
           path: `/repos/${input.owner}/${input.repo}/pulls/${input.number}`,
           signal,
@@ -78,7 +84,7 @@ export function createGitHubPullRequestGetAction(
         };
         return githubSuccess({
           items: [item],
-          summary: `Loaded PR #${pr.number} (${pr.state}${pr.draft ? ", draft" : ""}).`,
+          summary: `Loaded PR #${pr.number} (${pr.state}${pr.draft ? ", draft" : ""}${pr.merged ? ", merged" : ""}).`,
           owner: input.owner,
           repo: input.repo,
           rateLimit,

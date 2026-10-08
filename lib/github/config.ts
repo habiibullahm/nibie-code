@@ -1,8 +1,14 @@
 import "server-only";
 
 export type GitHubConfig = {
-  /** Optional PAT / App token for higher rate limits. Never log or persist. */
+  /**
+   * Optional PAT for higher public rate limits only.
+   * Never used unless `GITHUB_READ_USE_TOKEN=true`. Private repos are always rejected.
+   * Never log or persist.
+   */
   token: string | null;
+  /** Whether Authorization may be sent (still public-only). Default false. */
+  useToken: boolean;
   apiBaseUrl: string;
   /** Per-request wall-clock timeout (ms). */
   timeoutMs: number;
@@ -12,9 +18,12 @@ export type GitHubConfig = {
   maxPerPage: number;
   userAgent: string;
   apiVersion: string;
+  /** V1 invariant — always true. */
+  publicOnly: true;
 };
 
 const DEFAULT_API_BASE = "https://api.github.com";
+const ALLOWED_API_HOSTS = new Set(["api.github.com"]);
 const DEFAULT_TIMEOUT_MS = 12_000;
 const DEFAULT_PER_PAGE = 10;
 const MAX_PER_PAGE = 30;
@@ -32,22 +41,56 @@ function boundedInt(raw: string | undefined, fallback: number, min: number, max:
   return n;
 }
 
+function resolveApiBaseUrl(raw: string | undefined): string {
+  const base = (raw ?? DEFAULT_API_BASE).replace(/\/+$/, "");
+  let url: URL;
+  try {
+    url = new URL(base);
+  } catch {
+    return DEFAULT_API_BASE;
+  }
+  if (url.protocol !== "https:") return DEFAULT_API_BASE;
+  if (!ALLOWED_API_HOSTS.has(url.hostname.toLowerCase())) return DEFAULT_API_BASE;
+  if (url.pathname && url.pathname !== "/") return DEFAULT_API_BASE;
+  return `${url.origin}`;
+}
+
 /**
- * Server-only GitHub Read config. Token is optional — public repos work unauthenticated
- * with lower rate limits. Returns a config always (never null) so Actions can degrade
- * honestly when GitHub is unreachable.
+ * Server-only GitHub Read config.
+ * Dogfood defaults to unauthenticated public reads. Set `GITHUB_READ_USE_TOKEN=true`
+ * with `GITHUB_TOKEN` only to raise public rate limits — private repos stay rejected.
  */
 export function getGitHubConfig(env: Env = process.env): GitHubConfig {
-  const base = trimmed(env.GITHUB_API_BASE_URL) ?? DEFAULT_API_BASE;
-  // Only allow https://api.github.com or explicitly configured HTTPS base (tests).
-  const apiBaseUrl = base.replace(/\/+$/, "");
+  const token = trimmed(env.GITHUB_TOKEN) ?? null;
+  const useToken = trimmed(env.GITHUB_READ_USE_TOKEN)?.toLowerCase() === "true" && Boolean(token);
   return {
-    token: trimmed(env.GITHUB_TOKEN) ?? null,
-    apiBaseUrl,
+    token: useToken ? token : null,
+    useToken,
+    apiBaseUrl: resolveApiBaseUrl(trimmed(env.GITHUB_API_BASE_URL)),
     timeoutMs: boundedInt(env.GITHUB_API_TIMEOUT_MS, DEFAULT_TIMEOUT_MS, 2_000, 45_000),
     defaultPerPage: DEFAULT_PER_PAGE,
     maxPerPage: MAX_PER_PAGE,
     userAgent: "NibieBot/1.0 (+https://nibie.app; github-read)",
     apiVersion: "2022-11-28",
+    publicOnly: true,
+  };
+}
+
+/** Test helper: build a config without reading process.env host rules twice. */
+export function githubConfigForTests(
+  overrides: Partial<Omit<GitHubConfig, "publicOnly">> = {},
+): GitHubConfig {
+  return {
+    token: null,
+    useToken: false,
+    apiBaseUrl: DEFAULT_API_BASE,
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+    defaultPerPage: DEFAULT_PER_PAGE,
+    maxPerPage: MAX_PER_PAGE,
+    userAgent: "NibieBot/1.0 (+https://nibie.app; github-read)",
+    apiVersion: "2022-11-28",
+    ...overrides,
+    // Never allow turning publicOnly off.
+    publicOnly: true,
   };
 }

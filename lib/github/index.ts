@@ -1,4 +1,4 @@
-export { getGitHubConfig, type GitHubConfig } from "@/lib/github/config";
+export { getGitHubConfig, githubConfigForTests, type GitHubConfig } from "@/lib/github/config";
 export { githubGetJson, type GitHubRequestOptions, type GitHubResponse } from "@/lib/github/client";
 export {
   GitHubApiError,
@@ -25,6 +25,12 @@ export {
   normalizeWorkflowRun,
   isPullRequestIssue,
 } from "@/lib/github/normalize";
+export {
+  assertPublicRepository,
+  githubGetPublicRepoJson,
+  type PublicRepoGateResult,
+} from "@/lib/github/public-only";
+export { decideGitHubRead, type GitHubReadDecision, type GitHubRouteReason } from "@/lib/github/routing";
 export type {
   GitHubActor,
   GitHubRepoSummary,
