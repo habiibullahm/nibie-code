@@ -16,6 +16,8 @@ export {
   confirmDeleteAll as isDeleteAllConfirmed,
 };
 
+export { EXPORT_FILENAME } from "./account-constants.ts";
+
 const roles = new Set(["user", "assistant"]);
 const statuses = new Set(["complete", "streaming", "interrupted", "error"]);
 
@@ -38,6 +40,18 @@ export type ExportMessageRow = {
   reply_to_message_id: string | null;
 };
 
+export type ExportAttachmentRow = {
+  id: string;
+  message_id: string | null;
+  original_name: string;
+  extracted_text: string;
+};
+
+export type ExportedAttachment = {
+  originalName: string;
+  extractedText: string;
+};
+
 export type ExportedMessage = {
   id: string;
   role: "user" | "assistant";
@@ -46,6 +60,7 @@ export type ExportedMessage = {
   position: number;
   createdAt: string;
   replyToMessageId: string | null;
+  attachments: ExportedAttachment[];
 };
 
 export type ExportedConversation = {
@@ -106,11 +121,19 @@ function byId(left: { id: string }, right: { id: string }) {
   return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
 }
 
-// Builds export version 1 from owner-scoped rows. Field lists are explicit so credentials, user ids, and provider
+function byAttachmentOrder(left: ExportAttachmentRow, right: ExportAttachmentRow) {
+  const message = String(left.message_id ?? "").localeCompare(String(right.message_id ?? ""));
+  return message || byId(left, right);
+}
+
+// Builds export version 2 from owner-scoped rows. Field lists are explicit so credentials, user ids, and provider
 // configuration cannot ride along on a select *. Returns null when the snapshot is incomplete or inconsistent.
+// Attachment rows are names + extracted text only (no binary). Unlinked drafts are omitted; a linked attachment
+// whose message is missing from the same snapshot fails the export.
 export function buildConversationExport(input: {
   conversations: ExportConversationRow[];
   messages: ExportMessageRow[];
+  attachments?: ExportAttachmentRow[];
   exportedAt: string | Date;
 }): NibieExport | null {
   const exportedAt = timestamp(input.exportedAt);
@@ -124,6 +147,21 @@ export function buildConversationExport(input: {
     const conversation = left.conversation_id < right.conversation_id ? -1 : left.conversation_id > right.conversation_id ? 1 : 0;
     return conversation || left.position - right.position || byId(left, right);
   });
+  const attachments = [...(input.attachments ?? [])].sort(byAttachmentOrder);
+
+  const attachmentsByMessage = new Map<string, ExportedAttachment[]>();
+  for (const attachment of attachments) {
+    if (!attachment.message_id) continue;
+    if (typeof attachment.original_name !== "string" || typeof attachment.extracted_text !== "string") return null;
+    if (!attachment.original_name || !attachment.extracted_text) return null;
+    const exported: ExportedAttachment = {
+      originalName: attachment.original_name,
+      extractedText: attachment.extracted_text,
+    };
+    const bucket = attachmentsByMessage.get(attachment.message_id);
+    if (bucket) bucket.push(exported);
+    else attachmentsByMessage.set(attachment.message_id, [exported]);
+  }
 
   const grouped = new Map<string, ExportedMessage[]>();
   for (const message of messages) {
@@ -138,11 +176,16 @@ export function buildConversationExport(input: {
       position: message.position,
       createdAt,
       replyToMessageId: message.reply_to_message_id,
+      attachments: attachmentsByMessage.get(message.id) ?? [],
     };
+    attachmentsByMessage.delete(message.id);
     const bucket = grouped.get(message.conversation_id);
     if (bucket) bucket.push(exported);
     else grouped.set(message.conversation_id, [exported]);
   }
+
+  // A linked attachment whose message was not in the same snapshot must not be dropped quietly.
+  if (attachmentsByMessage.size > 0) return null;
 
   const exportedConversations: ExportedConversation[] = [];
   for (const conversation of conversations) {

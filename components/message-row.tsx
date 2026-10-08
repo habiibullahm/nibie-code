@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useState, type KeyboardEvent } from "react";
-import { FileText, Pencil, RefreshCw } from "lucide-react";
+import { Download, FileText, Pencil, RefreshCw } from "lucide-react";
 import { attachmentTypeLabel, formatBytes } from "@/lib/attachments/limits";
 import type { AttachmentSummary } from "@/lib/attachments/types";
 import { ResponseCopyButton } from "@/components/copy-button";
@@ -47,12 +47,24 @@ function MessageEditor({ message, disabled, onCancel, onSave }: { message: Persi
   </div>;
 }
 
-// Names only: a sent attachment is shown as a small chip, never as a preview or a link.
+// Sent attachments: name chip with owner-only download (signed URL via same-origin API).
 function MessageAttachments({ attachments }: { attachments: AttachmentSummary[] }) {
   return <ul className="message-attachments" aria-label="Attachments">
-    {attachments.map((attachment) => <li key={attachment.id} className="message-attachment" title={`${attachment.name} · ${attachmentTypeLabel(attachment.mimeType)} · ${formatBytes(attachment.sizeBytes)}${attachment.truncated ? " · partly read" : ""}`}>
-      <FileText size={13} aria-hidden="true" /><span>{attachment.name}</span>
-    </li>)}
+    {attachments.map((attachment) => {
+      const meta = `${attachment.name} · ${attachmentTypeLabel(attachment.mimeType)} · ${formatBytes(attachment.sizeBytes)}${attachment.truncated ? " · partly read" : ""}`;
+      return <li key={attachment.id} className="message-attachment" title={meta}>
+        <a
+          className="message-attachment-download"
+          href={`/api/chat/attachments/${attachment.id}/download`}
+          download={attachment.name}
+          aria-label={`Download ${attachment.name}`}
+        >
+          <FileText size={13} aria-hidden="true" />
+          <span>{attachment.name}</span>
+          <Download size={12} aria-hidden="true" className="message-attachment-download-icon" />
+        </a>
+      </li>;
+    })}
   </ul>;
 }
 

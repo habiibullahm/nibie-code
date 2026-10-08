@@ -2,8 +2,10 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getAuthenticatedUser } from "@/lib/auth/get-user";
 import {
+  EXPORT_FILENAME,
   buildConversationExport,
   readAllPages,
+  type ExportAttachmentRow,
   type ExportConversationRow,
   type ExportMessageRow,
 } from "@/lib/privacy/export";
@@ -13,6 +15,7 @@ export const dynamic = "force-dynamic";
 
 const exportFailed = "Your conversations couldn't be exported. Please try again.";
 const forbiddenUserParams = ["user_id", "userId", "user"];
+const attachmentColumns = "id,message_id,original_name,extracted_text";
 
 type OrderedQuery = {
   order: (column: string, options: { ascending: boolean }) => OrderedQuery;
@@ -55,16 +58,30 @@ export async function GET(request: Request) {
       const { data, error } = await query.range(from, to);
       return { data: data as ExportMessageRow[] | null, error };
     });
-    if (!conversations || !messages) return NextResponse.json({ error: exportFailed }, { status: 503 });
+    const attachments = messages && await readAllPages<ExportAttachmentRow>(async (from, to) => {
+      const query = owned(
+        supabase.from("message_attachments").select(attachmentColumns).eq("user_id", user.id) as unknown as OrderedQuery,
+        "message_id",
+        "id",
+      );
+      const { data, error } = await query.range(from, to);
+      return { data: data as ExportAttachmentRow[] | null, error };
+    });
+    if (!conversations || !messages || !attachments) return NextResponse.json({ error: exportFailed }, { status: 503 });
 
-    const payload = buildConversationExport({ conversations, messages, exportedAt: new Date().toISOString() });
+    const payload = buildConversationExport({
+      conversations,
+      messages,
+      attachments,
+      exportedAt: new Date().toISOString(),
+    });
     if (!payload) return NextResponse.json({ error: exportFailed }, { status: 503 });
 
     return new NextResponse(JSON.stringify(payload), {
       status: 200,
       headers: {
         "content-type": "application/json; charset=utf-8",
-        "content-disposition": 'attachment; filename="nibie-export-v1.json"',
+        "content-disposition": `attachment; filename="${EXPORT_FILENAME}"`,
         "cache-control": "no-store",
         "x-content-type-options": "nosniff",
       },

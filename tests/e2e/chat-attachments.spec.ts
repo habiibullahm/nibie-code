@@ -194,6 +194,8 @@ test("attach, remove, attach again, send, follow up and reload", async ({ page }
   const userRow = page.locator(".message-row.user").first();
   await expect(userRow.getByRole("list", { name: "Attachments" })).toContainText("attachment-a.txt");
   await expect(userRow.getByRole("list", { name: "Attachments" })).toContainText("attachment-b.md");
+  await expect(userRow.getByRole("link", { name: "Download attachment-a.txt" })).toHaveAttribute("href", /\/api\/chat\/attachments\/[0-9a-f-]+\/download$/i);
+  await expect(userRow.getByRole("link", { name: "Download attachment-b.md" })).toHaveAttribute("href", /\/api\/chat\/attachments\/[0-9a-f-]+\/download$/i);
   await expect(userRow).toContainText("What is the internal codename?");
   await expect(page.locator(".message-row.assistant").first()).toContainText("Cedar Harbor");
   await expect(page.locator(".composer .attachment-chip")).toHaveCount(0);

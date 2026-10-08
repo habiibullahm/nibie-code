@@ -2,16 +2,23 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import {
+  ATTACHMENT_DOWNLOAD_URL_TTL_SECONDS,
   ATTACHMENT_TYPES,
   ATTACHMENT_UPLOAD_SESSION_TTL_MS,
   CHAT_ATTACHMENT_STAGING_BUCKET,
-  DRAFT_ATTACHMENT_TTL_MS,
+  CHAT_ATTACHMENTS_BUCKET,
   MAX_ATTACHMENT_BYTES,
   MAX_DRAFT_ATTACHMENTS,
   type AttachmentExtension,
 } from "@/lib/attachments/limits";
 import { attachmentErrors, attachmentName, checkAttachmentFile } from "@/lib/attachments/rules";
-import { attachmentsUnavailable, saveDraftAttachment, tooManyDrafts, type AttachmentClient } from "@/lib/attachments/service";
+import {
+  attachmentsUnavailable,
+  purgeExpiredDraftAttachments,
+  saveDraftAttachment,
+  tooManyDrafts,
+  type AttachmentClient,
+} from "@/lib/attachments/service";
 import type { AttachmentSummary } from "@/lib/attachments/types";
 import { getSupabasePublicConfig } from "@/lib/config/supabase";
 import { schemaUnavailable } from "@/lib/chat/schema-error";
@@ -30,13 +37,25 @@ type SessionQuery = PromiseLike<Result<unknown>> & {
   maybeSingle: () => PromiseLike<Result<Record<string, unknown> | null>>;
 };
 
+type AttachmentRowQuery = PromiseLike<Result<unknown>> & {
+  select: (columns: string, options?: { count?: "exact"; head?: boolean }) => AttachmentRowQuery;
+  eq: (column: string, value: string) => AttachmentRowQuery;
+  maybeSingle: () => PromiseLike<Result<Record<string, unknown> | null>>;
+};
+
 type StorageBucket = {
   createSignedUploadUrl: (path: string) => Promise<{ data: { signedUrl: string; token: string; path: string } | null; error: QueryError }>;
+  createSignedUrl: (
+    path: string,
+    expiresIn: number,
+    options?: { download?: string | boolean },
+  ) => Promise<{ data: { signedUrl: string } | null; error: QueryError }>;
   download: (path: string) => Promise<{ data: Blob | null; error: QueryError }>;
+  upload: (path: string, body: Uint8Array, options: { contentType: string; upsert: boolean }) => Promise<{ error: QueryError }>;
   remove: (paths: string[]) => Promise<{ data: unknown; error: QueryError }>;
 };
 
-export type AttachmentUploadClient = AttachmentClient & {
+export type AttachmentUploadClient = Omit<AttachmentClient, "storage"> & {
   storage: { from: (bucket: string) => StorageBucket };
 };
 
@@ -90,9 +109,47 @@ export async function reconcileAbandonedAttachmentUploads(client: AttachmentUplo
     await removeStaging(client, row.storage_path);
     await Promise.resolve(sessions(client).delete().eq("id", row.id)).then(() => undefined, () => undefined);
   }
-  await Promise.resolve(
-    client.from("message_attachments").delete().is("message_id", null).lt("created_at", new Date(now - DRAFT_ATTACHMENT_TTL_MS).toISOString()),
-  ).then(() => undefined, () => undefined);
+  await purgeExpiredDraftAttachments(client, ownerId, now);
+}
+
+/** Owner-only short-lived signed URL for a sent attachment's original bytes. */
+export async function createAttachmentDownloadUrl(
+  client: AttachmentUploadClient,
+  ownerId: string,
+  attachmentId: string,
+): Promise<{ url?: string; error?: string }> {
+  if (!uuidPattern.test(attachmentId)) return { error: attachmentErrors.unavailable };
+
+  const loaded = await (client.from("message_attachments") as unknown as AttachmentRowQuery)
+    .select("id,user_id,storage_path,original_name,message_id")
+    .eq("id", attachmentId)
+    .maybeSingle();
+  if (schemaUnavailable(loaded.error)) return { error: attachmentsUnavailable };
+  if (loaded.error) {
+    logError("attachment.download.failed", { code: operationalCodes.attachmentSaveFailed, stage: "load" });
+    return { error: attachmentErrors.saveFailed };
+  }
+  const row = loaded.data as {
+    id: string;
+    user_id: string;
+    storage_path: string | null;
+    original_name: string;
+    message_id: string | null;
+  } | null;
+  // RLS already scopes the select; double-check owner and require a sent row with durable bytes.
+  if (!row || row.user_id !== ownerId || !row.message_id || !row.storage_path) return { error: attachmentErrors.unavailable };
+  if (!row.storage_path.startsWith(`${ownerId}/attachments/${attachmentId}/`)) return { error: attachmentErrors.unavailable };
+
+  const signed = await client.storage.from(CHAT_ATTACHMENTS_BUCKET).createSignedUrl(
+    row.storage_path,
+    ATTACHMENT_DOWNLOAD_URL_TTL_SECONDS,
+    { download: row.original_name },
+  );
+  if (signed.error || !signed.data?.signedUrl) {
+    logError("attachment.download.failed", { code: operationalCodes.attachmentSaveFailed, stage: "sign" });
+    return { error: attachmentErrors.unavailable };
+  }
+  return { url: signed.data.signedUrl };
 }
 
 export async function initAttachmentUpload(

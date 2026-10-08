@@ -6,7 +6,12 @@ import postgres, { type TransactionSql } from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { assertSafeIntegrationDatabaseUrl } from "../../lib/config/test-database";
-import { buildConversationExport, type ExportConversationRow, type ExportMessageRow } from "../../lib/privacy/export";
+import {
+  buildConversationExport,
+  type ExportAttachmentRow,
+  type ExportConversationRow,
+  type ExportMessageRow,
+} from "../../lib/privacy/export";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 describe("Supabase row-level security", () => {
@@ -905,18 +910,29 @@ describe("Supabase row-level security", () => {
     await sql`insert into auth.users (id) values (${userC})`;
     await asUser(userA, async (tx) => {
       await tx`insert into public.conversations (id, user_id, title, selected_model) values (${ownId}, ${userA}, 'Export me', 'Reasoning')`;
-      await tx`insert into public.messages (id, conversation_id, user_id, role, content, status, position) values (${ownMessage}, ${ownId}, ${userA}, 'user', 'only mine', 'complete', 1)`;
+      const [draft] = await tx`insert into public.message_attachments (user_id, original_name, mime_type, size_bytes, extracted_text)
+        values (${userA}, 'export-notes.txt', 'text/plain', 11, 'export body') returning id`;
+      await tx`select * from public.append_user_message_with_attachments(${ownId}, ${ownMessage}, 'only mine', ${[draft.id]}::uuid[])`;
     });
 
     const visibleConversations = await asUser(userA, (tx) => tx`select id, title, selected_model, created_at, updated_at from public.conversations`);
     const visibleMessages = await asUser(userA, (tx) => tx`select id, conversation_id, role, content, status, position, created_at, reply_to_message_id from public.messages`);
+    const visibleAttachments = await asUser(userA, (tx) => tx`select id, message_id, original_name, extracted_text from public.message_attachments`);
     const exported = buildConversationExport({
       conversations: [...visibleConversations] as ExportConversationRow[],
       messages: [...visibleMessages] as ExportMessageRow[],
+      attachments: [...visibleAttachments] as ExportAttachmentRow[],
       exportedAt: "2026-10-02T00:00:00.000Z",
     });
-    expect(exported?.exportVersion).toBe(1);
-    expect(exported?.conversations.some((item) => item.id === ownId && item.selectedModel === "Reasoning" && item.messages.some((entry) => entry.content === "only mine"))).toBe(true);
+    expect(exported?.exportVersion).toBe(2);
+    expect(exported?.conversations.some((item) =>
+      item.id === ownId
+      && item.selectedModel === "Reasoning"
+      && item.messages.some((entry) =>
+        entry.content === "only mine"
+        && entry.attachments.some((file) => file.originalName === "export-notes.txt" && file.extractedText === "export body"),
+      ),
+    )).toBe(true);
     const serialized = JSON.stringify(exported);
     expect(serialized).not.toContain(conversationB);
     expect(serialized).not.toContain("private message");
@@ -924,13 +940,15 @@ describe("Supabase row-level security", () => {
 
     const emptyConversations = await asUser(userC, (tx) => tx`select id, title, selected_model, created_at, updated_at from public.conversations`);
     const emptyMessages = await asUser(userC, (tx) => tx`select id, conversation_id, role, content, status, position, created_at, reply_to_message_id from public.messages`);
+    const emptyAttachments = await asUser(userC, (tx) => tx`select id, message_id, original_name, extracted_text from public.message_attachments`);
     expect(buildConversationExport({
       conversations: [...emptyConversations] as ExportConversationRow[],
       messages: [...emptyMessages] as ExportMessageRow[],
+      attachments: [...emptyAttachments] as ExportAttachmentRow[],
       exportedAt: "2026-10-02T00:00:00.000Z",
     })).toEqual({
       product: "Nibie",
-      exportVersion: 1,
+      exportVersion: 2,
       exportedAt: "2026-10-02T00:00:00.000Z",
       conversations: [],
     });
@@ -1053,6 +1071,18 @@ describe("Supabase row-level security", () => {
       await send(owner, otherThread, randomUUID(), [id], "In the other thread");
       await asUser(owner, (tx) => tx`delete from public.conversations where id = ${otherThread}`);
       expect(await sql`select id from public.message_attachments where id = ${id}`).toHaveLength(0);
+    });
+
+    it("allows an owner-scoped durable storage_path and refuses a foreign path", async () => {
+      const id = randomUUID();
+      const path = `${owner}/attachments/${id}/${id}.txt`;
+      await asUser(owner, (tx) => tx`insert into public.message_attachments (id, user_id, original_name, mime_type, size_bytes, storage_path, extracted_text)
+        values (${id}, ${owner}, 'notes.txt', 'text/plain', 12, ${path}, 'Cedar Harbor')`);
+      expect(await asUser(owner, (tx) => tx`select storage_path from public.message_attachments where id = ${id}`)).toEqual([{ storage_path: path }]);
+      expect(await asUser(stranger, (tx) => tx`select id from public.message_attachments where id = ${id}`)).toHaveLength(0);
+      const stolen = randomUUID();
+      await expect(asUser(owner, (tx) => tx`insert into public.message_attachments (id, user_id, original_name, mime_type, size_bytes, storage_path, extracted_text)
+        values (${stolen}, ${owner}, 'x.txt', 'text/plain', 1, ${`${stranger}/attachments/${stolen}/${stolen}.txt`}, 'x')`)).rejects.toThrow();
     });
 
     it("keeps attachment upload sessions private and owner-path constrained", async () => {
