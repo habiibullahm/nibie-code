@@ -22,7 +22,9 @@ RETURNS TABLE(id uuid, status text, started_at timestamptz)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 DECLARE
   v_user_id uuid := (SELECT auth.uid());
-  v_row public.action_runs;
+  v_id uuid;
+  v_status text;
+  v_started_at timestamptz;
 BEGIN
   IF v_user_id IS NULL THEN
     RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Authenticated action run required.';
@@ -56,9 +58,13 @@ BEGIN
   ) VALUES (
     v_user_id, p_room_id, p_conversation_id, p_message_id, p_action_id, p_capability, p_input_summary, p_status, p_metadata
   )
-  RETURNING action_runs.id, action_runs.status, action_runs.started_at INTO v_row;
+  RETURNING action_runs.id, action_runs.status, action_runs.started_at
+    INTO v_id, v_status, v_started_at;
 
-  RETURN QUERY SELECT v_row.id, v_row.status, v_row.started_at;
+  id := v_id;
+  status := v_status;
+  started_at := v_started_at;
+  RETURN NEXT;
 END;
 $$;--> statement-breakpoint
 
