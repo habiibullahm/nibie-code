@@ -94,4 +94,4 @@ The test consumes one Fast-mode credit when Fast is available.
 
 Vercel Preview uses the same Supabase database as production today. New tables from `drizzle/` are **not** created by PR Guard’s Integration DB + RLS job (local Docker only), and the external **Supabase Preview** check is skipped for this repo.
 
-PRs that change `drizzle/**` must get a green **Preview app DB migration** check (`.github/workflows/preview-app-db-migration.yml`) so additive migrations (for example `0019_action_runs`) exist on the shared DB before exact-HEAD Preview acceptance that depends on them.
+PRs that change `drizzle/**` must get a green **Preview app DB migration** check (`.github/workflows/preview-app-db-migration.yml`) so additive migrations (for example `0019_action_runs`) exist on the shared DB before exact-HEAD Preview acceptance that depends on them. Shared DB apply requires the PR label `allow-shared-db-migrate` (or a manual `workflow_dispatch`) after SQL review — PR synchronize alone does not write.

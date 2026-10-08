@@ -79,12 +79,14 @@ Do not create a permanent staging branch just to obtain a staging deployment.
 
 Today, Vercel Preview and Production share the same Supabase project (`NEXT_PUBLIC_SUPABASE_URL` / `DATABASE_URL` on both targets). The GitHub check named **Supabase Preview** is skipped: this repo migrates with Drizzle under `drizzle/`, not `supabase/migrations`, and Supabase branching is not the source of truth.
 
-When a PR adds or changes `drizzle/**`, the **Preview App DB Migration** workflow (`.github/workflows/preview-app-db-migration.yml`) applies those additive migrations to the shared app database before merge so Preview can exercise new tables. It uses the same `POSTGRES_URL_NON_POOLING` secret and the same concurrency group as Production DB Migration. PR Guard’s **Integration DB + RLS** job only migrates a local Docker Postgres for tests — it does not touch the Preview app DB.
+When a PR adds or changes `drizzle/**`, the **Preview App DB Migration** workflow (`.github/workflows/preview-app-db-migration.yml`) can apply those additive migrations to the shared app database before merge so Preview can exercise new tables. It uses the same `POSTGRES_URL_NON_POOLING` secret and the same concurrency group as Production DB Migration. PR Guard’s **Integration DB + RLS** job only migrates a local Docker Postgres for tests — it does not touch the Preview app DB.
+
+Shared DB writes from that workflow are **not** silent. After reviewing the SQL, a reviewer must either add the PR label `allow-shared-db-migrate` or run the workflow via `workflow_dispatch`. The job also refuses non-additive SQL (DROP TABLE/COLUMN, TRUNCATE, DELETE FROM, etc.). Prefer enabling required reviewers on the GitHub `production` environment as a second gate. Long-term: give Preview its own database and stop PR writes to production.
 
 Before merge:
 
 1. PR Guard must pass (including Integration DB + RLS when that job runs).
-2. When the PR touches `drizzle/**`, Preview App DB Migration must pass.
+2. When the PR touches `drizzle/**`, Preview App DB Migration must pass (additive check always; shared DB apply only after `allow-shared-db-migrate` or `workflow_dispatch`).
 3. Vercel Preview must build successfully.
 4. Smoke-test changed user flows on the Preview when UI/runtime behavior changed (`npm run test:qa:preview` for exact-HEAD acceptance).
 5. Run additional integration/E2E checks when the change requires them.
