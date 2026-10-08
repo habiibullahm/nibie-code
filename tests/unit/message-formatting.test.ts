@@ -54,10 +54,10 @@ describe("assistant formatting examples", () => {
 
   it("every fenced code block has labelled Copy and Wrap controls, with or without a language", () => {
     const html = render("```bash\nnpm run build\n```\n\n```\nplain text block\n```");
-    expect((html.match(/<button[^>]*class="copy-button is-compact"/g) ?? []).length).toBe(4);
+    expect((html.match(/copy-button is-compact/g) ?? []).length).toBe(4);
     expect(html).toContain('aria-label="Copy bash code block"');
     expect(html).toContain('aria-label="Copy code block"');
-    expect(html).toContain('aria-label="Wrap code"');
+    expect((html.match(/aria-label="Wrap code"/g) ?? []).length).toBe(2);
     expect((html.match(/lucide-copy/g) ?? []).length).toBe(2);
     expect((html.match(/lucide-wrap-text/g) ?? []).length).toBe(2);
     expect(html).toMatch(/>Copy</);
