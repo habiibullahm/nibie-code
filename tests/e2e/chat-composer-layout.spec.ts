@@ -76,7 +76,8 @@ test("growing composer stays below messages at desktop, tablet, and mobile sizes
     const textarea = page.getByRole("textbox", { name: "Message Nibie" });
     const initialHeight = await textarea.evaluate((element) => element.getBoundingClientRect().height);
     expect(await textarea.getAttribute("rows")).toBe("1");
-    expect(initialHeight).toBeLessThanOrEqual(30);
+    // Single-line composer: 15px desktop / 16px mobile type sits a little taller than the old 13px baseline.
+    expect(initialHeight).toBeLessThanOrEqual(40);
 
     await textarea.fill("A one-line prompt");
     await expect.poll(() => textarea.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(initialHeight);
