@@ -919,7 +919,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     } finally { busy.current = false; setSending(false); setSavingMode(false); }
   });
   const persistChatRole = useStableCallback(async (role: ChatRole, instructions: string | null) => {
-    if (preview || !activeConversation) {
+    if (!activeConversation) {
       setDraftChatRole(role);
       setDraftCustomInstructions(instructions);
       return;
@@ -928,6 +928,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     const previousInstructions = activeConversation.custom_instructions ?? null;
     const optimistic = { ...activeConversation, chat_role: role, custom_instructions: instructions };
     setLocalConversations((items) => [optimistic, ...items.filter((item) => item.id !== optimistic.id)]);
+    if (preview) return;
     busy.current = true;
     setSavingRole(true);
     try {
