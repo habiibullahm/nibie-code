@@ -12,7 +12,7 @@ vi.mock("@supabase/supabase-js", () => ({
 }));
 
 type Row = Record<string, unknown> & { id: string };
-type TableName = "conversations" | "messages" | "user_preferences" | "users";
+type TableName = "conversations" | "messages" | "message_attachments" | "user_preferences" | "users";
 type Store = Record<TableName, Row[]>;
 type DbError = { code: string; message: string };
 
@@ -86,8 +86,19 @@ function message(overrides: Record<string, unknown> = {}): Row {
   };
 }
 
+function attachment(overrides: Record<string, unknown> = {}): Row {
+  return {
+    id: "66666666-6666-4666-8666-666666666666",
+    message_id: messageId,
+    original_name: "notes.txt",
+    extracted_text: "attachment body",
+    user_id: "user-123",
+    ...overrides,
+  };
+}
+
 function emptyStore(): Store {
-  return { conversations: [], messages: [], user_preferences: [], users: [] };
+  return { conversations: [], messages: [], message_attachments: [], user_preferences: [], users: [] };
 }
 
 function seed(token: string, patch: Partial<Store>) {
@@ -335,7 +346,7 @@ describe("account export", () => {
     await app.close();
   });
 
-  it("exports only the verified owner's rows as version 1", async () => {
+  it("exports only the verified owner's rows as version 2", async () => {
     seed("valid-token", {
       conversations: [
         conversation({ api_key: "sk-live", email: "owner@example.com" }),
@@ -352,6 +363,16 @@ describe("account export", () => {
           id: "44444444-4444-4444-8444-444444444444",
           conversation_id: "33333333-3333-4333-8333-333333333333",
           content: "other private note",
+          user_id: "user-b",
+        }),
+      ],
+      message_attachments: [
+        attachment(),
+        attachment({
+          id: "77777777-7777-4777-8777-777777777777",
+          message_id: "44444444-4444-4444-8444-444444444444",
+          original_name: "other.txt",
+          extracted_text: "other attachment body",
           user_id: "user-b",
         }),
       ],
@@ -378,18 +399,24 @@ describe("account export", () => {
     expect(response.statusCode).toBe(200);
     expect(response.headers["x-request-id"]).toBe(requestId);
     expect(response.headers["content-type"]).toContain("application/json");
-    expect(response.headers["content-disposition"]).toBe('attachment; filename="nibie-export-v1.json"');
+    expect(response.headers["content-disposition"]).toBe('attachment; filename="nibie-export-v2.json"');
     expect(response.headers["cache-control"]).toBe("no-store");
     expect(response.headers["x-content-type-options"]).toBe("nosniff");
     const body = response.json();
     expect(body).toMatchObject({
       product: "Nibie",
-      exportVersion: 1,
+      exportVersion: 2,
       conversations: [{
         id: conversationId,
         title: "Mine",
         selectedModel: "Fast",
-        messages: [{ id: messageId, content: "only mine", role: "user", status: "complete" }],
+        messages: [{
+          id: messageId,
+          content: "only mine",
+          role: "user",
+          status: "complete",
+          attachments: [{ originalName: "notes.txt", extractedText: "attachment body" }],
+        }],
       }],
     });
     expect(body.exportedAt).not.toBe("1999-01-01T00:00:00.000Z");
@@ -402,11 +429,19 @@ describe("account export", () => {
     expect(serialized).not.toContain("user_id");
     expect(serialized).not.toContain("user-123");
     expect(serialized).not.toContain("AboutYouDoNotExport");
+    expect(serialized).not.toContain("other attachment body");
     expect(other.json().conversations).toEqual([
       expect.objectContaining({ id: "33333333-3333-4333-8333-333333333333", title: "Other account", selectedModel: "Reasoning" }),
     ]);
     const ranges = operations.filter((operation) => operation.op === "range");
-    expect(ranges.map((operation) => operation.table)).toEqual(["conversations", "messages", "conversations", "messages"]);
+    expect(ranges.map((operation) => operation.table)).toEqual([
+      "conversations",
+      "messages",
+      "message_attachments",
+      "conversations",
+      "messages",
+      "message_attachments",
+    ]);
     expect(ranges[0]).toMatchObject({
       token: "valid-token",
       columns: "id,title,selected_model,created_at,updated_at",
@@ -421,19 +456,25 @@ describe("account export", () => {
       filters: [["user_id", "user-123"]],
       orders: ["conversation_id", "position", "id"],
     });
-    expect(ranges[2]?.filters).toEqual([["user_id", "user-b"]]);
+    expect(ranges[2]).toMatchObject({
+      token: "valid-token",
+      columns: "id,message_id,original_name,extracted_text",
+      filters: [["user_id", "user-123"]],
+      orders: ["message_id", "id"],
+    });
+    expect(ranges[3]?.filters).toEqual([["user_id", "user-b"]]);
     expect(operations.some((operation) => operation.table === "user_preferences" || operation.table === "users")).toBe(false);
     expect(createClientMock).toHaveBeenCalledTimes(2);
     expect(clientCalls[1]?.authorization).toBe("Bearer token-b");
     await app.close();
   });
 
-  it("exports an empty account as version 1", async () => {
+  it("exports an empty account as version 2", async () => {
     seed("valid-token", {});
     const app = await buildAccountApp();
     const response = await app.inject({ method: "GET", url: "/v1/account/export", headers: bearer() });
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({ product: "Nibie", exportVersion: 1, conversations: [] });
+    expect(response.json()).toMatchObject({ product: "Nibie", exportVersion: 2, conversations: [] });
     await app.close();
   });
 

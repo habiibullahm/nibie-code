@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { EXPORT_PAGE_SIZE, buildConversationExport, readAllPages, type ExportConversationRow, type ExportMessageRow } from "../../lib/privacy/export";
+import {
+  EXPORT_PAGE_SIZE,
+  buildConversationExport,
+  readAllPages,
+  type ExportAttachmentRow,
+  type ExportConversationRow,
+  type ExportMessageRow,
+} from "../../lib/privacy/export";
 
 const exportedAt = "2026-10-02T00:00:00.000Z";
 
@@ -28,25 +35,36 @@ function message(overrides: Partial<ExportMessageRow> = {}): ExportMessageRow {
   };
 }
 
+function attachment(overrides: Partial<ExportAttachmentRow> = {}): ExportAttachmentRow {
+  return {
+    id: "66666666-6666-4666-8666-666666666666",
+    message_id: "22222222-2222-4222-8222-222222222222",
+    original_name: "notes.txt",
+    extracted_text: "attachment body",
+    ...overrides,
+  };
+}
+
 describe("conversation export", () => {
   it("builds a versioned empty export", () => {
-    expect(buildConversationExport({ conversations: [], messages: [], exportedAt })).toEqual({
+    expect(buildConversationExport({ conversations: [], messages: [], attachments: [], exportedAt })).toEqual({
       product: "Nibie",
-      exportVersion: 1,
+      exportVersion: 2,
       exportedAt,
       conversations: [],
     });
   });
 
-  it("includes conversations, messages, timestamps, and the selected model, and nothing else", () => {
+  it("includes conversations, messages, attachment names and text, timestamps, and the selected model, and nothing else", () => {
     const payload = buildConversationExport({
       conversations: [{ ...conversation(), user_id: "owner-secret", api_key: "sk-live" } as ExportConversationRow],
       messages: [{ ...message(), user_id: "owner-secret", provider: "secret-provider" } as ExportMessageRow],
+      attachments: [{ ...attachment(), user_id: "owner-secret", storage_path: "secret/path" } as ExportAttachmentRow],
       exportedAt,
     });
     expect(payload).toEqual({
       product: "Nibie",
-      exportVersion: 1,
+      exportVersion: 2,
       exportedAt,
       conversations: [{
         id: conversation().id,
@@ -62,6 +80,7 @@ describe("conversation export", () => {
           position: 1,
           createdAt: "2026-01-02T00:00:01.000Z",
           replyToMessageId: null,
+          attachments: [{ originalName: "notes.txt", extractedText: "attachment body" }],
         }],
       }],
     });
@@ -70,7 +89,35 @@ describe("conversation export", () => {
     expect(serialized).not.toContain("sk-live");
     expect(serialized).not.toContain("secret-provider");
     expect(serialized).not.toContain("user_id");
+    expect(serialized).not.toContain("storage_path");
     expect(Object.keys(payload!.conversations[0])).toEqual(["id", "title", "selectedModel", "createdAt", "updatedAt", "messages"]);
+    expect(Object.keys(payload!.conversations[0].messages[0])).toEqual([
+      "id",
+      "role",
+      "content",
+      "status",
+      "position",
+      "createdAt",
+      "replyToMessageId",
+      "attachments",
+    ]);
+  });
+
+  it("omits unlinked draft attachments and fails closed on a linked orphan", () => {
+    const withDraft = buildConversationExport({
+      conversations: [conversation()],
+      messages: [message()],
+      attachments: [attachment({ message_id: null, original_name: "draft.txt", extracted_text: "draft body" })],
+      exportedAt,
+    });
+    expect(withDraft?.conversations[0]?.messages[0]?.attachments).toEqual([]);
+
+    expect(buildConversationExport({
+      conversations: [conversation()],
+      messages: [message()],
+      attachments: [attachment({ message_id: "99999999-9999-4999-8999-999999999999" })],
+      exportedAt,
+    })).toBeNull();
   });
 
   it("strips internal reasoning from assistant messages and leaves user text unchanged", () => {
@@ -130,12 +177,35 @@ describe("conversation export", () => {
       position: 1,
       created_at: "2026-02-01T00:00:01.000Z",
     });
-    const forward = buildConversationExport({ conversations: [conversation(), later, sameTime], messages: [message(), reply, prompt], exportedAt });
-    const reversed = buildConversationExport({ conversations: [sameTime, later, conversation()], messages: [prompt, message(), reply], exportedAt });
+    const firstFile = attachment({
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      message_id: prompt.id,
+      original_name: "a.txt",
+      extracted_text: "a",
+    });
+    const secondFile = attachment({
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      message_id: prompt.id,
+      original_name: "b.txt",
+      extracted_text: "b",
+    });
+    const forward = buildConversationExport({
+      conversations: [conversation(), later, sameTime],
+      messages: [message(), reply, prompt],
+      attachments: [secondFile, firstFile],
+      exportedAt,
+    });
+    const reversed = buildConversationExport({
+      conversations: [sameTime, later, conversation()],
+      messages: [prompt, message(), reply],
+      attachments: [firstFile, secondFile],
+      exportedAt,
+    });
     expect(reversed).toEqual(forward);
     expect(forward?.conversations.map((item) => item.id)).toEqual([sameTime.id, conversation().id, later.id]);
     expect(forward?.conversations[2].messages.map((item) => item.position)).toEqual([1, 2]);
     expect(forward?.conversations[2].selectedModel).toBe("Reasoning");
+    expect(forward?.conversations[2].messages[0].attachments.map((item) => item.originalName)).toEqual(["a.txt", "b.txt"]);
   });
 
   it("fails closed when a message has no conversation in the same snapshot", () => {

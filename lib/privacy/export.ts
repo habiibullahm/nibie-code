@@ -1,11 +1,13 @@
 import { sanitizeModelOutput } from "@/lib/ai/sanitize-model-output";
 import {
   buildConversationExport as buildConversationExportUnsanitized,
+  type ExportAttachmentRow,
   type ExportConversationRow,
   type ExportMessageRow,
 } from "../../packages/contracts/src/account-export";
 
 export {
+  EXPORT_FILENAME,
   EXPORT_PAGE_SIZE,
   EXPORT_PRODUCT,
   EXPORT_VERSION,
@@ -15,6 +17,7 @@ export {
 type ConversationExportInput = {
   conversations: ExportConversationRow[];
   messages: ExportMessageRow[];
+  attachments?: ExportAttachmentRow[];
   exportedAt: string | Date;
 };
 
@@ -30,9 +33,11 @@ export function buildConversationExport(input: ConversationExportInput) {
 }
 
 export type {
+  ExportAttachmentRow,
   ExportConversationRow,
   ExportMessageRow,
   ExportPage,
+  ExportedAttachment,
   ExportedConversation,
   ExportedMessage,
   NibieExport,

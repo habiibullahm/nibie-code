@@ -25,6 +25,7 @@ What's new in Nibie.
 
 ### Changed
 
+- Account export now includes chat attachment file names and extracted text for your own conversations (download filename `nibie-export-v2.json`).
 - Copy on a reply now pastes Word- and Docs-friendly formatting by default (headings, lists, tables, and code without Markdown markers or dark theme), with a small menu for clean plain text.
 - Deep Research now uses a higher weekly credit cost that covers the full multi-step research run (planning, search, and synthesis), not just a single reply.
 - Model and Research controls are clearer: Research shows Off or Deep Research (with a stronger selected state when Deep Research is on), and replies have a slightly tighter vertical rhythm for easier scanning.
@@ -58,7 +59,7 @@ What's new in Nibie.
 
 ### Known issues
 
-- Attachments can't yet include images or scanned PDFs. Account exports don't include attachment files or extracted text yet. Attachments uploaded before owner download shipped may not have a downloadable original.
+- Attachments can't yet include images or scanned PDFs. Attachments uploaded before owner download shipped may not have a downloadable original.
 
 ## Current development
 

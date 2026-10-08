@@ -1,4 +1,4 @@
-import { parseDeleteConversationsRequest, parseSignOutRequest, signOutResponseSchema } from "@nibie/contracts";
+import { EXPORT_FILENAME, parseDeleteConversationsRequest, parseSignOutRequest, signOutResponseSchema } from "@nibie/contracts";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { deleteAllConversations, exportAccount } from "../../account/repository.js";
 import { ApiError } from "../../plugins/error-handler.js";
@@ -23,7 +23,7 @@ function requireUser(request: FastifyRequest) {
 
 function exportHeaders(reply: FastifyReply) {
   reply.header("content-type", "application/json; charset=utf-8");
-  reply.header("content-disposition", 'attachment; filename="nibie-export-v1.json"');
+  reply.header("content-disposition", `attachment; filename="${EXPORT_FILENAME}"`);
   reply.header("cache-control", "no-store");
   reply.header("x-content-type-options", "nosniff");
 }

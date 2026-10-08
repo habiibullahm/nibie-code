@@ -17,6 +17,7 @@ export {
 } from "./preferences.js";
 export {
   DELETE_ALL_CONFIRMATION,
+  EXPORT_FILENAME,
   EXPORT_PAGE_SIZE,
   EXPORT_PRODUCT,
   EXPORT_VERSION,
@@ -24,9 +25,11 @@ export {
   buildConversationExport,
   isDeleteAllConfirmed,
   readAllPages,
+  type ExportAttachmentRow,
   type ExportConversationRow,
   type ExportMessageRow,
   type ExportPage,
+  type ExportedAttachment,
   type ExportedConversation,
   type ExportedMessage,
   type NibieExport,

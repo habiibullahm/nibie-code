@@ -6,6 +6,7 @@ import {
   readAllPages,
   type AccountExport,
   type DeleteConversationsResponse,
+  type ExportAttachmentRow,
   type ExportConversationRow,
   type ExportMessageRow,
 } from "@nibie/contracts";
@@ -14,6 +15,7 @@ import { ApiError } from "../plugins/error-handler.js";
 
 const conversationColumns = "id,title,selected_model,created_at,updated_at";
 const messageColumns = "id,conversation_id,role,content,status,position,created_at,reply_to_message_id";
+const attachmentColumns = "id,message_id,original_name,extracted_text";
 
 const exportFailed = "Your conversations couldn't be exported. Please try again.";
 const deleteFailed = "Conversations couldn't be deleted. Please try again.";
@@ -75,7 +77,26 @@ export async function exportAccount(supabase: SupabaseClient, userId: string): P
   if (forbidden) throw new ApiError(403, "forbidden", "Forbidden.");
   if (!messages) throw new ApiError(503, "service_unavailable", exportFailed);
 
-  const payload = buildConversationExport({ conversations, messages, exportedAt: new Date().toISOString() });
+  const attachments = await readAllPages<ExportAttachmentRow>(async (from, to) => {
+    const query = owned(
+      supabase.from("message_attachments").select(attachmentColumns).eq("user_id", userId) as unknown as OrderedQuery,
+      "message_id",
+      "id",
+    );
+    return readPage<ExportAttachmentRow>(query, from, to, () => {
+      forbidden = true;
+    });
+  }, EXPORT_PAGE_SIZE);
+
+  if (forbidden) throw new ApiError(403, "forbidden", "Forbidden.");
+  if (!attachments) throw new ApiError(503, "service_unavailable", exportFailed);
+
+  const payload = buildConversationExport({
+    conversations,
+    messages,
+    attachments,
+    exportedAt: new Date().toISOString(),
+  });
   const parsed = payload ? accountExportSchema.safeParse(payload) : null;
   if (!parsed?.success) throw new ApiError(503, "service_unavailable", exportFailed);
   return parsed.data;
