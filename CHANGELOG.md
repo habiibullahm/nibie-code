@@ -24,6 +24,7 @@ What's new in Nibie.
 
 ### Changed
 
+- Copy on a reply now pastes Word- and Docs-friendly formatting by default (headings, lists, tables, and code without Markdown markers or dark theme), with a small menu for clean plain text.
 - Deep Research now uses a higher weekly credit cost that covers the full multi-step research run (planning, search, and synthesis), not just a single reply.
 - Model and Research controls are clearer: Research shows Off or Deep Research (with a stronger selected state when Deep Research is on), and replies have a slightly tighter vertical rhythm for easier scanning.
 - Improved message input readability, code example controls, and conversation navigation across desktop and mobile.

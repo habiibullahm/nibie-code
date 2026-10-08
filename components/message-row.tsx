@@ -4,7 +4,7 @@ import { memo, useState, type KeyboardEvent } from "react";
 import { FileText, Pencil, RefreshCw } from "lucide-react";
 import { attachmentTypeLabel, formatBytes } from "@/lib/attachments/limits";
 import type { AttachmentSummary } from "@/lib/attachments/types";
-import { CopyButton } from "@/components/copy-button";
+import { ResponseCopyButton } from "@/components/copy-button";
 import { MessageMarkdown } from "@/components/message-markdown";
 import { MessageSources } from "@/components/message-sources";
 import { useChatFlag } from "@/components/use-chat-preferences";
@@ -102,7 +102,7 @@ export const MessageRow = memo(function MessageRow({ message, initial, isLast, i
           : <MessageMarkdown content={message.content} sources={message.sources} />}
         {message.sources?.length && !waiting ? <MessageSources sources={message.sources} /> : null}
         {(canCopy || canRegenerate || canRetry) && <div className="message-actions">
-          {canCopy && <CopyButton text={message.content} label="Copy response" />}
+          {canCopy && <ResponseCopyButton markdown={message.content} sources={message.sources} label="Copy response" />}
           {canRegenerate && <button type="button" className="message-action" disabled={disabled} onClick={onRegenerate}><RefreshCw size={13} aria-hidden="true" /><span>Regenerate</span></button>}
           {canRetry && <button type="button" className="message-action" disabled={disabled} onClick={onRegenerate}><RefreshCw size={13} aria-hidden="true" /><span>Retry</span></button>}
         </div>}
