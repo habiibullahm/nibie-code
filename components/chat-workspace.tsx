@@ -35,6 +35,7 @@ import { previewContextDiagnostics } from "@/lib/context/profile-context";
 import type { ContextDiagnostics } from "@/lib/context/context-types";
 import { followAfterSending, followStreamedContent, isNearBottom, trackNearBottom } from "@/lib/chat/scroll";
 import { ChatStreamServerError, readChatSse } from "@/lib/ai/sse";
+import { actionRunningLabel, actionStatusLabel, actionUsedLabel } from "@/lib/actions/labels";
 import { operationalCodes } from "@/lib/observability/codes";
 import { weeklyLimitNotice } from "@/lib/usage/format";
 import { compareNames, compareText } from "@/lib/chat/order";
@@ -524,14 +525,29 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
           };
           setLocalMessages((items) => { const rows = items[id] ?? []; return { ...items, [id]: options.placeholderId && rows.some((row) => row.id === options.placeholderId) ? rows.map((row) => row.id === options.placeholderId ? reply : row) : [...rows, reply] }; });
         }
+        if (data.type === "context") {
+          setContextDiagnostics(data.context);
+        }
         if (data.type === "progress" && assistantId) {
           setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId ? { ...message, researchStage: data.stage, research: message.research ?? { status: "running", followUpUsed: false, searchQueryCount: 0, pagesFetched: 0, evidenceCount: 0, durationMs: 0, usagePolicy: "temporary_undercount_v1" } } : message) }));
+        }
+        if (data.type === "action_start" && assistantId) {
+          const label = actionRunningLabel(data.actionId);
+          setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId ? { ...message, actionId: data.actionId, actionLabel: label } : message) }));
+        }
+        if (data.type === "action_result" && assistantId) {
+          const label = actionUsedLabel(data.actionId);
+          setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId ? { ...message, actionId: data.actionId, actionLabel: label } : message) }));
+        }
+        if (data.type === "action_error" && assistantId) {
+          const label = actionStatusLabel(data.actionId, data.status);
+          setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId ? { ...message, actionId: data.actionId, actionLabel: label } : message) }));
         }
         if (data.type === "sources" && assistantId) {
           setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId ? { ...message, sources: data.sources } : message) }));
         }
         if (data.type === "delta") { setAssistantActivity("streaming"); buffer += data.text; received += data.text; if (!shown) flush(); else if (!flushTimer) flushTimer = setTimeout(flush, streamFlushMs); }
-        if (data.type === "status") { flush(); setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId ? { ...message, content: message.content || "Response stopped.", status: data.status, researchStage: undefined } : message) })); }
+        if (data.type === "status") { flush(); setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId ? { ...message, content: message.content || "Response stopped.", status: data.status, researchStage: undefined, ...(data.status === "interrupted" ? {} : {}) } : message) })); }
       }
       flush();
       router.refresh();

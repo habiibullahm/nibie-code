@@ -13,9 +13,10 @@ on:
 permissions:
   contents: read
 
-# Never cancel a running migration, and never run two at once. Later pushes queue behind it.
+# Never cancel a running migration, and never run two at once. Shares the queue with
+# Preview App DB Migration (same shared Supabase/Postgres today). Later pushes queue.
 concurrency:
-  group: production-db-migration
+  group: shared-app-db-migration
   cancel-in-progress: false
 
 jobs:

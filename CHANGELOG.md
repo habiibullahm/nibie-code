@@ -9,6 +9,7 @@ What's new in Nibie.
 ### Added
 
 - Code in Nibie's answers is now syntax-highlighted in calm, muted colors for common languages, including shell commands and their flags.
+- When Nibie searches the web for a reply, you can see “Searching the web…” while it runs and “Used Web Search” on the finished answer — a first step toward clear, stoppable Actions without changing ordinary chat.
 - Choose Deep Research from the Research menu for a bounded multi-source researched answer with citations, progress stages, and Incomplete/Failed labels when collection is partial or fails.
 - When a reply uses web sources, Nibie shows clickable citation markers and a Sources list with title and domain, kept with the message so they survive reload.
 - Ask Nibie to remember a preference or project fact across conversations, and manage or turn off Memory in Settings. Your current request always wins over what was saved.
@@ -31,6 +32,7 @@ What's new in Nibie.
 
 ### Fixed
 
+- Web Search and Deep Research no longer lose a valid weekly credit reservation between the allowance check and the reply, which could block an answer even when credits remained.
 - Web search now grounds Indonesian market condition/direction asks (for example “kondisi IHSG”, “arah pasar saham”) even when the message omits an explicit freshness word like “hari ini”, while still skipping definitional asks like “apa itu IHSG?”.
 - Web citation markers no longer appear as raw `[SOURCE:web:…]` text when the model streams a handle across chunk boundaries; they convert to clickable `[n]` markers with the Sources list.
 - Web search recognizes Indonesian web-intent and freshness cues for market questions (for example IHSG) without searching conceptual asks like “apa itu IHSG?”.

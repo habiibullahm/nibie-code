@@ -71,14 +71,24 @@ export const MessageRow = memo(function MessageRow({ message, initial, isLast, i
     const canCopy = message.status !== "streaming" && message.status !== "error" && Boolean(message.content) && !placeholderResponses.has(message.content);
     const canRegenerate = canMutate && isLast && message.status === "complete" && canCopy;
     const canRetry = canMutate && isLast && (message.status === "error" || message.status === "interrupted");
-    const responseStatus = message.researchStage ? `Nibie is ${RESEARCH_STAGE_LABELS[message.researchStage].toLowerCase()}` : "Nibie is responding";
+    const responseStatus = message.actionLabel
+      ? message.actionLabel
+      : message.researchStage
+        ? `Nibie is ${RESEARCH_STAGE_LABELS[message.researchStage].toLowerCase()}`
+        : "Nibie is responding";
     // No author header. Before the first token a status label shows (after a 300ms grace period, in CSS); once text arrives it renders as-is, without motion.
-    // Status labels (Deep Research, Stopped, errors) and the optional timestamp keep a small meta line.
+    // Status labels (Deep Research, Used Web Search, Stopped, errors) and the optional timestamp keep a small meta line.
     const statuses = [
       message.research ? `Deep Research${message.research.status === "incomplete" ? " · Incomplete" : message.research.status === "failed" ? " · Failed" : ""}` : null,
+      message.actionLabel && message.status === "complete" ? message.actionLabel : null,
       message.status === "interrupted" ? "Stopped" : null,
     ].filter(Boolean).join(" · ");
     const failed = message.status === "error";
+    const waitingLabel = message.actionLabel
+      ? message.actionLabel
+      : message.researchStage
+        ? "Researching…"
+        : waitLabel ?? "Responding…";
     return <article className="message-row assistant">
       <div className="message-content assistant">
         {message.status === "streaming" ? <span className="visually-hidden" role="status">{responseStatus}</span> : null}
@@ -88,7 +98,7 @@ export const MessageRow = memo(function MessageRow({ message, initial, isLast, i
           <MessageTime value={message.created_at} />
         </div> : null}
         {waiting
-          ? <div className="response-waiting"><span className="response-thinking" aria-hidden="true">{message.researchStage ? "Researching…" : waitLabel ?? "Responding…"}</span>{message.researchStage ? <span className="research-stage">{RESEARCH_STAGE_LABELS[message.researchStage]}</span> : null}</div>
+          ? <div className="response-waiting"><span className="response-thinking" aria-hidden="true">{waitingLabel}</span>{message.researchStage && !message.actionLabel ? <span className="research-stage">{RESEARCH_STAGE_LABELS[message.researchStage]}</span> : null}</div>
           : <MessageMarkdown content={message.content} sources={message.sources} />}
         {message.sources?.length && !waiting ? <MessageSources sources={message.sources} /> : null}
         {(canCopy || canRegenerate || canRetry) && <div className="message-actions">

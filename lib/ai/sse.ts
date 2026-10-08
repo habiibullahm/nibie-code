@@ -96,6 +96,31 @@ const chatEventSchema = z.discriminatedUnion("type", [
     stage: researchStageSchema,
   }),
   z.strictObject({
+    type: z.literal("action_start"),
+    actionId: z.string().min(1).max(120),
+    runId: z.string().uuid().nullable(),
+    title: z.string().min(1).max(120),
+  }),
+  z.strictObject({
+    type: z.literal("action_result"),
+    actionId: z.string().min(1).max(120),
+    runId: z.string().uuid(),
+    status: z.literal("completed"),
+    summary: z.string().max(400),
+  }),
+  z.strictObject({
+    type: z.literal("action_error"),
+    actionId: z.string().min(1).max(120),
+    runId: z.string().uuid().nullable(),
+    status: z.enum(["failed", "cancelled", "waiting_for_confirmation"]),
+    errorCode: z.string().min(1).max(64),
+  }),
+  // Follow-up diagnostics when start was emitted early (Action path) before buildContext.
+  z.strictObject({
+    type: z.literal("context"),
+    context: z.strictObject({ sources: z.array(contextDiagnosticSchema), recentMessageCount: z.number().int().nonnegative() }),
+  }),
+  z.strictObject({
     type: z.literal("sources"),
     sources: z.array(citationSourceSchema).max(20),
   }),

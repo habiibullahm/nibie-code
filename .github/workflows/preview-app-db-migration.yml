@@ -1,0 +1,158 @@
+name: Preview App DB Migration
+
+# INTERIM: Preview and Production Vercel targets share one Supabase/Postgres today.
+# Prefer an isolated Preview database. Until that exists, this job may apply only
+# strictly additive Drizzle migrations (gated below) under the `production`
+# environment — enable required reviewers on that environment.
+#
+# Not the PR Guard "Integration DB + RLS" job (local Docker only).
+# Not Supabase GitHub "Preview" branching (skipped here; migrations live in drizzle/).
+# Vercel must not run db:migrate in the build.
+#
+# Long-term: remove PR writes to production; apply schema only via
+# Production DB Migration on main once Preview has its own database.
+
+on:
+  pull_request:
+    branches:
+      - main
+      - 'release/**'
+    paths:
+      - 'drizzle/**'
+      - 'drizzle.config.ts'
+      - 'scripts/check-preview-migrations-additive.mjs'
+      - '.github/workflows/preview-app-db-migration.yml'
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Share the queue with Production DB Migration — never overlap or cancel mid-migrate.
+concurrency:
+  group: shared-app-db-migration
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: Preview app DB migration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Holds POSTGRES_URL_NON_POOLING. Require reviewers on this environment.
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Refuse non-additive PR migrations
+        run: |
+          git fetch --no-tags origin main 2>/dev/null || true
+          node scripts/check-preview-migrations-additive.mjs
+
+      - name: Check migration connection
+        env:
+          POSTGRES_URL_NON_POOLING: ${{ secrets.POSTGRES_URL_NON_POOLING }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$POSTGRES_URL_NON_POOLING" ]]; then
+            echo "::error::Secret POSTGRES_URL_NON_POOLING is not set on the 'production' environment."
+            echo "::error::Preview Vercel uses the shared app DB; this workflow cannot apply PR migrations without it."
+            exit 1
+          fi
+
+          if [[ "$POSTGRES_URL_NON_POOLING" == *":6543"* ]]; then
+            echo "::error::POSTGRES_URL_NON_POOLING points at a pooled port (6543). Use the direct or session-mode connection."
+            exit 1
+          fi
+
+      - name: Probe database connection
+        env:
+          DATABASE_URL: ${{ secrets.POSTGRES_URL_NON_POOLING }}
+        run: |
+          node --input-type=module -e '
+            import postgres from "postgres";
+            const url = new URL(process.env.DATABASE_URL);
+            const kind = url.hostname.startsWith("db.") ? "direct" : url.hostname.includes("pooler.") ? "pooler" : "other";
+            console.log(`host kind=${kind} port=${url.port || 5432}`);
+            const sql = postgres(process.env.DATABASE_URL, { max: 1, connect_timeout: 15, onnotice: () => {} });
+            try {
+              await sql`select 1`;
+              console.log("connection ok");
+            } catch (error) {
+              console.error(`::error::Database connection failed: code=${error.code ?? "none"} name=${error.name} syscall=${error.syscall ?? "none"}`);
+              process.exitCode = 1;
+            } finally {
+              await sql.end({ timeout: 5 });
+            }
+          '
+
+      - name: Apply migrations
+        env:
+          DATABASE_URL: ${{ secrets.POSTGRES_URL_NON_POOLING }}
+        run: npm run db:migrate
+
+      - name: Verify action_runs and server write RPCs when journal includes them
+        env:
+          DATABASE_URL: ${{ secrets.POSTGRES_URL_NON_POOLING }}
+        run: |
+          node --input-type=module -e '
+            import { readFileSync, existsSync } from "node:fs";
+            import postgres from "postgres";
+            const journalPath = "drizzle/meta/_journal.json";
+            if (!existsSync(journalPath)) {
+              console.log("no drizzle journal; skip table verify");
+              process.exit(0);
+            }
+            const journal = JSON.parse(readFileSync(journalPath, "utf8"));
+            const tags = (journal.entries || []).map((e) => e.tag);
+            const sql = postgres(process.env.DATABASE_URL, { max: 1, connect_timeout: 15, onnotice: () => {} });
+            try {
+              if (tags.includes("0019_action_runs")) {
+                const rows = await sql`
+                  select 1 as ok
+                  from information_schema.tables
+                  where table_schema = ${"public"}
+                    and table_name = ${"action_runs"}
+                  limit 1
+                `;
+                if (!rows.length) {
+                  console.error("::error::Migration claimed success but public.action_runs is missing");
+                  process.exitCode = 1;
+                } else {
+                  console.log("public.action_runs present");
+                }
+              }
+              if (tags.includes("0021_action_runs_server_writes")) {
+                const fns = await sql`
+                  select p.proname
+                  from pg_proc p
+                  join pg_namespace n on n.oid = p.pronamespace
+                  where n.nspname = ${"public"}
+                    and p.proname in (${"insert_action_run"}, ${"complete_action_run"})
+                  order by p.proname
+                `;
+                const names = fns.map((r) => r.proname);
+                if (!names.includes("insert_action_run") || !names.includes("complete_action_run")) {
+                  console.error("::error::0021 claimed success but insert_action_run/complete_action_run missing");
+                  process.exitCode = 1;
+                } else {
+                  console.log("action_runs server write RPCs present");
+                }
+              }
+            } finally {
+              await sql.end({ timeout: 5 });
+            }
+          '

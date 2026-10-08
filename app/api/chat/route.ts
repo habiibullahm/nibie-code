@@ -10,7 +10,6 @@ import { toProviderMessages } from "@/lib/ai/provider-messages";
 import { contextCapabilitiesFor, getModelOptions, providerFor } from "@/lib/ai/registry";
 import { createReasoningStreamFilter, sanitizeModelOutput } from "@/lib/ai/sanitize-model-output";
 import { ProviderStreamError, readOpenAiSse } from "@/lib/ai/sse";
-import { attachWebCitationHandles } from "@/lib/citations/attach";
 import { citationSourcesIncludedInContext } from "@/lib/citations/included";
 import { createCitationStreamFilter } from "@/lib/citations/parse";
 import { citationViewsFromPrepared, persistMessageSources } from "@/lib/citations/persist";
@@ -37,9 +36,7 @@ import { logError, logInfo, logWarn } from "@/lib/observability/logger";
 import { requestIdFrom } from "@/lib/observability/request-id";
 import { weeklyCreditCost, WEEKLY_FREE_CREDIT_LIMIT } from "@/lib/usage/policy";
 import { createDeepResearchChatResponse } from "@/lib/research/chat-stream";
-import { getWebSearchConfig } from "@/lib/web/config";
-import { getWebSearchProvider } from "@/lib/web/provider";
-import { runWebSearchPipeline } from "@/lib/web/pipeline";
+import { createAutoWebActionChatResponse } from "@/lib/actions/auto-web-response";
 import { decideWebSearch } from "@/lib/web/routing";
 import type { WebContextInput } from "@/lib/web/types";
 
@@ -50,6 +47,117 @@ export const maxDuration = 180;
 const encoder = new TextEncoder();
 const safeError = "Nibie couldn't complete that response. Please try again.";
 function event(type: string, data: unknown) { return `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`; }
+
+type WeeklyReservationRow = {
+  accepted: boolean;
+  credits_charged: number;
+  credits_used: number;
+  credits_remaining: number;
+  reset_at: string;
+};
+
+/**
+ * Shared HTTP weekly-usage gate for paths that open SSE before synthesis
+ * (Action/web.search and Deep Research). Exhausted accounts get the same 429 JSON as Fast path
+ * so the client can set weeklyLimitResetAt.
+ *
+ * On accept, the reservation is kept held for this generation id. Downstream streams must not
+ * release-then-re-reserve: `reserve_weekly_ai_usage` returns accepted=false once released_at is set.
+ * Pass `weeklyUsageReserved: true` and skip a second reserve; release only on early failure before start.
+ */
+async function rejectWeeklyUsageBeforeStream(input: {
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  assistantId: string;
+  mode: keyof typeof weeklyCreditCost;
+  requestId: string;
+}): Promise<NextResponse | null> {
+  const { supabase, assistantId, mode, requestId } = input;
+  const release = async () => {
+    try {
+      const { error } = await supabase.rpc("release_weekly_ai_usage", { p_generation_id: assistantId });
+      if (error) logError("weekly_usage.reservation.release_failed", { requestId, logicalMode: mode, code: operationalCodes.requestFailed });
+    } catch {
+      logError("weekly_usage.reservation.release_failed", { requestId, logicalMode: mode, code: operationalCodes.requestFailed });
+    }
+  };
+  const markError = async (content: string) => {
+    try {
+      await supabase.from("messages").update({ content, status: "error" }).eq("id", assistantId).eq("status", "streaming");
+    } catch {
+      logError("chat.persistence.failed", { requestId, code: operationalCodes.assistantPersistFailed, stage: "persist", status: "error" });
+    }
+  };
+
+  const reservationStartedAt = Date.now();
+  let reservation: WeeklyReservationRow | null = null;
+  let reservationError: unknown = null;
+  try {
+    const result = await supabase.rpc("reserve_weekly_ai_usage", {
+      p_generation_id: assistantId,
+      p_logical_mode: mode,
+    }).single<WeeklyReservationRow>();
+    reservation = result.data;
+    reservationError = result.error;
+  } catch {
+    reservationError = new Error("Reservation request failed.");
+  }
+  const usageReservationMs = Date.now() - reservationStartedAt;
+
+  if (
+    reservationError
+    || !reservation
+    || typeof reservation.accepted !== "boolean"
+    || !Number.isInteger(reservation.credits_remaining)
+    || reservation.credits_remaining < 0
+    || reservation.credits_remaining > WEEKLY_FREE_CREDIT_LIMIT
+    || typeof reservation.reset_at !== "string"
+    || !Number.isFinite(Date.parse(reservation.reset_at))
+  ) {
+    logError("weekly_usage.reservation.failed", { requestId, logicalMode: mode, durationMs: usageReservationMs, code: operationalCodes.requestFailed });
+    await release();
+    await markError("Response unavailable.");
+    return NextResponse.json({ error: safeError }, { status: 503 });
+  }
+
+  if (!reservation.accepted) {
+    logWarn("weekly_usage.limit.rejected", {
+      requestId,
+      logicalMode: mode,
+      creditsCharged: 0,
+      creditsRemaining: reservation.credits_remaining,
+    });
+    await markError("Weekly usage limit reached.");
+    return NextResponse.json({
+      code: operationalCodes.weeklyUsageLimitRejected,
+      error: "You've reached your weekly Nibie usage limit.",
+      creditsRemaining: reservation.credits_remaining,
+      resetAt: reservation.reset_at,
+    }, { status: 429, headers: { "x-request-id": requestId } });
+  }
+
+  if (reservation.credits_charged !== weeklyCreditCost[mode]) {
+    logError("weekly_usage.reservation.failed", {
+      requestId,
+      logicalMode: mode,
+      durationMs: usageReservationMs,
+      reason: "policy_mismatch",
+      code: operationalCodes.requestFailed,
+    });
+    await release();
+    await markError("Response unavailable.");
+    return NextResponse.json({ error: safeError }, { status: 503 });
+  }
+
+  logInfo("weekly_usage.reservation.accepted", {
+    requestId,
+    logicalMode: mode,
+    creditsCharged: reservation.credits_charged,
+    creditsRemaining: reservation.credits_remaining,
+    reservationLatencyMs: usageReservationMs,
+    heldForStream: true,
+  });
+  return null;
+}
 
 export async function POST(request: Request) {
   const requestId = requestIdFrom(request);
@@ -236,6 +344,13 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   // Deep Research is an explicit alternate path: bounded multi-source orchestrator + cited synthesis.
   // It does not use auto web routing and must not overload Fast/Balanced/High.
   if (deepResearch) {
+    const weeklyRejected = await rejectWeeklyUsageBeforeStream({
+      supabase,
+      assistantId: assistant.id,
+      mode,
+      requestId,
+    });
+    if (weeklyRejected) return weeklyRejected;
     const planMode = (availableModes.includes("Fast") ? "Fast" : mode) as typeof mode;
     return createDeepResearchChatResponse({
       request,
@@ -257,90 +372,53 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       memories,
       recallOperation,
       rows,
+      weeklyUsageReserved: true,
     });
   }
 
-  // Web search runs after Room hybrid retrieval and only for a fresh generation (replay already returned).
-  // Failures never block the reply: empty web context continues as normal chat, with an authoritative
-  // "verification unavailable" instruction when routing wanted search but sources were empty.
+  // Automatic Web Search V1 runs through Action Runtime (web.search) — allowlisted, audited, stoppable.
+  // Deterministic routing decides; no extra LLM round for the Action decision. Fast path (no search) is unchanged.
+  const webDecision = decideWebSearch(userMessage.content, { hasRoomFileContext: Boolean(files?.length) });
+  if (webDecision.search) {
+    const weeklyRejected = await rejectWeeklyUsageBeforeStream({
+      supabase,
+      assistantId: assistant.id,
+      mode,
+      requestId,
+    });
+    if (weeklyRejected) return weeklyRejected;
+    return createAutoWebActionChatResponse({
+      request,
+      requestId,
+      requestStartedAt,
+      supabase,
+      userId: user.id,
+      conversationId: conversation.id,
+      roomId: conversation.room_id ?? null,
+      assistant: { id: assistant.id, position: assistant.position },
+      userMessage: { id: userMessage.id, content: userMessage.content, position: userMessage.position },
+      mode,
+      preferences: preferenceState.preferences,
+      preferenceReadFailed: Boolean(preferenceState.error),
+      summary,
+      room,
+      files,
+      attachments,
+      memories,
+      recallOperation,
+      rows,
+      webRouteReason: webDecision.reason,
+      weeklyUsageReserved: true,
+    });
+  }
+  logInfo("web.route.decided", { requestId, search: false, reason: webDecision.reason });
+
+  // No-action path: no web sources; chat continues as before Actions V1.
   let web: WebContextInput[] | undefined;
-  let preparedCitationSources: SourceReference[] = [];
+  const preparedCitationSources: SourceReference[] = [];
   let citationSources: SourceReference[] = [];
   let citationViews: ReturnType<typeof citationViewsFromPrepared> = [];
-  let webVerificationUnavailable = false;
-  const webDecision = decideWebSearch(userMessage.content, { hasRoomFileContext: Boolean(files?.length) });
-  logInfo("web.route.decided", { requestId, search: webDecision.search, reason: webDecision.reason });
-  if (webDecision.search) {
-    const webConfig = getWebSearchConfig();
-    const webProvider = getWebSearchProvider();
-    if (!webConfig || !webProvider) {
-      webVerificationUnavailable = true;
-      logWarn("web.search.failed", {
-        requestId,
-        category: "provider_unconfigured",
-        durationMs: 0,
-        code: operationalCodes.webSearchFailed,
-      });
-    } else {
-      const webStartedAt = Date.now();
-      logInfo("web.search.started", { requestId, maxResults: webConfig.maxResults });
-      try {
-        const pipeline = await runWebSearchPipeline(userMessage.content, {
-          signal: request.signal,
-          provider: webProvider,
-          config: webConfig,
-        });
-        const webDurationMs = Date.now() - webStartedAt;
-        if (pipeline.sources.length) {
-          const attached = attachWebCitationHandles(pipeline.sources);
-          web = attached.web.length ? attached.web : undefined;
-          preparedCitationSources = attached.sources;
-          const snippetOnlyCount = (web ?? []).filter((source) => source.retrieval === "web_snippet_only").length;
-          logInfo("web.search.succeeded", {
-            requestId,
-            resultCount: pipeline.searchResultCount,
-            durationMs: webDurationMs,
-          });
-          logInfo("web.fetch.completed", {
-            requestId,
-            fetchedCount: pipeline.pagesFetched,
-            failedCount: snippetOnlyCount,
-            durationMs: webDurationMs,
-          });
-          logInfo("web.context.included", {
-            requestId,
-            sourceCount: web?.length ?? 0,
-            snippetOnlyCount,
-          });
-          if (!web?.length) webVerificationUnavailable = true;
-        } else {
-          webVerificationUnavailable = true;
-          if (pipeline.degraded) {
-            logWarn("web.search.failed", {
-              requestId,
-              category: pipeline.failureCategory ?? "empty",
-              durationMs: webDurationMs,
-              code: operationalCodes.webSearchFailed,
-            });
-          } else {
-            logInfo("web.search.succeeded", {
-              requestId,
-              resultCount: pipeline.searchResultCount,
-              durationMs: webDurationMs,
-            });
-          }
-        }
-      } catch {
-        webVerificationUnavailable = true;
-        logWarn("web.search.failed", {
-          requestId,
-          category: "provider_error",
-          durationMs: Date.now() - webStartedAt,
-          code: operationalCodes.webSearchFailed,
-        });
-      }
-    }
-  }
+  const webVerificationUnavailable = false;
 
   // Every save of this generation only applies while its row is still streaming. An explicit Stop has already written the
   // text the user saw and marked the row interrupted, so a late finish, error or disconnect save can never replace it.
