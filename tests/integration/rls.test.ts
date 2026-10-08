@@ -206,10 +206,13 @@ describe("Supabase row-level security", () => {
     const staleGeneration = await createGeneration(owner);
 
     const [accepted] = await reserveSpend(owner, okGeneration, 100_000, 150_000, 1_000_000);
-    expect(accepted).toMatchObject({ accepted: true, reserved_micros: 100_000 });
+    expect(accepted).toMatchObject({ accepted: true });
+    // postgres.js returns bigint columns as strings
+    expect(Number(accepted.reserved_micros)).toBe(100_000);
 
     const [rejected] = await reserveSpend(owner, blockedGeneration, 100_000, 150_000, 1_000_000);
-    expect(rejected).toMatchObject({ accepted: false, reserved_micros: 0 });
+    expect(rejected).toMatchObject({ accepted: false });
+    expect(Number(rejected.reserved_micros)).toBe(0);
 
     await reserveSpend(owner, staleGeneration, 40_000, 1_000_000, 1_000_000);
     await sql`update public.messages set status = 'error' where id = ${staleGeneration}`;

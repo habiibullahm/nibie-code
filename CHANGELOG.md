@@ -8,6 +8,7 @@ What's new in Nibie.
 
 ### Added
 
+- Nibie now enforces an AI spend budget separate from your weekly credits, so expensive replies stop with a clear “try again later” message when the budget is reached instead of keeping spend going.
 - Code in Nibie's answers is now syntax-highlighted in calm, muted colors for common languages, including shell commands and their flags.
 - When Nibie searches the web for a reply, you can see “Searching the web…” while it runs and “Used Web Search” on the finished answer — a first step toward clear, stoppable Actions without changing ordinary chat.
 - Choose Deep Research from the Research menu for a bounded multi-source researched answer with citations, progress stages, and Incomplete/Failed labels when collection is partial or fails.
@@ -22,6 +23,7 @@ What's new in Nibie.
 
 ### Changed
 
+- Deep Research now uses a higher weekly credit cost that covers the full multi-step research run (planning, search, and synthesis), not just a single reply.
 - Improved message input readability, code example controls, and conversation navigation across desktop and mobile.
 - Sources under a reply are now tucked into a single quiet line showing where the answer came from; open it to see each source with its title and site, or click a citation number to jump straight to it.
 - Nibie now uses an abstract ribbon mark instead of a letter-like symbol. Replies are shown as plain text without a name header, and a quiet status (Responding…, Thinking… in High, or Researching… in Deep Research) appears only if the wait lasts more than a moment and disappears as soon as the answer starts.

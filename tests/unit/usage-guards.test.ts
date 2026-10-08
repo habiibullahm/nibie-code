@@ -68,6 +68,32 @@ describe("usage reservation / reconcile failure paths", () => {
     expect(supabase.rpc).not.toHaveBeenCalledWith("reserve_ai_spend", expect.anything());
   });
 
+  it("coerces bigint spend micros returned as strings from the RPC", async () => {
+    const supabase = rpcClient({
+      reserve_weekly_ai_usage: () => ({
+        data: { accepted: true, credits_charged: 3, credits_used: 3, credits_remaining: 497, reset_at: "2026-10-12T00:00:00.000Z" },
+        error: null,
+      }),
+      reserve_ai_spend: () => ({
+        data: {
+          accepted: true,
+          reserved_micros: "150000",
+          user_remaining_micros: "4850000",
+          global_remaining_micros: "49850000",
+        },
+        error: null,
+      }),
+    });
+    const gate = await reserveUsageBeforeGeneration({
+      supabase: supabase as never,
+      generationId: "11111111-1111-4111-8111-111111111111",
+      mode: "Balanced",
+      usageKind: "chat",
+      requestId: "req-bigint",
+    });
+    expect(gate).toMatchObject({ ok: true, creditsCharged: 3, spendReservedMicros: 150_000 });
+  });
+
   it("releases weekly credits when dollar spend reservation is rejected", async () => {
     const releases: string[] = [];
     const supabase = rpcClient({

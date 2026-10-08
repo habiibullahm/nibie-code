@@ -1,7 +1,4 @@
-import "server-only";
-
 import type { ChatModel } from "@/lib/chat/validation";
-import type { ProviderId } from "@/lib/ai/registry";
 import type { UsageKind } from "@/lib/usage/policy";
 
 /** USD micros: $1.00 = 1_000_000. Integer-only to avoid float money math. */
@@ -68,6 +65,6 @@ export function reserveSpendCeilingMicros(mode: ChatModel, kind: UsageKind): Usd
 }
 
 /** Provider id is recorded for telemetry only; pricing is keyed by logical mode. */
-export function pricingModeForProvider(_provider: ProviderId | null, mode: ChatModel): ChatModel {
+export function pricingModeForProvider(_provider: string | null, mode: ChatModel): ChatModel {
   return mode;
 }

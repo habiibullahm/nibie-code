@@ -570,7 +570,12 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
       } else {
         // The server reported this failure itself, so it is final.
         if (assistantId) setLocalMessages((items) => ({ ...items, [id]: (items[id] ?? []).map((message) => message.id === assistantId ? { ...message, content: message.content || "Response unavailable.", status: "error" } : message) }));
-        setNotice(error instanceof ChatStreamServerError ? error.message : failureNotice);
+        // Prefer the server's JSON/SSE message (for example AI spend budget) over the generic failure copy.
+        const serverMessage =
+          error instanceof ChatStreamServerError || (kind === "request-failed" && error instanceof Error)
+            ? error.message.trim()
+            : "";
+        setNotice(serverMessage || failureNotice);
         router.refresh();
       }
     } finally {

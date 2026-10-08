@@ -5,7 +5,11 @@ import type { ChatModel } from "@/lib/chat/validation";
 import { operationalCodes } from "@/lib/observability/codes";
 import { logError, logInfo, logWarn } from "@/lib/observability/logger";
 import type { UsageKind } from "@/lib/usage/policy";
-import { getSpendLimits, spendReservationMicros, type SpendReservationRow } from "@/lib/usage/spend-policy";
+import {
+  getSpendLimits,
+  normalizeSpendReservationRow,
+  spendReservationMicros,
+} from "@/lib/usage/spend-policy";
 
 export type SpendGuardResult =
   | { ok: true; reservedMicros: number }
@@ -26,7 +30,7 @@ export async function reserveGenerationSpend(input: {
   const reservedMicros = spendReservationMicros(input.mode, input.usageKind);
   const startedAt = Date.now();
 
-  let row: SpendReservationRow | null = null;
+  let row = null as ReturnType<typeof normalizeSpendReservationRow>;
   let rpcError: unknown = null;
   try {
     const result = await input.supabase
@@ -36,14 +40,14 @@ export async function reserveGenerationSpend(input: {
         p_user_daily_limit_micros: limits.userDailyUsdMicros,
         p_global_hourly_limit_micros: limits.globalHourlyUsdMicros,
       })
-      .single<SpendReservationRow>();
-    row = result.data;
+      .single();
+    row = normalizeSpendReservationRow(result.data);
     rpcError = result.error;
   } catch (error) {
     rpcError = error;
   }
 
-  if (rpcError || !row || typeof row.accepted !== "boolean") {
+  if (rpcError || !row) {
     logError("ai_spend.reservation.failed", {
       requestId: input.requestId,
       logicalMode: input.mode,

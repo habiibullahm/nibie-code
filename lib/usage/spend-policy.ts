@@ -43,3 +43,29 @@ export type SpendReservationRow = {
   user_remaining_micros: number;
   global_remaining_micros: number;
 };
+
+/** Postgres/Supabase may return bigint as number or digit string. */
+export function coerceUsdMicros(value: unknown): number | null {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return value;
+  if (typeof value === "string" && /^\d+$/.test(value)) {
+    const n = Number(value);
+    return Number.isSafeInteger(n) ? n : null;
+  }
+  return null;
+}
+
+export function normalizeSpendReservationRow(row: unknown): SpendReservationRow | null {
+  if (!row || typeof row !== "object") return null;
+  const raw = row as Record<string, unknown>;
+  if (typeof raw.accepted !== "boolean") return null;
+  const reserved = coerceUsdMicros(raw.reserved_micros);
+  const userRemaining = coerceUsdMicros(raw.user_remaining_micros);
+  const globalRemaining = coerceUsdMicros(raw.global_remaining_micros);
+  if (reserved === null || userRemaining === null || globalRemaining === null) return null;
+  return {
+    accepted: raw.accepted,
+    reserved_micros: reserved,
+    user_remaining_micros: userRemaining,
+    global_remaining_micros: globalRemaining,
+  };
+}
