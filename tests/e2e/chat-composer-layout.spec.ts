@@ -216,7 +216,12 @@ test("expand and collapse preserve draft, focus, selection, and send reset", asy
   await expand.click();
   await expect(page.getByRole("button", { name: "Collapse composer" })).toBeVisible();
   await page.getByRole("button", { name: "Collapse composer" }).click();
-  await textarea.evaluate((element: HTMLTextAreaElement) => { element.focus(); element.setSelectionRange(12, 24); });
+  await textarea.evaluate((element: HTMLTextAreaElement) => {
+    element.focus();
+    element.setSelectionRange(12, 24);
+    element.dispatchEvent(new Event("select", { bubbles: true }));
+  });
+  await expect.poll(() => textarea.evaluate((element) => (element as HTMLTextAreaElement).selectionStart)).toBe(12);
   const compactHeight = await textarea.evaluate((element) => Number.parseFloat(getComputedStyle(element).maxHeight));
   await page.getByRole("button", { name: "Expand composer" }).click();
   await expect(textarea).toBeFocused();
