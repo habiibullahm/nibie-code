@@ -59,11 +59,7 @@ What's new in Nibie.
 
 ### Known issues
 
-<<<<<<< HEAD
-- Attachments can't yet include images or scanned PDFs. Sent files can't be downloaded from the message chip yet (account export includes names and extracted text).
-=======
-- Attachments can't yet include images or scanned PDFs. Account exports don't include attachment files or extracted text yet. Attachments uploaded before owner download shipped may not have a downloadable original.
->>>>>>> origin/main
+- Attachments can't yet include images or scanned PDFs. Attachments uploaded before owner download shipped may not have a downloadable original.
 
 ## Current development
 
