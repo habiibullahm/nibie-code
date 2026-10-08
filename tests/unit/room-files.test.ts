@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildContext } from "../../lib/context/build-context";
 import { CONTEXT_POLICY_TEXT } from "../../lib/context/context-policy";
 import type { BuildContextInput } from "../../lib/context/context-types";
+import { estimateTokens } from "../../lib/context/token-budget";
 import { toProviderMessages } from "../../lib/ai/provider-messages";
 import { buildRoomFilePath, displayFileName, fileDeletionOutcome, inspectRoomFile, parseSelectedFileIds } from "../../lib/files/inspect";
 import { MAX_EXTRACTED_CHARS, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE } from "../../lib/files/limits";
@@ -318,14 +319,18 @@ describe("file context", () => {
     expect(provider[0]?.content).not.toContain(attack);
     expect(provider[1]?.content).toContain(attack);
     expect(provider.at(-1)).toEqual({ role: "user", content: "hello" });
-    expect(buildContext(input()).diagnostics.sources.map((source) => source.type)).toEqual(["profile", "recent_messages", "thread_summary"]);
+    expect(buildContext(input()).diagnostics.sources.map((source) => source.type)).toEqual(["chat_role", "profile", "recent_messages", "thread_summary"]);
   });
 
   it("drops file text that does not fit the file budget", () => {
+    const current = "hello";
+    const minWindow = estimateTokens(CONTEXT_POLICY_TEXT) + estimateTokens(current) + 40;
     const plan = buildContext(input({
+      messages: [{ role: "user", content: current, position: 1 }],
+      currentPosition: 1,
       files: [{ name: "notes.txt", text: "f".repeat(20_000) }],
-      // The smallest window in the suite: it still fits the core policy and the request, but never all of this file.
-      capabilities: { contextWindowTokens: 1_450, maxOutputTokens: 4 },
+      // Tight window: fits core policy and the request, but never all of this file.
+      capabilities: { contextWindowTokens: minWindow, maxOutputTokens: 4 },
     }));
     const fileBlock = plan.blocks.find((block) => block.id === "file");
     expect(fileBlock?.text.length ?? 0).toBeLessThan(20_000);

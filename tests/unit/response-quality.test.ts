@@ -122,13 +122,14 @@ describe("response quality rules and compatibility", () => {
     const plan = buildContext(input("hello"));
     const core = plan.blocks.find((block) => block.id === "core")!;
     const basePolicy = buildContext(input("hello", "Balanced")).blocks.find((block) => block.id === "core")!;
-    expect(basePolicy.tokenEstimate, `base policy is ${basePolicy.tokenEstimate} tokens; the smallest context window in the suite (1,450, room-files) leaves headroom after the current request`).toBeLessThan(1_445);
-    expect(core.tokenEstimate).toBeLessThan(1_450);
+    // Chat-role policy wording grew the core block; tight suites size windows from estimateTokens(CONTEXT_POLICY_TEXT).
+    expect(basePolicy.tokenEstimate, `base policy is ${basePolicy.tokenEstimate} tokens; keep under 1,550 so room-file tight windows retain headroom`).toBeLessThan(1_550);
+    expect(core.tokenEstimate).toBeLessThan(1_550);
     expect(core.tokenEstimate).toBe(estimateTokens(contextPolicyFor("Fast")));
     expect(core.required).toBe(true);
     expect(plan.budget.estimatedTokens).toBe(plan.blocks.filter((block) => block.included).reduce((sum, block) => sum + block.tokenEstimate, 0));
     expect(estimateTokens(responseQualityFor("Fast"))).toBeLessThan(1_100);
-    for (const depth of ["concise", "balanced", "detailed"] as const) expect(estimateTokens(contextPolicyFor("Fast", depth))).toBeLessThan(1_450);
+    for (const depth of ["concise", "balanced", "detailed"] as const) expect(estimateTokens(contextPolicyFor("Fast", depth))).toBeLessThan(1_550);
   });
 
   it("keeps source injection outside authoritative policy and the current request last", () => {

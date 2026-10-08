@@ -43,14 +43,18 @@ export function ChatRoleControls({
 
   useEffect(() => {
     if (!open) return;
-    setDraft(instructions ?? "");
     const dialog = dialogRef.current;
     if (!dialog) return;
     if (!dialog.open) dialog.showModal();
     return () => {
       if (dialog.open) dialog.close();
     };
-  }, [open, instructions]);
+  }, [open]);
+
+  function openEditor() {
+    setDraft(instructions ?? "");
+    setOpen(true);
+  }
 
   function close() {
     setOpen(false);
@@ -90,7 +94,7 @@ export function ChatRoleControls({
         disabled={busy}
         title="Chat instructions"
         aria-label={hasInstructions ? "Edit chat instructions" : "Add chat instructions"}
-        onClick={() => setOpen(true)}
+        onClick={openEditor}
       >
         <span>{hasInstructions ? "Instructions" : "Instructions…"}</span>
       </button>
