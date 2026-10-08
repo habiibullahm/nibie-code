@@ -124,7 +124,13 @@ export const ChatSidebar = memo(function ChatSidebar({ conversations, archivedCo
     if (!contextMenu) return;
     contextMenuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
     const dismissOutside = (event: PointerEvent) => { if (!contextMenuRef.current?.contains(event.target as Node)) setContextMenu(null); };
-    const dismissEscape = (event: KeyboardEvent) => { if (event.key === "Escape") { setContextMenu(null); contextTriggerRef.current?.focus(); } };
+    const dismissEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      setContextMenu(null);
+      contextTriggerRef.current?.focus();
+    };
     document.addEventListener("pointerdown", dismissOutside);
     document.addEventListener("keydown", dismissEscape);
     return () => { document.removeEventListener("pointerdown", dismissOutside); document.removeEventListener("keydown", dismissEscape); };

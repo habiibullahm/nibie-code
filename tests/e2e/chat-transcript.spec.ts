@@ -37,7 +37,7 @@ test("thread menu downloads a UTF-8 Markdown transcript", async ({ page }) => {
     .click();
 
   const download = await downloadPromise;
-  expect(download.suggestedFilename()).toMatch(/debounce.*\.md$/i);
+  expect(download.suggestedFilename()).toBe("debouncing-a-search-box.md");
   const path = await download.path();
   expect(path).toBeTruthy();
   const body = await download.createReadStream().then(async (stream) => {
