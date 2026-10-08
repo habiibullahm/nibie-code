@@ -197,6 +197,25 @@ jobs:
                   console.log("action_runs server write RPCs present");
                 }
               }
+              if (tags.includes("0023_action_runs_service_role_writes")) {
+                // Double-quoted JS strings: nested single quotes would break bash -e '...' .
+                const insertSig = "public.insert_action_run(uuid, uuid, text, text, text, text, uuid, uuid, jsonb)";
+                const completeSig = "public.complete_action_run(uuid, uuid, text, text, jsonb)";
+                const grants = await sql`
+                  select
+                    has_function_privilege(${"authenticated"}, ${insertSig}, ${"execute"}) as auth_insert,
+                    has_function_privilege(${"authenticated"}, ${completeSig}, ${"execute"}) as auth_complete,
+                    has_function_privilege(${"service_role"}, ${insertSig}, ${"execute"}) as svc_insert,
+                    has_function_privilege(${"service_role"}, ${completeSig}, ${"execute"}) as svc_complete
+                `;
+                const g = grants[0];
+                if (g?.auth_insert || g?.auth_complete || !g?.svc_insert || !g?.svc_complete) {
+                  console.error("::error::0023 claimed success but audit RPC grants are wrong (authenticated must lack execute; service_role must have it)");
+                  process.exitCode = 1;
+                } else {
+                  console.log("action_runs audit RPCs are service_role-only");
+                }
+              }
             } finally {
               await sql.end({ timeout: 5 });
             }
