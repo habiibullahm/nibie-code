@@ -264,10 +264,17 @@ test("rejects oversize and total oversize before upload-init", async ({ page }) 
   expect(server.inits).toHaveLength(0);
 
   await page.getByRole("button", { name: "Remove too-big.txt" }).click();
-  await attach(page, [sized("a.txt", 9 * 1024 * 1024), sized("b.txt", 9 * 1024 * 1024)]);
-  await expect(page.locator(".attachment-chip")).toHaveCount(1);
-  await expect(page.getByRole("alert").filter({ hasText: `Attachments can be up to ${MAX_ATTACHMENTS_TOTAL_BYTES / (1024 * 1024)} MB together.` })).toBeVisible();
-  expect(server.inits).toHaveLength(1);
+  // 10 MiB + 10 MiB + 1 B exceeds the 20 MiB combined composer cap.
+  await attach(page, [
+    sized("a.txt", MAX_ATTACHMENT_BYTES),
+    sized("b.txt", MAX_ATTACHMENT_BYTES),
+    sized("c.txt", 1),
+  ]);
+  await expect(page.locator(".attachment-chip.is-ready, .attachment-chip.is-uploading")).toHaveCount(2);
+  await expect(page.getByRole("alert").filter({ hasText: "Attachments can be up to 20 MB together." })).toBeVisible();
+  expect(server.inits.length).toBeLessThanOrEqual(2);
+  expect(server.inits.some((init) => init.name === "c.txt")).toBe(false);
+  expect(MAX_ATTACHMENTS_TOTAL_BYTES).toBe(20 * 1024 * 1024);
 });
 
 test("invalid finalize extraction surfaces an error and does not send", async ({ page }) => {

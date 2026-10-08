@@ -1077,12 +1077,17 @@ describe("Supabase row-level security", () => {
 
     it("accepts a 10 MB draft and refuses more than 20 MB linked together", async () => {
       const ten = await draft(owner, "ten.txt", 10_485_760);
-      expect(ten).toBeTruthy();
+      const message = randomUUID();
+      const [saved] = await send(owner, thread, message, [ten], "Ten megabyte file");
+      expect(saved).toMatchObject({ id: message });
+      // 10 MiB + 10 MiB + 1 B exceeds the 20 MiB combined cap (exact 20 MiB is allowed).
       const a = await draft(owner, "a.txt", 10_485_760);
       const b = await draft(owner, "b.txt", 10_485_760);
+      const c = await draft(owner, "c.txt", 1);
       const tooLarge = randomUUID();
-      await expect(send(owner, thread, tooLarge, [a, b])).rejects.toMatchObject({ code: "PT413" });
+      await expect(send(owner, thread, tooLarge, [a, b, c])).rejects.toMatchObject({ code: "PT413" });
       expect(await sql`select id from public.messages where id = ${tooLarge}`).toHaveLength(0);
+      expect(await sql`select count(*)::int as n from public.message_attachments where id = any(${[a, b, c]}::uuid[]) and message_id is null`).toEqual([{ n: 3 }]);
     });
   });
 
