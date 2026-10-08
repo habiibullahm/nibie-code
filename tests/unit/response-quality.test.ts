@@ -120,10 +120,10 @@ describe("response quality rules and compatibility", () => {
 
   it("describes real tool, memory, and authorized Room retrieval without claiming unsupplied capabilities", () => {
     const policy = toProviderMessages(buildContext(input("What information can you access?", "Balanced")))[0].content;
-    expect(policy).toContain("Use only tool results and saved memories supplied for this request");
-    expect(policy).toContain("never claim an action, live verification, or cross-conversation recall that was not performed");
-    expect(policy).toContain("Authorized Room-file excerpts may be selected or automatically retrieved");
-    expect(policy).toContain("never claim access to files outside supplied context");
+    expect(policy).toContain("Tools and saved memories apply only when supplied");
+    expect(policy).toContain("never claim an action or recall not done");
+    expect(policy).toContain("Use only supplied authorized Room-file excerpts (selected or retrieved)");
+    expect(policy).toContain("answer directly without asking for product documentation");
     expect(policy).not.toContain("No tools or other-conversation memory");
     expect(policy).not.toContain("Only explicitly selected file text is used");
   });
