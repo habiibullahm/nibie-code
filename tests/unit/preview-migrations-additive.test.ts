@@ -40,9 +40,22 @@ describe("preview shared-DB migration additive gate", () => {
 
     const ok = checkAdditiveMigrations(root, { changedNames: ["0099_safe.sql"] });
     expect(ok.problems).toEqual([]);
+    expect(ok.mode).toBe("vs_main");
     expect(ok.comparedToMain).toBe(true);
 
     const bad = checkAdditiveMigrations(root, { changedNames: ["0100_bad.sql"] });
     expect(bad.problems).toEqual(["0100_bad.sql: forbidden pattern DELETE FROM"]);
+  });
+
+  it("passes when the main diff is empty without scanning historical DELETE FROM migrations", () => {
+    const root = mkdtempSync(join(tmpdir(), "preview-mig-empty-"));
+    const drizzleDir = join(root, "drizzle");
+    mkdirSync(drizzleDir);
+    writeFileSync(join(drizzleDir, "0001_legacy.sql"), "DELETE FROM public.widgets;\n");
+
+    const empty = checkAdditiveMigrations(root, { changedNames: [] });
+    expect(empty.mode).toBe("vs_main_empty");
+    expect(empty.targets).toEqual([]);
+    expect(empty.problems).toEqual([]);
   });
 });
