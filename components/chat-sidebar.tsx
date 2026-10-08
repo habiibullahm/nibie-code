@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
-import { Archive, ChevronDown, ChevronRight, DoorOpen, MessageSquare, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Plus, RotateCcw, Search, Settings, SquarePen, Trash2, X } from "lucide-react";
+import { Archive, ChevronDown, ChevronRight, DoorOpen, FileText, MessageSquare, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Plus, RotateCcw, Search, Settings, SquarePen, Trash2, UserCog, X } from "lucide-react";
 import { SIGN_OUT_LABEL } from "@/lib/privacy/sign-out";
 import { AccountMenu } from "@/components/account-menu";
 import type { WhatsNewPreview } from "@/lib/changelog";
@@ -44,6 +44,7 @@ type Props = {
   onNewChat: () => void;
   onOpenSettings: () => void;
   onRename: (item: ConversationSummary) => void;
+  onEditInstructions?: (item: ConversationSummary) => void;
   onArchive: (item: ConversationSummary) => void;
   onRestore: (item: ConversationSummary) => void;
   onMove: (item: ConversationSummary, roomId: string | null) => Promise<void>;
@@ -78,7 +79,7 @@ function ConversationSearchDialog({ conversations, archivedConversations, onOpen
 }
 
 // Memoized: streaming tokens and typing never re-render the history list.
-export const ChatSidebar = memo(function ChatSidebar({ conversations, archivedConversations, rooms, activeId, activeRoomId, busy, activity, preview, email, name, releasePreview = null, renderedAt, mobile = false, drawerRef, closeMenuRef, desktopToggleRef, desktopExpandRef, collapsed = false, settingsActive = false, onCollapse, onExpand, onClose, onOpen, onOpenRoom, onNewThreadInRoom, onDeleteRoom, onCreateRoom, onNewChat, onOpenSettings, onRename, onArchive, onRestore, onMove }: Props) {
+export const ChatSidebar = memo(function ChatSidebar({ conversations, archivedConversations, rooms, activeId, activeRoomId, busy, activity, preview, email, name, releasePreview = null, renderedAt, mobile = false, drawerRef, closeMenuRef, desktopToggleRef, desktopExpandRef, collapsed = false, settingsActive = false, onCollapse, onExpand, onClose, onOpen, onOpenRoom, onNewThreadInRoom, onDeleteRoom, onCreateRoom, onNewChat, onOpenSettings, onRename, onEditInstructions, onArchive, onRestore, onMove }: Props) {
   // Server render and hydration group by the UTC calendar from the server's clock so both agree; once mounted, the viewer's own clock and
   // time zone are used (the grouping is recomputed whenever the list changes).
   const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false);
@@ -153,7 +154,7 @@ export const ChatSidebar = memo(function ChatSidebar({ conversations, archivedCo
   }
   function showActions(item: ConversationSummary, trigger: HTMLDivElement, x: number, y: number) {
     contextTriggerRef.current = trigger;
-    setContextMenu({ item, x: Math.max(8, Math.min(x, window.innerWidth - 192)), y: Math.max(8, Math.min(y, window.innerHeight - 140)) });
+    setContextMenu({ item, x: Math.max(8, Math.min(x, window.innerWidth - 192)), y: Math.max(8, Math.min(y, window.innerHeight - 180)) });
   }
   function drop(event: DragEvent<HTMLElement>, roomId: string | null) {
     event.preventDefault();
@@ -175,7 +176,7 @@ export const ChatSidebar = memo(function ChatSidebar({ conversations, archivedCo
     return <div className="history-entry" key={item.id} data-conversation-id={item.id} tabIndex={-1} draggable={!mobile && !busy}
       onDragStart={(event) => { if (mobile || busy) { event.preventDefault(); return; } event.dataTransfer.setData("application/x-nibie-thread", item.id); event.dataTransfer.effectAllowed = "move"; setContextMenu(null); }} onDragEnd={() => setDropRoom(undefined)}
       onContextMenu={(event) => { event.preventDefault(); showActions(item, event.currentTarget, event.clientX, event.clientY); }}>
-      <button className={`history-item ${activeId === item.id ? "is-active" : ""}`} onClick={(event) => { if (event.detail === 2) onRename(item); else onOpen(item.id); }} title={`${item.title} · Double-click to rename`}><MessageSquare size={15} /><span>{item.title}</span></button>
+      <button className={`history-item ${activeId === item.id ? "is-active" : ""}`} onClick={(event) => { if (event.detail === 2) onRename(item); else onOpen(item.id); }} title={item.custom_instructions ? `${item.title} · Custom instructions active · Double-click to rename` : `${item.title} · Double-click to rename`} aria-description={item.custom_instructions ? "Custom instructions active" : undefined}><MessageSquare size={15} /><span>{item.title}</span>{item.custom_instructions ? <span className="history-instructions-badge" title="Custom instructions active" aria-hidden="true"><UserCog size={13} aria-hidden="true" /></span> : null}</button>
       <button type="button" className="history-action" aria-label={`Actions for ${item.title}`} title="Thread actions" aria-haspopup="menu" onClick={(event) => { const trigger = event.currentTarget.closest<HTMLDivElement>(".history-entry"); if (!trigger) return; const box = event.currentTarget.getBoundingClientRect(); showActions(item, trigger, box.left, box.bottom); }}><MoreHorizontal size={15} /></button>
       {!preview && <button className="history-action" aria-label={`Archive ${item.title}`} title="Archive" disabled={busy} onClick={() => onArchive(item)}><Archive size={13} /></button>}
     </div>;
@@ -217,7 +218,7 @@ export const ChatSidebar = memo(function ChatSidebar({ conversations, archivedCo
         })}
       </section>
     </nav> : null}
-    {contextMenu && <div ref={contextMenuRef} className="history-context-menu" role="menu" aria-label={`Actions for ${contextMenu.item.title}`} tabIndex={-1} style={{ left: contextMenu.x, top: contextMenu.y }}><button type="button" role="menuitem" disabled={busy} onClick={() => { setMoveItem(contextMenu.item); setMoveRoomId(contextMenu.item.room_id ?? ""); setContextMenu(null); }}>Move to…</button>{!preview && <><button type="button" role="menuitem" onClick={() => { setContextMenu(null); onRename(contextMenu.item); }}><Pencil size={14} />Rename</button><button type="button" role="menuitem" disabled={busy} onClick={() => { setContextMenu(null); onArchive(contextMenu.item); }}><Archive size={14} />Archive</button></>}</div>}
+    {contextMenu && <div ref={contextMenuRef} className="history-context-menu" role="menu" aria-label={`Actions for ${contextMenu.item.title}`} tabIndex={-1} style={{ left: contextMenu.x, top: contextMenu.y }}><button type="button" role="menuitem" disabled={busy} onClick={() => { setMoveItem(contextMenu.item); setMoveRoomId(contextMenu.item.room_id ?? ""); setContextMenu(null); }}>Move to…</button>{!preview && <button type="button" role="menuitem" onClick={() => { setContextMenu(null); onRename(contextMenu.item); }}><Pencil size={14} />Rename</button>}{onEditInstructions ? <button type="button" role="menuitem" onClick={() => { setContextMenu(null); onEditInstructions(contextMenu.item); }}><FileText size={14} />Chat instructions</button> : null}{!preview && <button type="button" role="menuitem" disabled={busy} onClick={() => { setContextMenu(null); onArchive(contextMenu.item); }}><Archive size={14} />Archive</button>}</div>}
     {moveItem && <dialog ref={moveDialogRef} className="thread-move-dialog" aria-labelledby={moveTitleId} onKeyDown={(event) => event.stopPropagation()} onCancel={(event) => { event.preventDefault(); setMoveItem(null); }}>
       <form onSubmit={(event) => { event.preventDefault(); const item = moveItem; setMoveItem(null); if (moveRoomId) setExpandedRooms((ids) => ids.includes(moveRoomId) ? ids : [...ids, moveRoomId]); void onMove(item, moveRoomId || null); }}>
         <h2 id={moveTitleId}>Move thread</h2><p>{moveItem.title}</p><label>Move to<select aria-label="Move to" value={moveRoomId} onChange={(event) => setMoveRoomId(event.target.value)}><option value="">General</option>{rooms.map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}</select></label>

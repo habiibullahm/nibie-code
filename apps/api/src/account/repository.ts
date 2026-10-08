@@ -12,7 +12,7 @@ import {
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { ApiError } from "../plugins/error-handler.js";
 
-const conversationColumns = "id,title,selected_model,chat_role,custom_instructions,created_at,updated_at";
+const conversationColumns = "id,title,selected_model,custom_instructions,created_at,updated_at";
 const messageColumns = "id,conversation_id,role,content,status,position,created_at,reply_to_message_id";
 
 const exportFailed = "Your conversations couldn't be exported. Please try again.";

@@ -1,9 +1,7 @@
 import { z } from "zod";
-import { CHAT_ROLES, customInstructionsLimit, type ChatRole } from "@/lib/chat-roles/types";
+import { customInstructionsLimit } from "@/lib/chat-instructions/types";
 
 const multilineControls = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/;
-
-export const chatRoleSchema = z.enum(CHAT_ROLES);
 
 const customInstructionsSchema = z
   .string()
@@ -12,8 +10,7 @@ const customInstructionsSchema = z
   .max(customInstructionsLimit)
   .refine((value) => !multilineControls.test(value));
 
-export type ChatRolePatch = {
-  chatRole: ChatRole;
+export type ChatInstructionsPatch = {
   customInstructions: string | null;
 };
 
@@ -21,28 +18,20 @@ function blankToNull(value: unknown) {
   return typeof value === "string" && value.trim() === "" ? null : value;
 }
 
-export function parseChatRolePatch(input: unknown): { data: ChatRolePatch } | { error: string } {
+export function parseChatInstructionsPatch(input: unknown): { data: ChatInstructionsPatch } | { error: string } {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
-    return { error: "Choose a valid chat role." };
+    return { error: "Enter valid chat instructions." };
   }
   const raw = input as Record<string, unknown>;
-  const roleParsed = chatRoleSchema.safeParse(raw.chatRole ?? raw.chat_role);
-  if (!roleParsed.success) return { error: "Choose a valid chat role." };
-
   const instructionsRaw = blankToNull(raw.customInstructions ?? raw.custom_instructions ?? null);
   if (instructionsRaw === null || instructionsRaw === undefined) {
-    return { data: { chatRole: roleParsed.data, customInstructions: null } };
+    return { data: { customInstructions: null } };
   }
   const instructionsParsed = customInstructionsSchema.safeParse(instructionsRaw);
   if (!instructionsParsed.success) {
-    return { error: "Custom instructions must be 2,000 characters or fewer." };
+    return { error: "Chat instructions must be 2,000 characters or fewer." };
   }
-  return { data: { chatRole: roleParsed.data, customInstructions: instructionsParsed.data } };
-}
-
-export function normalizeChatRole(value: unknown): ChatRole {
-  const parsed = chatRoleSchema.safeParse(value);
-  return parsed.success ? parsed.data : "general";
+  return { data: { customInstructions: instructionsParsed.data } };
 }
 
 export function normalizeCustomInstructions(value: unknown): string | null {

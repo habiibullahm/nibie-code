@@ -38,7 +38,7 @@ export async function GET(request: Request) {
 
     const conversations = await readAllPages<ExportConversationRow>(async (from, to) => {
       const query = owned(
-        supabase.from("conversations").select("id,title,selected_model,chat_role,custom_instructions,created_at,updated_at").eq("user_id", user.id) as unknown as OrderedQuery,
+        supabase.from("conversations").select("id,title,selected_model,custom_instructions,created_at,updated_at").eq("user_id", user.id) as unknown as OrderedQuery,
         "created_at",
         "id",
       );

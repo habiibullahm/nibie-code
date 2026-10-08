@@ -426,10 +426,10 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .composer textarea:focus-visible { outline: none; }
 .composer textarea::placeholder { color: var(--text-placeholder); }
 .composer-actions { grid-area: actions; display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; min-height: 32px; }
-.chat-role-controls { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
-.chat-role-instructions-button { max-width: min(120px, 28vw); }
-.chat-role-disclaimer { margin: 0 0 12px; color: var(--text-3); font-size: 12.5px; line-height: 1.45; }
-.chat-role-instructions-dialog .room-field textarea { min-height: 120px; resize: vertical; }
+.chat-instructions-disclaimer { margin: 0 0 12px; color: var(--text-3); font-size: 12.5px; line-height: 1.45; }
+.chat-instructions-dialog .room-field textarea { min-height: 120px; resize: vertical; }
+.history-instructions-badge { display: inline-flex; flex: none; align-items: center; min-width: auto; overflow: visible; color: var(--text-4); }
+.history-item.is-active .history-instructions-badge { color: var(--emphasis); }
 .composer-tools { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .composer-left-tools { position: relative; display: flex; flex: 1; flex-wrap: wrap; align-items: center; gap: 5px; min-width: 0; }
 .composer-secondary-tools { width: min(100%, 760px); margin: 8px auto 0; }

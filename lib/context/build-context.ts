@@ -1,4 +1,4 @@
-import { chatRoleDiagnosticReason, renderChatRoleContext } from "@/lib/chat-roles/context";
+import { conversationInstructionsDiagnosticReason, renderConversationInstructions } from "@/lib/chat-instructions/context";
 import { contextPolicyFor, CONTEXT_POLICY_VERSION } from "@/lib/context/context-policy";
 import { ContextBuildError, type BuildContextInput, type ContextBlock, type ContextDiagnostics, type ContextPlan, type ContextSourceDiagnostic, type ThreadMessage } from "@/lib/context/context-types";
 import { renderAttachmentContext } from "@/lib/context/attachment-context";
@@ -13,7 +13,7 @@ import {
   WEB_VERIFICATION_UNAVAILABLE_DIAGNOSTIC_REASON,
   WEB_VERIFICATION_UNAVAILABLE_INSTRUCTION,
 } from "@/lib/context/web-context";
-import { ATTACHMENT_TOKEN_CAP, budgetLimits, CHAT_ROLE_TOKEN_CAP, estimateTokens, FILE_TOKEN_CAP, MEMORY_TOKEN_CAP, PIN_TOKEN_CAP, PROTECTED_RECENT_COUNT, ROOM_TOKEN_CAP, SUMMARY_TOKEN_CAP, WEB_TOKEN_CAP } from "@/lib/context/token-budget";
+import { ATTACHMENT_TOKEN_CAP, budgetLimits, CONVERSATION_INSTRUCTIONS_TOKEN_CAP, estimateTokens, FILE_TOKEN_CAP, MEMORY_TOKEN_CAP, PIN_TOKEN_CAP, PROTECTED_RECENT_COUNT, ROOM_TOKEN_CAP, SUMMARY_TOKEN_CAP, WEB_TOKEN_CAP } from "@/lib/context/token-budget";
 
 function block(partial: ContextBlock): ContextBlock {
   return partial;
@@ -65,19 +65,19 @@ export function buildContext(input: BuildContextInput): ContextPlan {
   const remaining = { value: inputBudgetTokens - coreTokens - currentTokens };
   const protectedFit = takeNewest(protectedMessages, remaining);
 
-  // Soft chat role / custom instructions: after protected recent, before profile and room.
-  const chatRoleInput = input.chatRole ?? null;
-  const chatRoleCandidate = renderChatRoleContext(chatRoleInput);
-  let chatRoleText = "";
-  let chatRoleDroppedForBudget = false;
-  if (chatRoleCandidate) {
-    const tokens = estimateTokens(chatRoleCandidate);
-    const allowance = Math.min(CHAT_ROLE_TOKEN_CAP, remaining.value);
+  // Soft conversation instructions: after protected recent, before profile and room.
+  const instructionsInput = input.conversationInstructions ?? null;
+  const instructionsCandidate = renderConversationInstructions(instructionsInput);
+  let instructionsText = "";
+  let instructionsDroppedForBudget = false;
+  if (instructionsCandidate) {
+    const tokens = estimateTokens(instructionsCandidate);
+    const allowance = Math.min(CONVERSATION_INSTRUCTIONS_TOKEN_CAP, remaining.value);
     if (tokens <= allowance) {
-      chatRoleText = chatRoleCandidate;
+      instructionsText = instructionsCandidate;
       remaining.value -= tokens;
     } else {
-      chatRoleDroppedForBudget = true;
+      instructionsDroppedForBudget = true;
     }
   }
 
@@ -161,7 +161,7 @@ export function buildContext(input: BuildContextInput): ContextPlan {
   const olderFit = takeNewest(olderMessages.filter((message) => message.position > coveredThrough), remaining);
   const dialogue = [...olderFit.included, ...protectedFit.included, current];
   const droppedMessages = [...olderFit.dropped, ...protectedFit.dropped];
-  const truncated = droppedMessages.length > 0 || droppedPieces.length > 0 || droppedRoom.length > 0 || droppedPins.length > 0 || Boolean(renderedFiles?.truncated) || Boolean(renderedAttachments?.truncated) || Boolean(renderedWeb?.truncated) || Boolean(renderedMemories?.truncated) || summaryDroppedForBudget || chatRoleDroppedForBudget;
+  const truncated = droppedMessages.length > 0 || droppedPieces.length > 0 || droppedRoom.length > 0 || droppedPins.length > 0 || Boolean(renderedFiles?.truncated) || Boolean(renderedAttachments?.truncated) || Boolean(renderedWeb?.truncated) || Boolean(renderedMemories?.truncated) || summaryDroppedForBudget || instructionsDroppedForBudget;
 
   const profileText = includedPieces.map((piece) => piece.text).join("\n");
   const roomText = includedRoom.map((piece) => piece.text).join("\n\n");
@@ -173,14 +173,14 @@ export function buildContext(input: BuildContextInput): ContextPlan {
   const blocks: ContextBlock[] = [
     block({ id: "core", authority: "policy", priority: 1, required: true, text: corePolicyText, tokenEstimate: coreTokens, included: true, exclusionReason: null }),
     block({
-      id: "chat_role",
+      id: "instructions",
       authority: "untrusted_data",
       priority: 4,
       required: false,
-      text: chatRoleText,
-      tokenEstimate: chatRoleText ? estimateTokens(chatRoleText) : 0,
-      included: Boolean(chatRoleText),
-      exclusionReason: chatRoleText ? null : chatRoleDroppedForBudget ? "budget" : "not_needed",
+      text: instructionsText,
+      tokenEstimate: instructionsText ? estimateTokens(instructionsText) : 0,
+      included: Boolean(instructionsText),
+      exclusionReason: instructionsText ? null : instructionsDroppedForBudget ? "budget" : "not_needed",
     }),
     block({ id: "profile", authority: "untrusted_data", priority: 5, required: false, text: profileText, tokenEstimate: profileText ? estimateTokens(profileText) : 0, included: Boolean(profileText), exclusionReason: profileText ? null : input.preferenceReadFailed ? "read_failed" : droppedPieces.length && !includedPieces.length ? "budget" : "defaults_only" }),
   ];
@@ -188,7 +188,7 @@ export function buildContext(input: BuildContextInput): ContextPlan {
     blocks.push(block({ id: "room", authority: "untrusted_data", priority: 5, required: false, text: roomText, tokenEstimate: roomText ? estimateTokens(roomText) : 0, included: Boolean(roomText), exclusionReason: roomText ? null : droppedRoom.length ? "budget" : "not_needed" }));
     blocks.push(block({ id: "pins", authority: "untrusted_data", priority: 5, required: false, text: pinText, tokenEstimate: pinText ? estimateTokens(pinText) : 0, included: Boolean(pinText), exclusionReason: pinText ? null : droppedPins.length ? "budget" : "not_needed" }));
   }
-  // chat_role priority stays 4 (above profile/room in soft-guidance precedence); room/pins remain 5.
+  // instructions priority stays 4 (above profile/room in soft-guidance precedence); room/pins remain 5.
   if (requestedFiles) {
     blocks.push(block({ id: "file", authority: "untrusted_data", priority: 6, required: false, text: fileText, tokenEstimate: fileText ? estimateTokens(fileText) : 0, included: Boolean(fileText), exclusionReason: fileText ? null : "budget" }));
   }
@@ -217,14 +217,14 @@ export function buildContext(input: BuildContextInput): ContextPlan {
     }));
   }
 
-  const chatRoleDiagnostic: ContextSourceDiagnostic = {
-    type: "chat_role",
-    label: "Chat role",
-    state: chatRoleText ? "included" : "not_used",
-    reason: chatRoleDiagnosticReason(
-      chatRoleInput ?? { role: "general", customInstructions: null },
-      Boolean(chatRoleText),
-      chatRoleDroppedForBudget,
+  const instructionsDiagnostic: ContextSourceDiagnostic = {
+    type: "instructions",
+    label: "Chat instructions",
+    state: instructionsText ? "included" : "not_used",
+    reason: conversationInstructionsDiagnosticReason(
+      instructionsInput ?? { customInstructions: null },
+      Boolean(instructionsText),
+      instructionsDroppedForBudget,
     ),
   };
   const profileDiagnostic: ContextSourceDiagnostic = profileText
@@ -276,7 +276,7 @@ export function buildContext(input: BuildContextInput): ContextPlan {
   let diagnostics: ContextDiagnostics;
   try {
     // Order: chat role → profile → room → pins → files → … → recent → summary
-    const sources = [chatRoleDiagnostic, profileDiagnostic, recentDiagnostic, summaryDiagnostic];
+    const sources = [instructionsDiagnostic, profileDiagnostic, recentDiagnostic, summaryDiagnostic];
     if (roomDiagnostic) {
       const profileIndex = sources.findIndex((source) => source.type === "profile");
       sources.splice(profileIndex + 1, 0, roomDiagnostic);

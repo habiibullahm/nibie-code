@@ -1,5 +1,4 @@
-import { chatRoleDiagnosticReason } from "@/lib/chat-roles/context";
-import type { ChatRole } from "@/lib/chat-roles/types";
+import { conversationInstructionsDiagnosticReason } from "@/lib/chat-instructions/context";
 import type { ContextDiagnostics, ContextSourceDiagnostic } from "@/lib/context/context-types";
 import { pinPieces } from "@/lib/context/pin-context";
 import { roomPieces, roomReason, type RoomContextInput } from "@/lib/context/room-context";
@@ -71,18 +70,16 @@ export function previewContextDiagnostics(input: {
   hasEarlierMessages: boolean;
   room?: RoomContextInput | null;
   selectedFileCount?: number;
-  chatRole?: ChatRole;
   customInstructions?: string | null;
 }): ContextDiagnostics {
   const pieces = input.preferenceReadFailed ? [] : profilePieces(input.preferences);
-  const role = input.chatRole ?? "general";
   const custom = input.customInstructions?.trim() || null;
-  const roleActive = role !== "general" || Boolean(custom);
-  const chatRole: ContextSourceDiagnostic = {
-    type: "chat_role",
-    label: "Chat role",
-    state: roleActive ? "included" : "not_used",
-    reason: chatRoleDiagnosticReason({ role, customInstructions: custom }, roleActive, false),
+  const instructionsActive = Boolean(custom);
+  const instructions: ContextSourceDiagnostic = {
+    type: "instructions",
+    label: "Chat instructions",
+    state: instructionsActive ? "included" : "not_used",
+    reason: conversationInstructionsDiagnosticReason({ customInstructions: custom }, instructionsActive, false),
   };
   const profile: ContextSourceDiagnostic = pieces.length
     ? { type: "profile", label: "Your profile", state: "included", reason: profileReason(pieces.flatMap((piece) => piece.categories)) }
@@ -90,7 +87,7 @@ export function previewContextDiagnostics(input: {
   const recent: ContextSourceDiagnostic = input.hasEarlierMessages
     ? { type: "recent_messages", label: "Recent conversation", state: "included", reason: "The latest messages in this thread." }
     : { type: "recent_messages", label: "Recent conversation", state: "not_used", reason: "No earlier messages yet." };
-  const sources: ContextSourceDiagnostic[] = [chatRole, profile, recent, summaryUnused];
+  const sources: ContextSourceDiagnostic[] = [instructions, profile, recent, summaryUnused];
   if (input.room) {
     const roomParts = roomPieces(input.room);
     const profileIndex = sources.findIndex((source) => source.type === "profile");

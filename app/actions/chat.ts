@@ -10,8 +10,7 @@ import { logError, logInfo } from "@/lib/observability/logger";
 import { operationalCodes } from "@/lib/observability/codes";
 import { attachmentErrors, parseAttachmentIds } from "@/lib/attachments/rules";
 import { parseStopRequest, parseStopRequests, stopDecision, stoppedContent, type StopRequest } from "@/lib/chat/stop";
-import { parseChatRolePatch } from "@/lib/chat-roles/validation";
-import { defaultChatRole, type ChatRole } from "@/lib/chat-roles/types";
+import { parseChatInstructionsPatch } from "@/lib/chat-instructions/validation";
 
 export type ChatActionResult<T = undefined> = { data?: T; error?: string };
 type ConversationRow = {
@@ -19,7 +18,6 @@ type ConversationRow = {
   title: string;
   selected_model: string;
   room_id: string | null;
-  chat_role?: ChatRole;
   custom_instructions?: string | null;
   created_at: string;
   updated_at: string;
@@ -44,26 +42,13 @@ function failure<T>(): ChatActionResult<T> {
   return { error: saveFailed };
 }
 
-async function insertConversation(
-  supabase: Supabase,
-  userId: string,
-  model: ChatModel,
-  roomId: string | null,
-  role: { chatRole: ChatRole; customInstructions: string | null } | null = null,
-) {
-  const wantsRole = Boolean(role && (role.chatRole !== defaultChatRole || role.customInstructions !== null));
-  const roleFields = wantsRole && role
-    ? { chat_role: role.chatRole, custom_instructions: role.customInstructions }
-    : {};
+async function insertConversation(supabase: Supabase, userId: string, model: ChatModel, roomId: string | null) {
   const inserted = await supabase.from("conversations").insert({
     user_id: userId,
     title: "New chat",
     selected_model: model,
     ...(roomId ? { room_id: roomId } : {}),
-    ...roleFields,
-  }).select("id,title,selected_model,room_id,chat_role,custom_instructions,created_at,updated_at").single();
-  // Role columns missing while the user chose a non-default role: fail closed (do not silently start as General).
-  if (schemaUnavailable(inserted.error) && wantsRole) return inserted;
+  }).select("id,title,selected_model,room_id,custom_instructions,created_at,updated_at").single();
   // A general thread does not need Rooms. Retry without room_id when that column is not in the database yet.
   if (!schemaUnavailable(inserted.error) || roomId) {
     if (inserted.data) {
@@ -71,8 +56,7 @@ async function insertConversation(
       return {
         data: {
           ...row,
-          chat_role: (row.chat_role as ChatRole | null | undefined) ?? role?.chatRole ?? defaultChatRole,
-          custom_instructions: row.custom_instructions ?? role?.customInstructions ?? null,
+          custom_instructions: row.custom_instructions ?? null,
         },
         error: null,
       };
@@ -87,9 +71,8 @@ async function insertConversation(
   if (legacy.error || !legacy.data) return legacy;
   return {
     data: {
-      ...(legacy.data as unknown as Omit<ConversationRow, "room_id" | "chat_role" | "custom_instructions">),
+      ...(legacy.data as unknown as Omit<ConversationRow, "room_id" | "custom_instructions">),
       room_id: null,
-      chat_role: defaultChatRole,
       custom_instructions: null,
     },
     error: null,
@@ -185,7 +168,6 @@ export async function startConversationAction(
   content: unknown,
   roomId: unknown = null,
   attachmentIds: unknown = undefined,
-  rolePatch: unknown = undefined,
 ): Promise<ChatActionResult<{ conversation: ConversationRow; message: SavedMessage }>> {
   const parsedAttachments = parseAttachmentIds(attachmentIds);
   if (!parsedAttachments.ok) return { error: attachmentErrors.tooMany };
@@ -193,28 +175,15 @@ export async function startConversationAction(
   const parsedMessageId = validateConversationId(messageId);
   const parsedContent = validateMessage(content);
   const parsedRoom = roomId === null || roomId === undefined ? { success: true as const, data: null } : validateConversationId(roomId);
-  const parsedRole = rolePatch === undefined || rolePatch === null
-    ? { data: { chatRole: defaultChatRole, customInstructions: null as string | null } }
-    : parseChatRolePatch(rolePatch);
   if (!parsedModel.success) return { error: "Choose a valid response mode." };
   if (!parsedMessageId.success) return { error: "Choose a valid message." };
   if (!parsedContent.success) return { error: "Messages must be between 1 and 20,000 characters." };
   if (!parsedRoom.success) return { error: "Choose a valid room." };
-  if ("error" in parsedRole) return { error: parsedRole.error };
   if (!isModeAvailable(parsedModel.data)) return modelUnavailable;
   try {
     const { supabase, user } = await authenticatedClient();
-    const { data: conversation, error } = await insertConversation(
-      supabase,
-      user.id,
-      parsedModel.data,
-      parsedRoom.data,
-      parsedRole.data,
-    );
+    const { data: conversation, error } = await insertConversation(supabase, user.id, parsedModel.data, parsedRoom.data);
     if (error?.code === "23503") return { error: "That room is no longer available." };
-    if (schemaUnavailable(error) && (parsedRole.data.chatRole !== defaultChatRole || parsedRole.data.customInstructions !== null)) {
-      return { error: "Chat roles aren't available yet on this workspace." };
-    }
     if (error || !conversation) return failure();
     const saved = await appendMessage(supabase, conversation.id, parsedMessageId.data, parsedContent.data, [], parsedAttachments.ids);
     if ("error" in saved) {
@@ -244,13 +213,13 @@ export async function updateConversationModelAction(id: unknown, model: unknown)
   }
 }
 
-/** Owner-scoped chat role + optional custom instructions. Never accepts client system/developer payloads. */
-export async function updateConversationRoleAction(
+/** Owner-scoped conversation instructions. Never accepts client system/developer payloads. */
+export async function updateConversationInstructionsAction(
   id: unknown,
   patch: unknown,
-): Promise<ChatActionResult<{ chat_role: ChatRole; custom_instructions: string | null }>> {
+): Promise<ChatActionResult<{ custom_instructions: string | null }>> {
   const parsedId = validateConversationId(id);
-  const parsed = parseChatRolePatch(patch);
+  const parsed = parseChatInstructionsPatch(patch);
   if (!parsedId.success) return { error: "Choose a valid conversation." };
   if ("error" in parsed) return { error: parsed.error };
   try {
@@ -258,21 +227,19 @@ export async function updateConversationRoleAction(
     const updated = await supabase
       .from("conversations")
       .update({
-        chat_role: parsed.data.chatRole,
         custom_instructions: parsed.data.customInstructions,
         updated_at: new Date().toISOString(),
       })
       .eq("id", parsedId.data)
-      .select("id,chat_role,custom_instructions")
+      .select("id,custom_instructions")
       .maybeSingle();
     if (schemaUnavailable(updated.error)) {
-      return { error: "Chat roles aren't available yet on this workspace." };
+      return { error: "Chat instructions aren't available yet on this workspace." };
     }
     if (updated.error) return failure();
     if (!updated.data) return { error: "That conversation is no longer available." };
     return {
       data: {
-        chat_role: (updated.data.chat_role as ChatRole | null) ?? defaultChatRole,
         custom_instructions: (updated.data.custom_instructions as string | null) ?? null,
       },
     };

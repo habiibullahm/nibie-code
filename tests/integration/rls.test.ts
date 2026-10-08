@@ -679,23 +679,22 @@ describe("Supabase row-level security", () => {
     });
   });
 
-  it("keeps chat role and custom instructions owner-scoped with CHECKs", async () => {
+  it("keeps custom instructions owner-scoped with length CHECKs", async () => {
     const id = randomUUID();
     await asUser(userA, async (tx) => {
       await tx`insert into public.conversations (id, user_id, selected_model) values (${id}, ${userA}, 'Balanced')`;
-      const [defaults] = await tx`select chat_role, custom_instructions from public.conversations where id = ${id}`;
-      expect(defaults).toEqual({ chat_role: "general", custom_instructions: null });
-      await tx`update public.conversations set chat_role = 'developer', custom_instructions = 'Prefer TypeScript' where id = ${id}`;
-      const [saved] = await tx`select chat_role, custom_instructions from public.conversations where id = ${id}`;
-      expect(saved).toEqual({ chat_role: "developer", custom_instructions: "Prefer TypeScript" });
+      const [defaults] = await tx`select custom_instructions from public.conversations where id = ${id}`;
+      expect(defaults).toEqual({ custom_instructions: null });
+      await tx`update public.conversations set custom_instructions = 'Prefer TypeScript' where id = ${id}`;
+      const [saved] = await tx`select custom_instructions from public.conversations where id = ${id}`;
+      expect(saved).toEqual({ custom_instructions: "Prefer TypeScript" });
     });
-    const hidden = await asUser(userB, (tx) => tx`select chat_role, custom_instructions from public.conversations where id = ${id}`);
+    const hidden = await asUser(userB, (tx) => tx`select custom_instructions from public.conversations where id = ${id}`);
     expect(hidden).toEqual([]);
-    const updated = await asUser(userB, (tx) => tx`update public.conversations set chat_role = 'custom', custom_instructions = 'stolen' where id = ${id} returning id`);
+    const updated = await asUser(userB, (tx) => tx`update public.conversations set custom_instructions = 'stolen' where id = ${id} returning id`);
     expect(updated).toEqual([]);
-    const [still] = await asUser(userA, (tx) => tx`select chat_role, custom_instructions from public.conversations where id = ${id}`);
-    expect(still).toEqual({ chat_role: "developer", custom_instructions: "Prefer TypeScript" });
-    await expect(asUser(userA, (tx) => tx`update public.conversations set chat_role = 'hacker' where id = ${id}`)).rejects.toThrow();
+    const [still] = await asUser(userA, (tx) => tx`select custom_instructions from public.conversations where id = ${id}`);
+    expect(still).toEqual({ custom_instructions: "Prefer TypeScript" });
     await expect(asUser(userA, (tx) => tx`update public.conversations set custom_instructions = ${"x".repeat(2001)} where id = ${id}`)).rejects.toThrow();
     await asUser(userA, (tx) => tx`delete from public.conversations where id = ${id}`);
   });

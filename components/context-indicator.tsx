@@ -5,7 +5,7 @@ import { BookOpenText, Brain, DoorOpen, FileText, Globe, Info, MessagesSquare, P
 import type { ContextDiagnostics, ContextSourceDiagnostic } from "@/lib/context/context-types";
 
 const sourceIcons: Record<ContextSourceDiagnostic["type"], LucideIcon> = {
-  chat_role: UserCog,
+  instructions: UserCog,
   profile: UserRound,
   room: DoorOpen,
   pins: Pin,

@@ -16,7 +16,7 @@ import { citationViewsFromPrepared, persistMessageSources } from "@/lib/citation
 import type { SourceReference } from "@/lib/citations/types";
 import { buildContext } from "@/lib/context/build-context";
 import { CONTEXT_POLICY_VERSION } from "@/lib/context/context-policy";
-import type { ChatRoleContextInput } from "@/lib/chat-roles/context";
+import type { ConversationInstructionsInput } from "@/lib/chat-instructions/context";
 import type { AttachmentContextInput, FileContextInput, ThreadSummary } from "@/lib/context/context-types";
 import type { RoomContextInput } from "@/lib/context/room-context";
 import { RESEARCH_WEB_TOKEN_CAP } from "@/lib/context/token-budget";
@@ -64,7 +64,7 @@ export type DeepResearchChatStreamInput = {
   preferences: UserPreferences;
   preferenceReadFailed: boolean;
   summary: ThreadSummary | null;
-  chatRole?: ChatRoleContextInput | null;
+  conversationInstructions?: ConversationInstructionsInput | null;
   room: RoomContextInput | null;
   files: FileContextInput[] | undefined;
   attachments: AttachmentContextInput[];
@@ -94,7 +94,7 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
     preferences,
     preferenceReadFailed,
     summary,
-    chatRole = null,
+    conversationInstructions = null,
     room,
     files,
     attachments,
@@ -357,7 +357,7 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
             preferences,
             preferenceReadFailed,
             summary,
-            chatRole,
+            conversationInstructions,
             room,
             files,
             attachments,

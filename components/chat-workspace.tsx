@@ -3,7 +3,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { PanelLeftClose, PanelLeftOpen, SquarePen, X } from "lucide-react";
-import { addUserMessageAction, archiveConversationAction, editLastUserMessageAction, moveConversationAction, renameConversationAction, restoreConversationAction, startConversationAction, updateConversationModelAction, updateConversationRoleAction } from "@/app/actions/chat";
+import { addUserMessageAction, archiveConversationAction, editLastUserMessageAction, moveConversationAction, renameConversationAction, restoreConversationAction, startConversationAction, updateConversationInstructionsAction, updateConversationModelAction } from "@/app/actions/chat";
 import { createPinAction, deletePinAction, updatePinAction } from "@/app/actions/pins";
 import { createRoomAction, deleteRoomAction, updateRoomAction, updateRoomBriefAction } from "@/app/actions/rooms";
 import type { BrandActivity } from "@/components/brand";
@@ -21,7 +21,7 @@ import type { WhatsNewPreview } from "@/lib/changelog";
 import type { ConversationSummary, PersistedMessage, RoomSummary } from "@/lib/chat/read";
 import type { AttachmentSummary } from "@/lib/attachments/types";
 import type { ModelChoice, ModelOption } from "@/lib/chat/models";
-import { defaultChatRole, type ChatRole } from "@/lib/chat-roles/types";
+import { chatInstructionsDisclaimer, customInstructionsLimit } from "@/lib/chat-instructions/types";
 import { decideRestoredConversation } from "@/lib/chat/preferences";
 import { roomContextFromRows } from "@/lib/rooms/map";
 import type { PinDraft } from "@/lib/pins/types";
@@ -94,6 +94,12 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const [renameTitle, setRenameTitle] = useState("");
   const [renameError, setRenameError] = useState("");
   const [renameSaving, setRenameSaving] = useState(false);
+  const instructionsDialogRef = useRef<HTMLDialogElement>(null);
+  const instructionsTitleId = useId();
+  const [editingInstructions, setEditingInstructions] = useState<ConversationSummary | null>(null);
+  const [instructionsDraft, setInstructionsDraft] = useState("");
+  const [instructionsError, setInstructionsError] = useState("");
+  const [instructionsSaving, setInstructionsSaving] = useState(false);
   const [recovery, setRecovery] = useState<Recovery | null>(null);
   const [localConversations, setLocalConversations] = useState<ConversationSummary[]>([]);
   const [locallyArchivedIds, setLocallyArchivedIds] = useState<string[]>([]);
@@ -114,9 +120,6 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const availableModes = useMemo(() => models.map((option) => option.id), [models]);
   const [modelChoice, setModelChoice] = useState<ModelChoice>("Auto");
   const [savingMode, setSavingMode] = useState(false);
-  const [draftChatRole, setDraftChatRole] = useState<ChatRole>(defaultChatRole);
-  const [draftCustomInstructions, setDraftCustomInstructions] = useState<string | null>(null);
-  const [savingRole, setSavingRole] = useState(false);
   const [savedPreferences, setSavedPreferences] = useState(preferences ?? defaultUserPreferences());
   const [serverUpdatedAt, setServerUpdatedAt] = useState(preferences?.updatedAt ?? null);
   if (preferences && preferences.updatedAt !== serverUpdatedAt) {
@@ -168,6 +171,14 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     dialog?.querySelector("input")?.focus();
     return () => { dialog?.close(); previous?.focus(); };
   }, [renaming]);
+  useEffect(() => {
+    if (!editingInstructions) return;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = instructionsDialogRef.current;
+    dialog?.showModal();
+    dialog?.querySelector("textarea")?.focus();
+    return () => { dialog?.close(); previous?.focus(); };
+  }, [editingInstructions]);
   // The conversation follows new content while auto-follow is on and the reader is near the bottom (see lib/chat/scroll.ts).
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
@@ -630,24 +641,18 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
       const rollback = (message: string, from: string) => { setLocalMessages((items) => ({ ...items, [from]: withoutPending(items[from]) })); composerRef.current?.restore(content, attachments); setNotice(message); };
       let saved: { id: string; position: number };
       if (!id) {
-        // First message creates the conversation with the draft role/instructions atomically (no silent General fallback).
-        const rolePatch = draftChatRole !== defaultChatRole || draftCustomInstructions
-          ? { chatRole: draftChatRole, customInstructions: draftCustomInstructions }
-          : undefined;
+        // First message creates the conversation; chat instructions are configured afterward from the sidebar.
         const started = await startConversationAction(
           mode,
           messageId,
           content,
           drafting ? selectedRoomId : null,
           attachmentIds.length ? attachmentIds : undefined,
-          rolePatch,
         );
         if (started.error || !started.data) { rollback(started.error ?? "Conversation couldn't be created.", key); return; }
         const { conversation } = started.data;
         saved = started.data.message;
         id = conversation.id;
-        setDraftChatRole(defaultChatRole);
-        setDraftCustomInstructions(null);
         setLocalConversations((items) => [conversation, ...items]);
         setLocalMessages((items) => { const { "": rows = [], ...rest } = items; return { ...rest, [conversation.id]: rows }; });
         setPendingId(conversation.id);
@@ -913,56 +918,47 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
       setNotice("We couldn't save that model choice. Please try again.");
     } finally { busy.current = false; setSending(false); setSavingMode(false); }
   });
-  const persistChatRole = useStableCallback(async (role: ChatRole, instructions: string | null) => {
-    if (!activeConversation) {
-      setDraftChatRole(role);
-      setDraftCustomInstructions(instructions);
+  const openChatInstructions = useStableCallback((item: ConversationSummary) => {
+    setInstructionsDraft(item.custom_instructions ?? "");
+    setInstructionsError("");
+    setEditingInstructions(item);
+  });
+  const saveChatInstructions = useStableCallback(async (next: string | null) => {
+    if (!editingInstructions || instructionsSaving) return;
+    const item = editingInstructions;
+    const previous = item.custom_instructions ?? null;
+    const customInstructions = next?.trim() ? next.trim() : null;
+    const optimistic = { ...item, custom_instructions: customInstructions, updated_at: new Date().toISOString() };
+    setLocalConversations((items) => items.some((entry) => entry.id === item.id)
+      ? items.map((entry) => entry.id === item.id ? optimistic : entry)
+      : [optimistic, ...items]);
+    if (preview) {
+      setEditingInstructions(null);
       return;
     }
-    const previousRole = activeConversation.chat_role ?? defaultChatRole;
-    const previousInstructions = activeConversation.custom_instructions ?? null;
-    const optimistic = { ...activeConversation, chat_role: role, custom_instructions: instructions };
-    setLocalConversations((items) => [optimistic, ...items.filter((item) => item.id !== optimistic.id)]);
-    if (preview) return;
-    busy.current = true;
-    setSavingRole(true);
+    setInstructionsSaving(true);
+    setInstructionsError("");
     try {
-      const result = await updateConversationRoleAction(activeConversation.id, { chatRole: role, customInstructions: instructions });
+      const result = await updateConversationInstructionsAction(item.id, { customInstructions });
       if (result.error) {
-        setLocalConversations((items) => [{ ...activeConversation, chat_role: previousRole, custom_instructions: previousInstructions }, ...items.filter((item) => item.id !== activeConversation.id)]);
-        setNotice(result.error);
+        setLocalConversations((items) => items.map((entry) => entry.id === item.id ? { ...entry, custom_instructions: previous } : entry));
+        setInstructionsError(result.error);
         return;
       }
       if (result.data) {
-        const saved = { ...activeConversation, chat_role: result.data.chat_role, custom_instructions: result.data.custom_instructions };
-        setLocalConversations((items) => [saved, ...items.filter((item) => item.id !== saved.id)]);
+        const saved = { ...item, custom_instructions: result.data.custom_instructions, updated_at: new Date().toISOString() };
+        setLocalConversations((items) => items.some((entry) => entry.id === item.id)
+          ? items.map((entry) => entry.id === item.id ? saved : entry)
+          : [saved, ...items]);
       }
+      setEditingInstructions(null);
       router.refresh();
     } catch {
-      setLocalConversations((items) => [{ ...activeConversation, chat_role: previousRole, custom_instructions: previousInstructions }, ...items.filter((item) => item.id !== activeConversation.id)]);
-      setNotice("We couldn't save that chat role. Please try again.");
+      setLocalConversations((items) => items.map((entry) => entry.id === item.id ? { ...entry, custom_instructions: previous } : entry));
+      setInstructionsError("Chat instructions couldn't be saved. Please try again.");
     } finally {
-      busy.current = false;
-      setSavingRole(false);
+      setInstructionsSaving(false);
     }
-  });
-  const changeChatRole = useStableCallback((role: ChatRole) => {
-    if (busy.current || recovery || movePending.current) return;
-    const instructions = activeId
-      ? (activeConversation?.custom_instructions ?? null)
-      : draftCustomInstructions;
-    void persistChatRole(role, instructions);
-  });
-  const saveCustomInstructions = useStableCallback((instructions: string | null) => {
-    if (busy.current || recovery || movePending.current) return;
-    const role = activeId
-      ? (activeConversation?.chat_role ?? defaultChatRole)
-      : draftChatRole;
-    void persistChatRole(role, instructions);
-  });
-  const resetChatRole = useStableCallback(() => {
-    if (busy.current || recovery || movePending.current) return;
-    void persistChatRole(defaultChatRole, null);
   });
   const stopStream = useStableCallback(() => stopGeneration.current?.());
   const cancelEdit = useStableCallback(() => setEditingId(null));
@@ -992,12 +988,6 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     }
     setFilePickerOpen((open) => !open);
   });
-  const activeChatRole = activeId
-    ? (activeConversation?.chat_role ?? defaultChatRole)
-    : draftChatRole;
-  const activeCustomInstructions = activeId
-    ? (activeConversation?.custom_instructions ?? null)
-    : draftCustomInstructions;
   const contextRoom = threadRoom ? roomContextFromRows({ name: threadRoom.name, instructions: threadRoom.instructions }, threadRoom.brief, threadRoom.pins) : null;
   const contextPreview = previewContextDiagnostics({
     preferences: savedPreferences,
@@ -1005,8 +995,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     hasEarlierMessages: messages.some((message) => message.role === "user" || message.role === "assistant"),
     room: contextRoom,
     selectedFileCount: selectedFileIds.length,
-    chatRole: activeChatRole,
-    customInstructions: activeCustomInstructions,
+    customInstructions: activeConversation?.custom_instructions ?? null,
   });
   const accountName = accountDisplayName({ email, metadataName, preferredName: savedPreferences.preferredName });
   const greetingSource = savedPreferences.preferredName?.trim() || metadataName?.trim() || null;
@@ -1014,8 +1003,8 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const welcomeGreeting = welcomeGreetings[welcomeGreetingIndex](greetingName);
   const headerRoomName = (showRoom ? activeRoom?.name : threadRoom?.name) ?? null;
   const roomThreads = activeRoom ? shownConversations.filter((item) => item.room_id === activeRoom.id) : [];
-  const sidebarProps = { conversations: shownConversations, archivedConversations, rooms, activeId: history, activeRoomId: showRoom ? selectedRoomId : threadRoom?.id ?? null, busy: controlsDisabled || recovering, activity: assistantActivity, preview, email, name: accountName, releasePreview, renderedAt, settingsActive: settingsOpen, onClose: closeDrawer, onOpen: openConversation, onOpenRoom: openRoom, onNewThreadInRoom: newThreadInRoom, onDeleteRoom: deleteRoomFromSidebar, onCreateRoom: openRoomSetup, onNewChat: newChat, onOpenSettings: openSettings, onRename: rename, onArchive: archive, onRestore: restore, onMove: moveThread };
-  const composerProps = { ref: composerRef, dockRef: composerDockRef, sending: sending || recovering || movingThread !== null, streaming, mode, models, onModelChange: changeModel, researchMode, onResearchModeChange: setResearchMode, savingMode, caption, diagnostics: contextDiagnostics ?? contextPreview, onEditProfile: editProfile, onSubmit: submitMessage, onStop: stopStream, onAttach: attach, attachmentsEnabled: !preview, onRoomFiles: threadRoom && !preview ? toggleRoomFiles : undefined, roomItems, roomId: threadRoomId ?? "", roomLabel, roomSelectionNotice, roomsLoading, onRoomChange: activeId ? rooms.length ? changeComposerRoom : undefined : chooseDraftRoom, attachmentPanel: filePickerOpen && threadRoom ? <RoomFilePicker roomId={threadRoom.id} selectedIds={selectedFileIds} disabled={controlsDisabled || sending || streaming} onChange={setSelectedFileIds} /> : null, chatRole: activeChatRole, customInstructions: activeCustomInstructions, savingRole, onChatRoleChange: changeChatRole, onCustomInstructionsSave: saveCustomInstructions, onChatRoleReset: resetChatRole };
+  const sidebarProps = { conversations: shownConversations, archivedConversations, rooms, activeId: history, activeRoomId: showRoom ? selectedRoomId : threadRoom?.id ?? null, busy: controlsDisabled || recovering, activity: assistantActivity, preview, email, name: accountName, releasePreview, renderedAt, settingsActive: settingsOpen, onClose: closeDrawer, onOpen: openConversation, onOpenRoom: openRoom, onNewThreadInRoom: newThreadInRoom, onDeleteRoom: deleteRoomFromSidebar, onCreateRoom: openRoomSetup, onNewChat: newChat, onOpenSettings: openSettings, onRename: rename, onEditInstructions: openChatInstructions, onArchive: archive, onRestore: restore, onMove: moveThread };
+  const composerProps = { ref: composerRef, dockRef: composerDockRef, sending: sending || recovering || movingThread !== null, streaming, mode, models, onModelChange: changeModel, researchMode, onResearchModeChange: setResearchMode, savingMode, caption, diagnostics: contextDiagnostics ?? contextPreview, onEditProfile: editProfile, onSubmit: submitMessage, onStop: stopStream, onAttach: attach, attachmentsEnabled: !preview, onRoomFiles: threadRoom && !preview ? toggleRoomFiles : undefined, roomItems, roomId: threadRoomId ?? "", roomLabel, roomSelectionNotice, roomsLoading, onRoomChange: activeId ? rooms.length ? changeComposerRoom : undefined : chooseDraftRoom, attachmentPanel: filePickerOpen && threadRoom ? <RoomFilePicker roomId={threadRoom.id} selectedIds={selectedFileIds} disabled={controlsDisabled || sending || streaming} onChange={setSelectedFileIds} /> : null };
 
   return <main className="chat-workspace">
     <ChatSidebar {...sidebarProps} collapsed={desktopSidebarCollapsed} desktopToggleRef={desktopCollapseButtonRef} desktopExpandRef={desktopExpandButtonRef} onCollapse={collapseDesktopSidebar} onExpand={expandDesktopSidebar} />
@@ -1036,6 +1025,24 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
         <label className="room-field"><span>Conversation title</span><input value={renameTitle} maxLength={120} required disabled={renameSaving} onChange={(event) => setRenameTitle(event.target.value)} /></label>
         {renameError ? <p className="privacy-error" role="alert">{renameError}</p> : null}
         <div className="room-setup-actions"><button type="button" className="privacy-button" disabled={renameSaving} onClick={() => setRenaming(null)}>Cancel</button><button type="submit" className="privacy-button" disabled={renameSaving || !renameTitle.trim()}>{renameSaving ? "Saving…" : "Save"}</button></div>
+      </form>
+    </dialog>}
+    {editingInstructions && <dialog ref={instructionsDialogRef} className="room-setup-dialog chat-instructions-dialog" aria-labelledby={instructionsTitleId} aria-busy={instructionsSaving} onCancel={(event) => { event.preventDefault(); if (!instructionsSaving) setEditingInstructions(null); }}>
+      <header className="settings-header"><h1 id={instructionsTitleId}>Chat instructions</h1><button type="button" className="icon-button" aria-label="Close chat instructions" disabled={instructionsSaving} onClick={() => setEditingInstructions(null)}><X size={18} /></button></header>
+      <form className="room-setup-form" onSubmit={(event) => { event.preventDefault(); void saveChatInstructions(instructionsDraft); }}>
+        <p className="chat-instructions-disclaimer">How should Nibie respond in this conversation?</p>
+        <p className="chat-instructions-disclaimer">{chatInstructionsDisclaimer}</p>
+        <label className="room-field">
+          <span>Custom instructions</span>
+          <textarea value={instructionsDraft} maxLength={customInstructionsLimit} rows={5} disabled={instructionsSaving} placeholder="e.g. Act as a Senior Full-Stack Engineer. Focus on architecture, security, and performance." onChange={(event) => setInstructionsDraft(event.target.value)} />
+          <small>{[...instructionsDraft].length}/{customInstructionsLimit}</small>
+        </label>
+        {instructionsError ? <p className="privacy-error" role="alert">{instructionsError}</p> : null}
+        <div className="room-setup-actions">
+          <button type="button" className="privacy-button" disabled={instructionsSaving} onClick={() => { setInstructionsDraft(""); void saveChatInstructions(null); }}>Clear</button>
+          <button type="button" className="privacy-button" disabled={instructionsSaving} onClick={() => setEditingInstructions(null)}>Cancel</button>
+          <button type="submit" className="privacy-button" disabled={instructionsSaving}>{instructionsSaving ? "Saving…" : "Save instructions"}</button>
+        </div>
       </form>
     </dialog>}
     {creatingRoom ? <RoomCreateDialog preview={preview} onClose={closeRoomSetup} onCreate={createRoom} /> : null}

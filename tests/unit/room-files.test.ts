@@ -319,7 +319,7 @@ describe("file context", () => {
     expect(provider[0]?.content).not.toContain(attack);
     expect(provider[1]?.content).toContain(attack);
     expect(provider.at(-1)).toEqual({ role: "user", content: "hello" });
-    expect(buildContext(input()).diagnostics.sources.map((source) => source.type)).toEqual(["chat_role", "profile", "recent_messages", "thread_summary"]);
+    expect(buildContext(input()).diagnostics.sources.map((source) => source.type)).toEqual(["instructions", "profile", "recent_messages", "thread_summary"]);
   });
 
   it("drops file text that does not fit the file budget", () => {

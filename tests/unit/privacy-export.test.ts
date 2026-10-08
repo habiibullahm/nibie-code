@@ -52,7 +52,6 @@ describe("conversation export", () => {
         id: conversation().id,
         title: "First",
         selectedModel: "Balanced",
-        chatRole: "general",
         customInstructions: null,
         createdAt: "2026-01-02T00:00:00.000Z",
         updatedAt: "2026-01-03T00:00:00.000Z",
@@ -72,7 +71,7 @@ describe("conversation export", () => {
     expect(serialized).not.toContain("sk-live");
     expect(serialized).not.toContain("secret-provider");
     expect(serialized).not.toContain("user_id");
-    expect(Object.keys(payload!.conversations[0])).toEqual(["id", "title", "selectedModel", "chatRole", "customInstructions", "createdAt", "updatedAt", "messages"]);
+    expect(Object.keys(payload!.conversations[0])).toEqual(["id", "title", "selectedModel", "customInstructions", "createdAt", "updatedAt", "messages"]);
   });
 
   it("strips internal reasoning from assistant messages and leaves user text unchanged", () => {

@@ -4,8 +4,8 @@ export const FETCH_CAP = 32;
 export const PROTECTED_RECENT_COUNT = 6;
 export const SUMMARY_TOKEN_CAP = 800;
 export const ROOM_TOKEN_CAP = 1_200;
-// Soft chat-role / custom-instructions block (≤2000 chars ≈ ~500 tokens; hard-capped).
-export const CHAT_ROLE_TOKEN_CAP = 600;
+// Soft conversation instructions block (≤2000 chars ≈ ~500 tokens; hard-capped).
+export const CONVERSATION_INSTRUCTIONS_TOKEN_CAP = 600;
 // Shared by every pin in one room. Whole pins are kept or dropped; pin text is never cut in half.
 export const PIN_TOKEN_CAP = 800;
 export const FILE_TOKEN_CAP = 1_500;

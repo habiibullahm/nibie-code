@@ -1,5 +1,5 @@
 {
-  "id": "a25e0025-role-5594-h025-0025chatroles",
+  "id": "a25e0025-inst-5594-h025-0025convinst",
   "prevId": "a24e0024-cost-5392-f024-0024costguard",
   "version": "7",
   "dialect": "postgresql",
@@ -60,13 +60,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "chat_role": {
-          "name": "chat_role",
-          "type": "chat_role",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'general'"
         },
         "custom_instructions": {
           "name": "custom_instructions",
@@ -2796,18 +2789,6 @@
         "web",
         "room_file",
         "attachment"
-      ]
-    },
-    "public.chat_role": {
-      "name": "chat_role",
-      "schema": "public",
-      "values": [
-        "general",
-        "developer",
-        "researcher",
-        "writer",
-        "product_lead",
-        "custom"
       ]
     }
   },

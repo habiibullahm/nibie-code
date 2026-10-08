@@ -171,7 +171,7 @@ describe("attachment context", () => {
     const plan = buildContext(input);
     const block = plan.blocks.find((item) => item.id === "attachment");
     expect(block).toMatchObject({ authority: "untrusted_data", included: true });
-    expect(plan.diagnostics.sources.map((source) => source.type)).toEqual(["chat_role", "profile", "room", "pins", "attachment", "recent_messages", "thread_summary"]);
+    expect(plan.diagnostics.sources.map((source) => source.type)).toEqual(["instructions", "profile", "room", "pins", "attachment", "recent_messages", "thread_summary"]);
     const messages = toProviderMessages(plan);
     expect(messages[0]).toEqual({ role: "system", content: CONTEXT_POLICY_TEXT });
     expect(messages[0].content).not.toContain("Cedar Harbor");

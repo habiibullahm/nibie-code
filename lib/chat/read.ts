@@ -11,15 +11,13 @@ import type { MessageResearchView } from "@/lib/research/types";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { schemaUnavailable } from "@/lib/chat/schema-error";
 import { validateConversationId } from "@/lib/chat/validation";
-import { defaultChatRole, type ChatRole } from "@/lib/chat-roles/types";
-import { normalizeChatRole, normalizeCustomInstructions } from "@/lib/chat-roles/validation";
+import { normalizeCustomInstructions } from "@/lib/chat-instructions/validation";
 
 export type ConversationSummary = {
   id: string;
   title: string;
   selected_model: string;
   room_id: string | null;
-  chat_role?: ChatRole;
   custom_instructions?: string | null;
   archived_at?: string | null;
   created_at: string;
@@ -92,7 +90,7 @@ export async function getChatWorkspaceData(conversationId: unknown) {
   // The history list and the selected conversation's messages are independent reads, so they run together.
   // RLS scopes both to the signed-in owner; messages are only used when the conversation is in the owner's list.
   const [conversationResult, { data: roomRows, error: roomsError }, { data: briefRows, error: briefsError }, { data: pinRows, error: pinsError }, messagesResult, attachmentsResult, sourcesResult, researchResult, actionsResult] = await Promise.all([
-    orderedConversations("id,title,selected_model,room_id,chat_role,custom_instructions,archived_at,created_at,updated_at"),
+    orderedConversations("id,title,selected_model,room_id,custom_instructions,archived_at,created_at,updated_at"),
     supabase
     .from("rooms")
       .select("id,name,description,instructions,created_at,updated_at")
@@ -121,35 +119,32 @@ export async function getChatWorkspaceData(conversationId: unknown) {
       ? loadMessageActionsByConversation(supabase, parsedId.data)
       : Promise.resolve({ byMessage: new Map<string, MessageActionView>(), error: false, unavailable: true }),
   ]);
-  // Graceful degrade: chat roles → archive → room columns may be missing on older DBs.
-  const withoutRoles = schemaUnavailable(conversationResult.error)
+  // Graceful degrade: custom instructions → archive → room columns may be missing on older DBs.
+  const withoutInstructions = schemaUnavailable(conversationResult.error)
     ? await orderedConversations("id,title,selected_model,room_id,archived_at,created_at,updated_at")
     : null;
-  const withoutArchive = withoutRoles && schemaUnavailable(withoutRoles.error)
+  const withoutArchive = withoutInstructions && schemaUnavailable(withoutInstructions.error)
     ? await orderedConversations("id,title,selected_model,room_id,created_at,updated_at")
     : null;
   const withoutRoom = withoutArchive && schemaUnavailable(withoutArchive.error)
     ? await orderedConversations("id,title,selected_model,created_at,updated_at")
     : null;
   const conversationRows = withoutRoom && !withoutRoom.error
-    ? ((withoutRoom.data ?? []) as unknown as Omit<ConversationSummary, "room_id" | "archived_at" | "chat_role" | "custom_instructions">[]).map((row) => ({
+    ? ((withoutRoom.data ?? []) as unknown as Omit<ConversationSummary, "room_id" | "archived_at" | "custom_instructions">[]).map((row) => ({
       ...row,
       room_id: null,
       archived_at: null,
-      chat_role: defaultChatRole,
       custom_instructions: null,
     }))
     : withoutArchive && !withoutArchive.error
-      ? ((withoutArchive.data ?? []) as unknown as Omit<ConversationSummary, "archived_at" | "chat_role" | "custom_instructions">[]).map((row) => ({
+      ? ((withoutArchive.data ?? []) as unknown as Omit<ConversationSummary, "archived_at" | "custom_instructions">[]).map((row) => ({
         ...row,
         archived_at: null,
-        chat_role: defaultChatRole,
         custom_instructions: null,
       }))
-      : withoutRoles && !withoutRoles.error
-        ? ((withoutRoles.data ?? []) as unknown as Omit<ConversationSummary, "chat_role" | "custom_instructions">[]).map((row) => ({
+      : withoutInstructions && !withoutInstructions.error
+        ? ((withoutInstructions.data ?? []) as unknown as Omit<ConversationSummary, "custom_instructions">[]).map((row) => ({
           ...row,
-          chat_role: defaultChatRole,
           custom_instructions: null,
         }))
         : conversationResult.data;
@@ -157,8 +152,8 @@ export async function getChatWorkspaceData(conversationId: unknown) {
     ? withoutRoom.error
     : withoutArchive
       ? withoutArchive.error
-      : withoutRoles
-        ? withoutRoles.error
+      : withoutInstructions
+        ? withoutInstructions.error
         : conversationResult.error;
   const empty = { conversations: [] as ConversationSummary[], archivedConversations: [] as ConversationSummary[], rooms: [] as RoomSummary[], roomsError: null as string | null, messages: [] as PersistedMessage[], activeId: null };
   if (conversationsError) return { ...empty, error: "Conversation history couldn't be loaded. Refresh to try again." };
@@ -168,7 +163,6 @@ export async function getChatWorkspaceData(conversationId: unknown) {
     selected_model: normalizeSavedMode(row.selected_model) ?? row.selected_model,
     room_id: row.room_id ?? null,
     archived_at: row.archived_at ?? null,
-    chat_role: normalizeChatRole(row.chat_role ?? defaultChatRole),
     custom_instructions: normalizeCustomInstructions(row.custom_instructions ?? null),
   }));
   const conversations = allConversations.filter((item) => !item.archived_at);
