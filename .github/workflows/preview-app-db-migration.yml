@@ -1,14 +1,16 @@
 name: Preview App DB Migration
 
-# Applies additive Drizzle migrations to the shared app database that Vercel Preview
-# uses (same Supabase/Postgres as production today). Required so PR Previews can
-# exercise new tables (e.g. action_runs) before merge.
+# INTERIM: Preview and Production Vercel targets share one Supabase/Postgres today.
+# Prefer an isolated Preview database. Until that exists, this job may apply only
+# strictly additive Drizzle migrations (gated below) under the `production`
+# environment — enable required reviewers on that environment.
 #
 # Not the PR Guard "Integration DB + RLS" job (local Docker only).
 # Not Supabase GitHub "Preview" branching (skipped here; migrations live in drizzle/).
+# Vercel must not run db:migrate in the build.
 #
-# Vercel must not run db:migrate in the build. Migrations stay additive + backward
-# compatible so the production app keeps serving until the PR merges.
+# Long-term: remove PR writes to production; apply schema only via
+# Production DB Migration on main once Preview has its own database.
 
 on:
   pull_request:
@@ -18,6 +20,7 @@ on:
     paths:
       - 'drizzle/**'
       - 'drizzle.config.ts'
+      - 'scripts/check-preview-migrations-additive.mjs'
       - '.github/workflows/preview-app-db-migration.yml'
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
@@ -35,12 +38,13 @@ jobs:
     name: Preview app DB migration
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Same POSTGRES_URL_NON_POOLING as production: Preview and Production Vercel
-    # targets share NEXT_PUBLIC_SUPABASE_URL / DATABASE_URL today.
+    # Holds POSTGRES_URL_NON_POOLING. Require reviewers on this environment.
     environment: production
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -50,6 +54,11 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Refuse non-additive PR migrations
+        run: |
+          git fetch --no-tags origin main 2>/dev/null || true
+          node scripts/check-preview-migrations-additive.mjs
 
       - name: Check migration connection
         env:
@@ -95,7 +104,7 @@ jobs:
           DATABASE_URL: ${{ secrets.POSTGRES_URL_NON_POOLING }}
         run: npm run db:migrate
 
-      - name: Verify action_runs exists when journal includes 0019
+      - name: Verify action_runs and server write RPCs when journal includes them
         env:
           DATABASE_URL: ${{ secrets.POSTGRES_URL_NON_POOLING }}
         run: |
@@ -109,24 +118,39 @@ jobs:
             }
             const journal = JSON.parse(readFileSync(journalPath, "utf8"));
             const tags = (journal.entries || []).map((e) => e.tag);
-            if (!tags.includes("0019_action_runs")) {
-              console.log("journal has no 0019_action_runs; skip");
-              process.exit(0);
-            }
             const sql = postgres(process.env.DATABASE_URL, { max: 1, connect_timeout: 15, onnotice: () => {} });
             try {
-              const rows = await sql`
-                select 1 as ok
-                from information_schema.tables
-                where table_schema = ${"public"}
-                  and table_name = ${"action_runs"}
-                limit 1
-              `;
-              if (!rows.length) {
-                console.error("::error::Migration claimed success but public.action_runs is missing");
-                process.exitCode = 1;
-              } else {
-                console.log("public.action_runs present");
+              if (tags.includes("0019_action_runs")) {
+                const rows = await sql`
+                  select 1 as ok
+                  from information_schema.tables
+                  where table_schema = ${"public"}
+                    and table_name = ${"action_runs"}
+                  limit 1
+                `;
+                if (!rows.length) {
+                  console.error("::error::Migration claimed success but public.action_runs is missing");
+                  process.exitCode = 1;
+                } else {
+                  console.log("public.action_runs present");
+                }
+              }
+              if (tags.includes("0021_action_runs_server_writes")) {
+                const fns = await sql`
+                  select p.proname
+                  from pg_proc p
+                  join pg_namespace n on n.oid = p.pronamespace
+                  where n.nspname = ${"public"}
+                    and p.proname in (${"insert_action_run"}, ${"complete_action_run"})
+                  order by p.proname
+                `;
+                const names = fns.map((r) => r.proname);
+                if (!names.includes("insert_action_run") || !names.includes("complete_action_run")) {
+                  console.error("::error::0021 claimed success but insert_action_run/complete_action_run missing");
+                  process.exitCode = 1;
+                } else {
+                  console.log("action_runs server write RPCs present");
+                }
               }
             } finally {
               await sql.end({ timeout: 5 });
