@@ -1,16 +1,17 @@
-// Geometry for the Nibie mark: a cream ribbon "n" with the terracotta fold showing between the stems.
-// The in-app mark uses these paths with theme tokens; icon.svg and apple-icon.tsx use the same outlines.
+// Geometry for the Nibie mark: an abstract folded ribbon with a cream surface and terracotta underside.
+// The shape is intentionally non-letterform so the mark reads as movement/continuity rather than an initial.
+// In-app, favicon, Apple icon, and share art all use the same geometry.
 import { darkPalette } from "@/lib/theme/palette";
 
-export const logoViewBox = "24 8 460 340";
+export const logoViewBox = "31 19 93 62";
 
+// The fold is drawn first and closes through the body's interior (the L back to the neck), so the body's
+// lower edge always sits on terracotta with no seam.
 export const logoFoldPath =
-  "M90 175 C170 145 260 165 345 220 C405 262 440 296 404 318 C348 348 260 318 190 268 C130 226 70 196 90 175Z";
+  "M90.5 48.7 C96 45 103 42 109.5 42.1 C117 42.2 122.5 46 123 52.5 C123.5 62 115 78.5 99 79.7 C92 80.2 85 76.5 77 71 C73 69.5 66 76.5 54.5 78 C43 78 35.5 68 34 60 C33.6 53 40 48.5 48 48.5 L48 40 Z";
 
 export const logoBodyPath =
-  "M108 332 A60 60 0 0 1 48 272 L48 128 C48 66 82 32 132 30 C196 28 252 62 310 122 C356 170 392 202 366 228 C336 258 296 242 248 206 C206 174 176 182 166 206 C160 224 164 250 168 272 A60 60 0 0 1 108 332Z";
-
-export const logoCap = { x: 330, y: 104, width: 130, height: 190, rx: 65 };
+  "M56 20.2 C66 20.2 75 25 81 33 C85 38.5 88 44 90.5 48.7 C95 55.5 101 62.5 110 63 C118 63.4 122.5 58 122.8 52.5 C121 61 110 70.5 94 72.5 C84 72.5 76 66 69 60 C62 54 55 49.8 48 49.8 C41 49.8 34.5 53 34 58.5 C33 55 31.8 50 31.8 45 C31.8 31 42 20.2 56 20.2Z";
 
 export const logoBodyColor = darkPalette.logoBody;
 export const logoFoldColor = darkPalette.terracotta;

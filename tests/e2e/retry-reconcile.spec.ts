@@ -51,7 +51,7 @@ test("a stream that drops before its terminal event reconciles to the saved repl
     // Without a reload: the UI must settle on the saved, complete reply and offer Regenerate (not Retry), with no error notice.
     await expect(regenerate(page)).toBeVisible({ timeout: 90_000 });
     await expect(notices(page)).toHaveCount(0);
-    await expect(page.locator(".message-author").last()).toHaveText("Nibie");
+    await expect(page.locator(".message-row.assistant").last().locator(".message-status")).toHaveCount(0);
     const shown = (await assistant(page).textContent())!.trim();
     expect(shown).toBeTruthy();
 
@@ -109,10 +109,10 @@ test("Retry right after Stop completes without a failure notice", async ({ page 
     expect(await response.text()).toContain('event: status\ndata: {"status":"complete"}');
     await expect(regenerate(page)).toBeVisible({ timeout: 30_000 });
     await expect(notices(page)).toHaveCount(0);
-    await expect(page.locator(".message-author").last()).toHaveText("Nibie");
+    await expect(page.locator(".message-row.assistant").last().locator(".message-status")).toHaveCount(0);
     await page.reload();
     await expect(assistant(page)).toHaveCount(1);
-    await expect(page.locator(".message-author").last()).toHaveText("Nibie");
+    await expect(page.locator(".message-row.assistant").last().locator(".message-status")).toHaveCount(0);
   } finally {
     await removeConversation(page, url);
   }

@@ -8,6 +8,7 @@ What's new in Nibie.
 
 ### Added
 
+- Code in Nibie's answers is now syntax-highlighted in calm, muted colors for common languages, including shell commands and their flags.
 - When Nibie searches the web for a reply, you can see “Searching the web…” while it runs and “Used Web Search” on the finished answer — a first step toward clear, stoppable Actions without changing ordinary chat.
 - Choose Deep Research from the Research menu for a bounded multi-source researched answer with citations, progress stages, and Incomplete/Failed labels when collection is partial or fails.
 - When a reply uses web sources, Nibie shows clickable citation markers and a Sources list with title and domain, kept with the message so they survive reload.
@@ -21,6 +22,9 @@ What's new in Nibie.
 
 ### Changed
 
+- Sources under a reply are now tucked into a single quiet line showing where the answer came from; open it to see each source with its title and site, or click a citation number to jump straight to it.
+- Nibie now uses an abstract ribbon mark instead of a letter-like symbol. Replies are shown as plain text without a name header, and a quiet status (Responding…, Thinking… in High, or Researching… in Deep Research) appears only if the wait lasts more than a moment and disappears as soon as the answer starts.
+- Nibie's dark workspace now uses calmer neutral graphite surfaces and a clearer text hierarchy, so long answers, conversation titles, and section labels are easier to read during long chats.
 - Weekly AI allowance is now 500 credits per week (was 100); Fast, Balanced, and High still cost 1, 3, and 6.
 - In a Room, Nibie finds relevant file excerpts from both keywords and meaning, so paraphrased questions still pull the right context while exact symbols stay preferred.
 - Nibie's answers are now substantive by default, with enough explanation, steps, examples, or trade-offs to understand or act without asking again, and no padding. Short follow-ups like a company name or tech stack refine your current question, and Nibie won't start a quiz or mock interview unless you ask for one. Settings → Response depth offers Concise, Default, and Detailed, and a request in your message always wins.

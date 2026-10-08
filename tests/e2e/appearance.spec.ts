@@ -82,7 +82,7 @@ test.describe("theme", () => {
       const luminance = ([r, g, b]: number[]) => { const [x, y, z] = [r, g, b].map((v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; }); return 0.2126 * x + 0.7152 * y + 0.0722 * z; };
       const ratio = (a: number[], b: number[]) => { const [hi, lo] = [luminance(a), luminance(b)].sort((p, q) => q - p); return (hi + 0.05) / (lo + 0.05); };
       const bg = channels(getComputedStyle(document.querySelector(".chat-workspace")!).backgroundColor);
-      return [".message-content.user p", ".markdown p", ".message-author", ".history-item.is-active"].map((selector) => ratio(channels(getComputedStyle(document.querySelector(selector)!).color), bg));
+      return [".message-content.user p", ".markdown p", ".history-item:not(.is-active)", ".history-item.is-active"].map((selector) => ratio(channels(getComputedStyle(document.querySelector(selector)!).color), bg));
     });
     for (const ratio of await contrast()) expect(ratio).toBeGreaterThan(4.5);
     await openThemeSettings(page);
