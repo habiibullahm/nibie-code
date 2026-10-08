@@ -22,6 +22,7 @@ What's new in Nibie.
 
 ### Changed
 
+- The message box, code in answers, and conversation list are easier to read: larger composer text with a clearer caret, labelled Copy and Wrap on code blocks, and roomier sidebar history rows.
 - Sources under a reply are now tucked into a single quiet line showing where the answer came from; open it to see each source with its title and site, or click a citation number to jump straight to it.
 - Nibie now uses an abstract ribbon mark instead of a letter-like symbol. Replies are shown as plain text without a name header, and a quiet status (Responding…, Thinking… in High, or Researching… in Deep Research) appears only if the wait lasts more than a moment and disappears as soon as the answer starts.
 - Nibie's dark workspace now uses calmer neutral graphite surfaces and a clearer text hierarchy, so long answers, conversation titles, and section labels are easier to read during long chats.
