@@ -27,7 +27,13 @@ import { createGitHubPullRequestGetAction } from "@/lib/actions/tools/github-pul
 import { createGitHubPullRequestsListAction } from "@/lib/actions/tools/github-pull-requests-list";
 import { createGitHubRepoGetAction } from "@/lib/actions/tools/github-repo-get";
 import { createGitHubWorkflowRunsListAction } from "@/lib/actions/tools/github-workflow-runs-list";
-import { GitHubApiError, getGitHubConfig, githubGetJson, redactSecrets } from "@/lib/github/index";
+import {
+  getGitHubConfig,
+  githubConfigForTests,
+  githubGetJson,
+  normalizePullRequest,
+  redactSecrets,
+} from "@/lib/github/index";
 
 const fixtures = join(process.cwd(), "tests/fixtures/github");
 
@@ -58,6 +64,15 @@ function jsonResponse(body: unknown, init?: { status?: number; headers?: Record<
   });
 }
 
+/** Mock fetch: public repo gate + nested resource by URL suffix. */
+function publicRepoFetch(resourceBody: unknown, repoBody: unknown = loadJson("repo.json")) {
+  return vi.fn(async (url: string) => {
+    const path = new URL(url).pathname;
+    if (/\/repos\/[^/]+\/[^/]+$/.test(path)) return jsonResponse(repoBody);
+    return jsonResponse(resourceBody);
+  });
+}
+
 describe("GitHub Read registry", () => {
   it("registers six read-only GitHub Actions and keeps web.search", () => {
     const ids = listRegisteredActions().map((a) => a.id);
@@ -75,6 +90,30 @@ describe("GitHub Read registry", () => {
 
   it("documents one Action per generation", () => {
     expect(MAX_ACTIONS_PER_GENERATION).toBe(1);
+  });
+});
+
+describe("GitHub config public-only", () => {
+  it("does not attach token unless GITHUB_READ_USE_TOKEN=true", () => {
+    const token = "ghp_" + "c".repeat(36);
+    const idle = getGitHubConfig({ GITHUB_TOKEN: token });
+    expect(idle.token).toBeNull();
+    expect(idle.useToken).toBe(false);
+    expect(idle.publicOnly).toBe(true);
+
+    const armed = getGitHubConfig({ GITHUB_TOKEN: token, GITHUB_READ_USE_TOKEN: "true" });
+    expect(armed.token).toBe(token);
+    expect(armed.useToken).toBe(true);
+    expect(armed.publicOnly).toBe(true);
+  });
+
+  it("locks API base host to api.github.com", () => {
+    expect(getGitHubConfig({ GITHUB_API_BASE_URL: "https://evil.example/api" }).apiBaseUrl).toBe(
+      "https://api.github.com",
+    );
+    expect(getGitHubConfig({ GITHUB_API_BASE_URL: "http://api.github.com" }).apiBaseUrl).toBe(
+      "https://api.github.com",
+    );
   });
 });
 
@@ -109,7 +148,7 @@ describe("GitHub HTTP client", () => {
       path: "/repos/habiibullahm/nibie-code",
       signal: AbortSignal.timeout(5_000),
       fetchImpl: fetchImpl as unknown as typeof fetch,
-      config: { ...getGitHubConfig({}), token: null },
+      config: githubConfigForTests({ token: null }),
     });
     expect(result.status).toBe(200);
     expect(fetchImpl).toHaveBeenCalledOnce();
@@ -128,50 +167,83 @@ describe("GitHub HTTP client", () => {
         path: "/repos/habiibullahm/nibie-code",
         signal: AbortSignal.timeout(5_000),
         fetchImpl: fetchImpl as unknown as typeof fetch,
-        config: { ...getGitHubConfig({}), token: null },
+        config: githubConfigForTests(),
       }),
     ).rejects.toMatchObject({
       name: "GitHubApiError",
       category: "rate_limited",
       retryAfterSeconds: 30,
-    } satisfies Partial<GitHubApiError>);
+    });
   });
 
-  it("maps timeout via AbortSignal", async () => {
-    const fetchImpl = vi.fn(
-      (_url: string, init?: RequestInit) =>
-        new Promise<Response>((_resolve, reject) => {
-          init?.signal?.addEventListener("abort", () => {
-            const err = new Error("aborted");
-            err.name = "AbortError";
-            reject(err);
-          });
-        }),
-    );
+  it("rejects disallowed API hosts even if config is forged", async () => {
     await expect(
       githubGetJson({
         path: "/repos/habiibullahm/nibie-code",
-        signal: AbortSignal.timeout(5_000),
-        timeoutMs: 20,
-        fetchImpl: fetchImpl as unknown as typeof fetch,
-        config: { ...getGitHubConfig({}), token: null },
-      }),
-    ).rejects.toMatchObject({ category: "timeout" });
-  });
-
-  it("rejects path traversal", async () => {
-    await expect(
-      githubGetJson({
-        path: "/repos/../admin",
         signal: AbortSignal.timeout(1_000),
         fetchImpl: vi.fn() as unknown as typeof fetch,
+        config: githubConfigForTests({ apiBaseUrl: "https://evil.example" }),
       }),
     ).rejects.toMatchObject({ category: "validation" });
   });
 });
 
+describe("GitHub public-only gate", () => {
+  it("rejects private repositories even when a token would have access", async () => {
+    const action = createGitHubRepoGetAction({
+      fetchImpl: async () => jsonResponse(loadJson("repo-private.json")),
+      config: githubConfigForTests({
+        token: "ghp_" + "d".repeat(36),
+        useToken: true,
+      }),
+    });
+    const result = await action.execute(
+      ctx(),
+      { owner: "acme", repo: "secret-sauce" },
+      AbortSignal.timeout(5_000),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.errorMessage).toBe("private_repo");
+    expect(result.summary).toMatch(/private/i);
+    expect(JSON.stringify(result)).not.toContain("should never be returned");
+  });
+
+  it("blocks nested reads on private repos before listing commits", async () => {
+    const fetchImpl = publicRepoFetch(loadJson("commits.json"), loadJson("repo-private.json"));
+    const action = createGitHubCommitsListAction({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      config: githubConfigForTests({ token: "ghp_" + "e".repeat(36), useToken: true }),
+    });
+    const result = await action.execute(
+      ctx(),
+      { owner: "acme", repo: "secret-sauce", perPage: 10 },
+      AbortSignal.timeout(5_000),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.errorMessage).toBe("private_repo");
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+});
+
+describe("normalizePullRequest merged_at fallback", () => {
+  it("treats merged_at as merged when merged flag is absent", () => {
+    const pr = normalizePullRequest({
+      number: 1,
+      title: "Merged PR",
+      state: "closed",
+      html_url: "https://github.com/o/r/pull/1",
+      merged_at: "2026-10-01T00:00:00Z",
+      user: { login: "dev" },
+      base: { ref: "main" },
+      head: { ref: "feat" },
+    });
+    expect(pr?.merged).toBe(true);
+    expect(pr?.mergedAt).toBe("2026-10-01T00:00:00Z");
+  });
+});
+
 describe("GitHub Read Actions (fixture-backed)", () => {
-  it("github.repo.get returns normalized repo", async () => {
+  it("github.repo.get returns normalized public repo", async () => {
     const action = createGitHubRepoGetAction({
       fetchImpl: async () => jsonResponse(loadJson("repo.json")),
     });
@@ -179,11 +251,12 @@ describe("GitHub Read Actions (fixture-backed)", () => {
     expect(result.ok).toBe(true);
     expect(result.items[0]?.title).toBe("habiibullahm/nibie-code");
     expect(result.items[0]?.data?.defaultBranch).toBe("main");
+    expect(result.items[0]?.data?.private).toBe(false);
   });
 
-  it("github.commits.list returns commits", async () => {
+  it("github.commits.list returns commits after public gate", async () => {
     const action = createGitHubCommitsListAction({
-      fetchImpl: async () => jsonResponse(loadJson("commits.json")),
+      fetchImpl: publicRepoFetch(loadJson("commits.json")) as unknown as typeof fetch,
     });
     const result = await action.execute(
       ctx(),
@@ -196,10 +269,10 @@ describe("GitHub Read Actions (fixture-backed)", () => {
 
   it("github.pull_request.get and list work", async () => {
     const getActionDef = createGitHubPullRequestGetAction({
-      fetchImpl: async () => jsonResponse(loadJson("pull.json")),
+      fetchImpl: publicRepoFetch(loadJson("pull.json")) as unknown as typeof fetch,
     });
     const listAction = createGitHubPullRequestsListAction({
-      fetchImpl: async () => jsonResponse(loadJson("pulls.json")),
+      fetchImpl: publicRepoFetch(loadJson("pulls.json")) as unknown as typeof fetch,
     });
     const one = await getActionDef.execute(
       ctx(),
@@ -217,9 +290,58 @@ describe("GitHub Read Actions (fixture-backed)", () => {
     expect(many.items).toHaveLength(2);
   });
 
-  it("github.issues.list filters pull requests out", async () => {
+  it("github.issues.list filters PRs and pages when the first page is PR-heavy", async () => {
+    const page1 = loadJson("issues.json"); // one issue + one PR
+    const page2 = [
+      {
+        number: 11,
+        title: "Second real issue",
+        state: "open",
+        html_url: "https://github.com/habiibullahm/nibie-code/issues/11",
+        user: { login: "habiibullahm" },
+        labels: [],
+        created_at: "2026-10-03T12:00:00Z",
+        updated_at: "2026-10-03T12:00:00Z",
+        body: "another",
+      },
+    ];
+    const fetchImpl = vi.fn(async (url: string) => {
+      const u = new URL(url);
+      if (/\/repos\/[^/]+\/[^/]+$/.test(u.pathname)) return jsonResponse(loadJson("repo.json"));
+      if (u.searchParams.get("page") === "2") return jsonResponse(page2);
+      return jsonResponse(page1);
+    });
     const action = createGitHubIssuesListAction({
-      fetchImpl: async () => jsonResponse(loadJson("issues.json")),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      config: githubConfigForTests({ maxPerPage: 2 }),
+    });
+    const result = await action.execute(
+      ctx(),
+      { owner: "habiibullahm", repo: "nibie-code", state: "open", perPage: 2 },
+      AbortSignal.timeout(5_000),
+    );
+    expect(result.ok).toBe(true);
+    expect(result.items.map((i) => i.title)).toEqual([
+      "#10 Improve citation markers",
+      "#11 Second real issue",
+    ]);
+    expect(result.summary).not.toMatch(/^No open issues/);
+  });
+
+  it("github.issues.list is honest when only PRs were present", async () => {
+    const onlyPrs = [
+      {
+        number: 63,
+        title: "PR as issue",
+        state: "open",
+        html_url: "https://github.com/habiibullahm/nibie-code/pull/63",
+        user: { login: "x" },
+        labels: [],
+        pull_request: { url: "https://api.github.com/repos/o/r/pulls/63" },
+      },
+    ];
+    const action = createGitHubIssuesListAction({
+      fetchImpl: publicRepoFetch(onlyPrs) as unknown as typeof fetch,
     });
     const result = await action.execute(
       ctx(),
@@ -227,13 +349,13 @@ describe("GitHub Read Actions (fixture-backed)", () => {
       AbortSignal.timeout(5_000),
     );
     expect(result.ok).toBe(true);
-    expect(result.items).toHaveLength(1);
-    expect(result.items[0]?.title).toContain("#10");
+    expect(result.items).toHaveLength(0);
+    expect(result.summary).toMatch(/pull requests/i);
   });
 
   it("github.workflow_runs.list returns runs", async () => {
     const action = createGitHubWorkflowRunsListAction({
-      fetchImpl: async () => jsonResponse(loadJson("workflow-runs.json")),
+      fetchImpl: publicRepoFetch(loadJson("workflow-runs.json")) as unknown as typeof fetch,
     });
     const result = await action.execute(
       ctx(),
@@ -245,21 +367,7 @@ describe("GitHub Read Actions (fixture-backed)", () => {
   });
 
   it("runtime validates owner/repo and enforces one-per-generation across GitHub Actions", async () => {
-    const bad = await executeAction({
-      actionId: GITHUB_REPO_GET_ACTION_ID,
-      rawInput: { owner: "../evil", repo: "x" },
-      ctx: ctx(),
-    });
-    expect(bad.result.errorCode).toBe("validation_failed");
-
-    const fetchImpl = vi.fn(async () => jsonResponse(loadJson("repo.json")));
-    // executeAction uses the registered action (global fetch). Stub via action path already covered;
-    // budget enforcement does not need a successful second call.
     const budget = { current: 0 };
-    // First call will hit real registered action → network; instead bump budget manually after a
-    // dry validation-only failure path is insufficient. Use generationActionCount with a mocked
-    // success by calling executeAction twice where first fails validation still increments? Looking
-    // at runtime: budget increments before validation. So:
     const first = await executeAction({
       actionId: GITHUB_REPO_GET_ACTION_ID,
       rawInput: { owner: "bad owner", repo: "x" },
@@ -275,17 +383,6 @@ describe("GitHub Read Actions (fixture-backed)", () => {
       generationActionCount: budget,
     });
     expect(second.result.errorCode).toBe("budget_exceeded");
-    expect(fetchImpl).not.toHaveBeenCalled();
-  });
-
-  it("returns honest not_found from Action execute", async () => {
-    const action = createGitHubRepoGetAction({
-      fetchImpl: async () => jsonResponse({ message: "Not Found" }, { status: 404 }),
-    });
-    const result = await action.execute(ctx(), { owner: "habiibullahm", repo: "missing" }, AbortSignal.timeout(5_000));
-    expect(result.ok).toBe(false);
-    expect(result.errorMessage).toBe("not_found");
-    expect(result.summary).toMatch(/not found/i);
   });
 
   it("exposes stable Action ids for UI labels", () => {

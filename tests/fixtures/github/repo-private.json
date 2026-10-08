@@ -1,0 +1,16 @@
+{
+  "id": 2,
+  "name": "secret-sauce",
+  "full_name": "acme/secret-sauce",
+  "private": true,
+  "owner": { "login": "acme", "html_url": "https://github.com/acme" },
+  "html_url": "https://github.com/acme/secret-sauce",
+  "description": "should never be returned to chat",
+  "default_branch": "main",
+  "language": "TypeScript",
+  "stargazers_count": 0,
+  "forks_count": 0,
+  "open_issues_count": 0,
+  "pushed_at": "2026-10-08T12:00:00Z",
+  "updated_at": "2026-10-08T12:00:00Z"
+}

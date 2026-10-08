@@ -3,6 +3,7 @@ import "server-only";
 /** Honest failure categories for GitHub Read Actions — never invent success. */
 export type GitHubFailureCategory =
   | "not_found"
+  | "private_repo"
   | "forbidden"
   | "unauthorized"
   | "rate_limited"
@@ -35,7 +36,9 @@ export class GitHubApiError extends Error {
 export function userFacingGitHubError(error: GitHubApiError): string {
   switch (error.category) {
     case "not_found":
-      return "That GitHub repository or resource was not found (or is private).";
+      return "That GitHub repository or resource was not found.";
+    case "private_repo":
+      return "That GitHub repository is private. Nibie only reads public repositories.";
     case "forbidden":
       return "GitHub refused access to that resource.";
     case "unauthorized":

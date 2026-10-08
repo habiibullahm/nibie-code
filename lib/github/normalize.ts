@@ -100,7 +100,8 @@ export function normalizePullRequest(raw: unknown): GitHubPullRequestSummary | n
     title,
     state: str(r.state) ?? "unknown",
     draft: bool(r.draft),
-    merged: bool(r.merged),
+    // List payloads often omit `merged` but include `merged_at` when merged.
+    merged: bool(r.merged) || Boolean(str(r.merged_at)),
     htmlUrl,
     authorLogin: str(user?.login),
     baseRef: str(base?.ref),

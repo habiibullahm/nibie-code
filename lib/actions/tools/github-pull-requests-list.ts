@@ -10,6 +10,7 @@ import {
   type GitHubActionDeps,
 } from "@/lib/actions/tools/github-shared";
 import {
+  assertPublicRepository,
   getGitHubConfig,
   githubPerPageSchema,
   githubPullStateSchema,
@@ -30,7 +31,7 @@ export function createGitHubPullRequestsListAction(
   return {
     id: GITHUB_PULL_REQUESTS_LIST_ACTION_ID,
     title: "GitHub Pull Requests",
-    description: "List pull requests on a GitHub repository. Read-only.",
+    description: "List pull requests on a public GitHub repository. Read-only.",
     capability: "read",
     requiresConfirmation: false,
     inputSchema: githubPullRequestsListInputSchema,
@@ -47,6 +48,11 @@ export function createGitHubPullRequestsListAction(
       const config = deps.config ?? getGitHubConfig();
       const perPage = Math.min(input.perPage, config.maxPerPage);
       try {
+        await assertPublicRepository(input.owner, input.repo, {
+          signal,
+          config,
+          fetchImpl: deps.fetchImpl,
+        });
         const { data, rateLimit } = await githubReadJson<unknown[]>({
           path: `/repos/${input.owner}/${input.repo}/pulls`,
           query: { state: input.state, per_page: perPage },
@@ -60,7 +66,13 @@ export function createGitHubPullRequestsListAction(
           .map((pr) => ({
             title: `#${pr.number} ${pr.title}`,
             url: pr.htmlUrl,
-            snippet: [pr.state, pr.draft ? "draft" : null, pr.authorLogin, pr.headRef && pr.baseRef ? `${pr.headRef} → ${pr.baseRef}` : null]
+            snippet: [
+              pr.state,
+              pr.draft ? "draft" : null,
+              pr.merged ? "merged" : null,
+              pr.authorLogin,
+              pr.headRef && pr.baseRef ? `${pr.headRef} → ${pr.baseRef}` : null,
+            ]
               .filter(Boolean)
               .join(" · "),
             provenance: "github.pull_request",
@@ -68,6 +80,7 @@ export function createGitHubPullRequestsListAction(
               number: pr.number,
               state: pr.state,
               draft: pr.draft,
+              merged: pr.merged,
               authorLogin: pr.authorLogin,
               baseRef: pr.baseRef,
               headRef: pr.headRef,

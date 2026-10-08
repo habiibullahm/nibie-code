@@ -10,6 +10,7 @@ import {
   type GitHubActionDeps,
 } from "@/lib/actions/tools/github-shared";
 import {
+  assertPublicRepository,
   getGitHubConfig,
   githubPerPageSchema,
   githubRepoRefSchema,
@@ -30,7 +31,7 @@ export function createGitHubCommitsListAction(
   return {
     id: GITHUB_COMMITS_LIST_ACTION_ID,
     title: "GitHub Commits",
-    description: "List recent commits on a GitHub repository. Read-only.",
+    description: "List recent commits on a public GitHub repository. Read-only.",
     capability: "read",
     requiresConfirmation: false,
     inputSchema: githubCommitsListInputSchema,
@@ -47,6 +48,11 @@ export function createGitHubCommitsListAction(
       const config = deps.config ?? getGitHubConfig();
       const perPage = Math.min(input.perPage, config.maxPerPage);
       try {
+        await assertPublicRepository(input.owner, input.repo, {
+          signal,
+          config,
+          fetchImpl: deps.fetchImpl,
+        });
         const { data, rateLimit } = await githubReadJson<unknown[]>({
           path: `/repos/${input.owner}/${input.repo}/commits`,
           query: {

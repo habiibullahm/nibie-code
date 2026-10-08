@@ -5,11 +5,10 @@ import { GITHUB_REPO_GET_ACTION_ID } from "@/lib/actions/ids";
 import type { ActionDefinition, ActionResultItem } from "@/lib/actions/types";
 import {
   githubFailed,
-  githubReadJson,
   githubSuccess,
   type GitHubActionDeps,
 } from "@/lib/actions/tools/github-shared";
-import { githubRepoRefSchema, normalizeRepo } from "@/lib/github/index";
+import { assertPublicRepository, githubRepoRefSchema } from "@/lib/github/index";
 
 export const githubRepoGetInputSchema = githubRepoRefSchema;
 
@@ -21,7 +20,7 @@ export function createGitHubRepoGetAction(deps: GitHubActionDeps = {}): ActionDe
   return {
     id: GITHUB_REPO_GET_ACTION_ID,
     title: "GitHub Repository",
-    description: "Read public metadata for a GitHub repository. Read-only.",
+    description: "Read public metadata for a GitHub repository. Read-only. Public repos only.",
     capability: "read",
     requiresConfirmation: false,
     inputSchema: githubRepoGetInputSchema,
@@ -36,22 +35,11 @@ export function createGitHubRepoGetAction(deps: GitHubActionDeps = {}): ActionDe
         };
       }
       try {
-        const { data, rateLimit } = await githubReadJson<unknown>({
-          path: `/repos/${input.owner}/${input.repo}`,
+        const { repo, rateLimit } = await assertPublicRepository(input.owner, input.repo, {
           signal,
           config: deps.config,
           fetchImpl: deps.fetchImpl,
         });
-        const repo = normalizeRepo(data);
-        if (!repo) {
-          return {
-            ok: false,
-            items: [],
-            summary: "GitHub returned an unexpected repository payload.",
-            errorCode: "execution_failed",
-            errorMessage: "parse_error",
-          };
-        }
         const item: ActionResultItem = {
           title: repo.fullName,
           url: repo.htmlUrl,
@@ -74,7 +62,7 @@ export function createGitHubRepoGetAction(deps: GitHubActionDeps = {}): ActionDe
           owner: input.owner,
           repo: input.repo,
           rateLimit,
-          extraMeta: { defaultBranch: repo.defaultBranch, private: repo.private },
+          extraMeta: { defaultBranch: repo.defaultBranch, private: false },
         });
       } catch (error) {
         return githubFailed(error, "Could not load that GitHub repository.");
