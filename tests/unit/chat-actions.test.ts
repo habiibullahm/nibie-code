@@ -98,7 +98,15 @@ describe("chat server action input boundaries", () => {
     function stack(append: { data: unknown; error: unknown }) {
       const calls: string[] = [];
       const removed = vi.fn<(...args: unknown[]) => Promise<{ error: null }>>(async () => ({ error: null }));
-      const insert = vi.fn((row: unknown) => { calls.push("insert"); return { select: () => ({ single: async () => ({ data: conversation, error: null }) }), row }; });
+      const insert = vi.fn((row: Record<string, unknown>) => {
+        calls.push("insert");
+        const data = {
+          ...conversation,
+          ...(typeof row.chat_role === "string" ? { chat_role: row.chat_role } : {}),
+          ...("custom_instructions" in row ? { custom_instructions: row.custom_instructions ?? null } : {}),
+        };
+        return { select: () => ({ single: async () => ({ data, error: null }) }), row };
+      });
       const rpc = vi.fn(() => { calls.push("append"); return { single: async () => append }; });
       const client = { auth: signedIn, from: vi.fn(() => ({ insert, delete: () => ({ eq: (...args: unknown[]) => { calls.push("delete"); return { then: (resolve: (v: unknown) => unknown) => removed(...args).then(resolve) }; } }) })), rpc };
       createClient.mockResolvedValue(client);
@@ -115,10 +123,41 @@ describe("chat server action input boundaries", () => {
 
     it("creates the conversation for the signed-in owner and saves the message, returning both", async () => {
       const { calls, insert, rpc } = stack({ data: { id: message, position: 1 }, error: null });
-      await expect(startConversationAction("Balanced", message, " hello ")).resolves.toEqual({ data: { conversation, message: { id: message, position: 1 } } });
+      await expect(startConversationAction("Balanced", message, " hello ")).resolves.toEqual({
+        data: {
+          conversation: { ...conversation, chat_role: "general", custom_instructions: null },
+          message: { id: message, position: 1 },
+        },
+      });
       expect(calls).toEqual(["insert", "append"]);
       expect(insert).toHaveBeenCalledWith({ user_id: "owner", title: "New chat", selected_model: "Balanced" });
       expect(rpc).toHaveBeenCalledWith("append_user_message", { p_conversation_id: conversation.id, p_message_id: message, p_content: "hello" });
+    });
+
+    it("creates the conversation with chat role and instructions in the same insert", async () => {
+      const { calls, insert } = stack({ data: { id: message, position: 1 }, error: null });
+      const rolePatch = { chatRole: "developer" as const, customInstructions: "Prefer TypeScript" };
+      await expect(startConversationAction("Balanced", message, "hello", null, undefined, rolePatch)).resolves.toEqual({
+        data: {
+          conversation: { ...conversation, chat_role: "developer", custom_instructions: "Prefer TypeScript" },
+          message: { id: message, position: 1 },
+        },
+      });
+      expect(calls).toEqual(["insert", "append"]);
+      expect(insert).toHaveBeenCalledWith({
+        user_id: "owner",
+        title: "New chat",
+        selected_model: "Balanced",
+        chat_role: "developer",
+        custom_instructions: "Prefer TypeScript",
+      });
+    });
+
+    it("rejects an invalid role patch before opening the database", async () => {
+      await expect(startConversationAction("Balanced", message, "hello", null, undefined, { chatRole: "hacker" })).resolves.toEqual({
+        error: "Choose a valid chat role.",
+      });
+      expect(createClient).not.toHaveBeenCalled();
     });
 
     it("removes the empty conversation again when the message cannot be saved, without leaking details", async () => {

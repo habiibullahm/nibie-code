@@ -52,6 +52,7 @@ type Props = {
   savingRole?: boolean;
   onChatRoleChange: (role: ChatRole) => void;
   onCustomInstructionsSave: (instructions: string | null) => void;
+  onChatRoleReset: () => void;
   centered?: boolean;
 };
 
@@ -63,7 +64,7 @@ function fitCollapsedTextarea(element: HTMLTextAreaElement) {
 }
 
 // The draft lives here, not in the workspace: typing re-renders only this component, never the message list or sidebar.
-export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, streaming, mode, models, onModelChange, researchMode, onResearchModeChange, savingMode, caption, diagnostics, onEditProfile, onSubmit, onStop, onAttach, attachmentsEnabled = false, onRoomFiles, attachmentPanel = null, roomItems, roomId, roomLabel, roomSelectionNotice, roomsLoading, onRoomChange, chatRole, customInstructions, savingRole = false, onChatRoleChange, onCustomInstructionsSave, centered = false }: Props) {
+export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, streaming, mode, models, onModelChange, researchMode, onResearchModeChange, savingMode, caption, diagnostics, onEditProfile, onSubmit, onStop, onAttach, attachmentsEnabled = false, onRoomFiles, attachmentPanel = null, roomItems, roomId, roomLabel, roomSelectionNotice, roomsLoading, onRoomChange, chatRole, customInstructions, savingRole = false, onChatRoleChange, onCustomInstructionsSave, onChatRoleReset, centered = false }: Props) {
   const [draft, setDraft] = useState("");
   const [expanded, setExpanded] = useState(false);
   const [canExpand, setCanExpand] = useState(false);
@@ -271,6 +272,7 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
           saving={savingRole}
           onRoleChange={onChatRoleChange}
           onInstructionsSave={onCustomInstructionsSave}
+          onReset={onChatRoleReset}
         />
       </div>
     </div>

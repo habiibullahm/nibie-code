@@ -44,22 +44,56 @@ function failure<T>(): ChatActionResult<T> {
   return { error: saveFailed };
 }
 
-async function insertConversation(supabase: Supabase, userId: string, model: ChatModel, roomId: string | null) {
+async function insertConversation(
+  supabase: Supabase,
+  userId: string,
+  model: ChatModel,
+  roomId: string | null,
+  role: { chatRole: ChatRole; customInstructions: string | null } | null = null,
+) {
+  const wantsRole = Boolean(role && (role.chatRole !== defaultChatRole || role.customInstructions !== null));
+  const roleFields = wantsRole && role
+    ? { chat_role: role.chatRole, custom_instructions: role.customInstructions }
+    : {};
   const inserted = await supabase.from("conversations").insert({
     user_id: userId,
     title: "New chat",
     selected_model: model,
     ...(roomId ? { room_id: roomId } : {}),
-  }).select("id,title,selected_model,room_id,created_at,updated_at").single();
+    ...roleFields,
+  }).select("id,title,selected_model,room_id,chat_role,custom_instructions,created_at,updated_at").single();
+  // Role columns missing while the user chose a non-default role: fail closed (do not silently start as General).
+  if (schemaUnavailable(inserted.error) && wantsRole) return inserted;
   // A general thread does not need Rooms. Retry without room_id when that column is not in the database yet.
-  if (!schemaUnavailable(inserted.error) || roomId) return inserted;
+  if (!schemaUnavailable(inserted.error) || roomId) {
+    if (inserted.data) {
+      const row = inserted.data as ConversationRow;
+      return {
+        data: {
+          ...row,
+          chat_role: (row.chat_role as ChatRole | null | undefined) ?? role?.chatRole ?? defaultChatRole,
+          custom_instructions: row.custom_instructions ?? role?.customInstructions ?? null,
+        },
+        error: null,
+      };
+    }
+    return inserted;
+  }
   const legacy = await supabase.from("conversations").insert({
     user_id: userId,
     title: "New chat",
     selected_model: model,
   }).select("id,title,selected_model,created_at,updated_at").single();
   if (legacy.error || !legacy.data) return legacy;
-  return { data: { ...(legacy.data as unknown as Omit<ConversationRow, "room_id">), room_id: null }, error: null };
+  return {
+    data: {
+      ...(legacy.data as unknown as Omit<ConversationRow, "room_id" | "chat_role" | "custom_instructions">),
+      room_id: null,
+      chat_role: defaultChatRole,
+      custom_instructions: null,
+    },
+    error: null,
+  };
 }
 
 // Applies explicit Stops: each reply keeps exactly the text its user saw and becomes interrupted.
@@ -143,24 +177,44 @@ export async function createConversationAction(model: unknown): Promise<ChatActi
   }
 }
 
-// The first message of a new chat: creates the conversation and saves the message in one round trip from the browser.
-// If the message cannot be saved, the empty conversation is removed again so history is not left with a blank "New chat".
-export async function startConversationAction(model: unknown, messageId: unknown, content: unknown, roomId: unknown = null, attachmentIds: unknown = undefined): Promise<ChatActionResult<{ conversation: ConversationRow; message: SavedMessage }>> {
+// The first message of a new chat: creates the conversation (including optional chat role) and saves the message
+// in one round trip from the browser. If the message cannot be saved, the empty conversation is removed again.
+export async function startConversationAction(
+  model: unknown,
+  messageId: unknown,
+  content: unknown,
+  roomId: unknown = null,
+  attachmentIds: unknown = undefined,
+  rolePatch: unknown = undefined,
+): Promise<ChatActionResult<{ conversation: ConversationRow; message: SavedMessage }>> {
   const parsedAttachments = parseAttachmentIds(attachmentIds);
   if (!parsedAttachments.ok) return { error: attachmentErrors.tooMany };
   const parsedModel = modelInputSchema.safeParse(model);
   const parsedMessageId = validateConversationId(messageId);
   const parsedContent = validateMessage(content);
   const parsedRoom = roomId === null || roomId === undefined ? { success: true as const, data: null } : validateConversationId(roomId);
+  const parsedRole = rolePatch === undefined || rolePatch === null
+    ? { data: { chatRole: defaultChatRole, customInstructions: null as string | null } }
+    : parseChatRolePatch(rolePatch);
   if (!parsedModel.success) return { error: "Choose a valid response mode." };
   if (!parsedMessageId.success) return { error: "Choose a valid message." };
   if (!parsedContent.success) return { error: "Messages must be between 1 and 20,000 characters." };
   if (!parsedRoom.success) return { error: "Choose a valid room." };
+  if ("error" in parsedRole) return { error: parsedRole.error };
   if (!isModeAvailable(parsedModel.data)) return modelUnavailable;
   try {
     const { supabase, user } = await authenticatedClient();
-    const { data: conversation, error } = await insertConversation(supabase, user.id, parsedModel.data, parsedRoom.data);
+    const { data: conversation, error } = await insertConversation(
+      supabase,
+      user.id,
+      parsedModel.data,
+      parsedRoom.data,
+      parsedRole.data,
+    );
     if (error?.code === "23503") return { error: "That room is no longer available." };
+    if (schemaUnavailable(error) && (parsedRole.data.chatRole !== defaultChatRole || parsedRole.data.customInstructions !== null)) {
+      return { error: "Chat roles aren't available yet on this workspace." };
+    }
     if (error || !conversation) return failure();
     const saved = await appendMessage(supabase, conversation.id, parsedMessageId.data, parsedContent.data, [], parsedAttachments.ids);
     if ("error" in saved) {

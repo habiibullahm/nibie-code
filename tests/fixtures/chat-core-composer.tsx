@@ -45,6 +45,6 @@ export function ChatCoreComposerFixture() {
       diagnostics={{ sources: [], recentMessageCount: 0 }} onEditProfile={() => {}} caption="Composer test fixture"
       onSubmit={send} onStop={() => { setStops((count) => count + 1); current.current?.abort(); }} onAttach={() => {}}
       roomItems={[{ value: "", label: "General" }]} roomId="" roomLabel="General" roomSelectionNotice={null} roomsLoading={false} onRoomChange={() => {}}
-      chatRole="general" customInstructions={null} onChatRoleChange={() => {}} onCustomInstructionsSave={() => {}} />
+      chatRole="general" customInstructions={null} onChatRoleChange={() => {}} onCustomInstructionsSave={() => {}} onChatRoleReset={() => {}} />
   </main>;
 }

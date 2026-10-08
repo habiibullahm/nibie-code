@@ -619,8 +619,6 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
       const attachmentKey = attachmentIds.join(",");
       const messageId = submission.current && submission.current.content === content && submission.current.conversationId === id && submission.current.attachmentIds === attachmentKey ? submission.current.id : crypto.randomUUID();
       submission.current = { id: messageId, content, conversationId: id, attachmentIds: attachmentKey };
-      // Attachment ids are sent only with attachments, so a plain message keeps its existing action arguments.
-      const withAttachments = attachmentIds.length ? [attachmentIds] as const : [] as const;
       const placeholderId = `pending-${messageId}`;
       const basePosition = lastMessage?.position ?? 0;
       const withoutPending = (rows: PersistedMessage[] = []) => rows.filter((row) => row.id !== messageId && row.id !== placeholderId);
@@ -632,26 +630,22 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
       const rollback = (message: string, from: string) => { setLocalMessages((items) => ({ ...items, [from]: withoutPending(items[from]) })); composerRef.current?.restore(content, attachments); setNotice(message); };
       let saved: { id: string; position: number };
       if (!id) {
-        // The first message of a new chat creates the conversation and saves the message in a single round trip.
-        const started = await startConversationAction(mode, messageId, content, drafting ? selectedRoomId : null, ...withAttachments);
+        // First message creates the conversation with the draft role/instructions atomically (no silent General fallback).
+        const rolePatch = draftChatRole !== defaultChatRole || draftCustomInstructions
+          ? { chatRole: draftChatRole, customInstructions: draftCustomInstructions }
+          : undefined;
+        const started = await startConversationAction(
+          mode,
+          messageId,
+          content,
+          drafting ? selectedRoomId : null,
+          attachmentIds.length ? attachmentIds : undefined,
+          rolePatch,
+        );
         if (started.error || !started.data) { rollback(started.error ?? "Conversation couldn't be created.", key); return; }
-        let { conversation } = started.data;
+        const { conversation } = started.data;
         saved = started.data.message;
         id = conversation.id;
-        // Persist draft role/instructions chosen before the first message (DB defaults to general).
-        if (!preview && (draftChatRole !== defaultChatRole || draftCustomInstructions)) {
-          const roleResult = await updateConversationRoleAction(conversation.id, {
-            chatRole: draftChatRole,
-            customInstructions: draftCustomInstructions,
-          });
-          if (roleResult.data) {
-            conversation = {
-              ...conversation,
-              chat_role: roleResult.data.chat_role,
-              custom_instructions: roleResult.data.custom_instructions,
-            };
-          }
-        }
         setDraftChatRole(defaultChatRole);
         setDraftCustomInstructions(null);
         setLocalConversations((items) => [conversation, ...items]);
@@ -662,6 +656,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
         router.push(conversationPath(conversation.id));
       } else {
         const stopped = [...(stoppedReplies.current.get(id)?.values() ?? [])];
+        const withAttachments = attachmentIds.length ? [attachmentIds] as const : [] as const;
         const result = await addUserMessageAction(id, content, messageId, stopped, ...withAttachments);
         if (result.error || !result.data) { rollback(result.error ?? "Message couldn't be saved.", id); return; }
         saved = result.data;
@@ -965,6 +960,10 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
       : draftChatRole;
     void persistChatRole(role, instructions);
   });
+  const resetChatRole = useStableCallback(() => {
+    if (busy.current || recovery || movePending.current) return;
+    void persistChatRole(defaultChatRole, null);
+  });
   const stopStream = useStableCallback(() => stopGeneration.current?.());
   const cancelEdit = useStableCallback(() => setEditingId(null));
   const startEdit = useStableCallback((id: string) => setEditingId(id));
@@ -1016,7 +1015,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const headerRoomName = (showRoom ? activeRoom?.name : threadRoom?.name) ?? null;
   const roomThreads = activeRoom ? shownConversations.filter((item) => item.room_id === activeRoom.id) : [];
   const sidebarProps = { conversations: shownConversations, archivedConversations, rooms, activeId: history, activeRoomId: showRoom ? selectedRoomId : threadRoom?.id ?? null, busy: controlsDisabled || recovering, activity: assistantActivity, preview, email, name: accountName, releasePreview, renderedAt, settingsActive: settingsOpen, onClose: closeDrawer, onOpen: openConversation, onOpenRoom: openRoom, onNewThreadInRoom: newThreadInRoom, onDeleteRoom: deleteRoomFromSidebar, onCreateRoom: openRoomSetup, onNewChat: newChat, onOpenSettings: openSettings, onRename: rename, onArchive: archive, onRestore: restore, onMove: moveThread };
-  const composerProps = { ref: composerRef, dockRef: composerDockRef, sending: sending || recovering || movingThread !== null, streaming, mode, models, onModelChange: changeModel, researchMode, onResearchModeChange: setResearchMode, savingMode, caption, diagnostics: contextDiagnostics ?? contextPreview, onEditProfile: editProfile, onSubmit: submitMessage, onStop: stopStream, onAttach: attach, attachmentsEnabled: !preview, onRoomFiles: threadRoom && !preview ? toggleRoomFiles : undefined, roomItems, roomId: threadRoomId ?? "", roomLabel, roomSelectionNotice, roomsLoading, onRoomChange: activeId ? rooms.length ? changeComposerRoom : undefined : chooseDraftRoom, attachmentPanel: filePickerOpen && threadRoom ? <RoomFilePicker roomId={threadRoom.id} selectedIds={selectedFileIds} disabled={controlsDisabled || sending || streaming} onChange={setSelectedFileIds} /> : null, chatRole: activeChatRole, customInstructions: activeCustomInstructions, savingRole, onChatRoleChange: changeChatRole, onCustomInstructionsSave: saveCustomInstructions };
+  const composerProps = { ref: composerRef, dockRef: composerDockRef, sending: sending || recovering || movingThread !== null, streaming, mode, models, onModelChange: changeModel, researchMode, onResearchModeChange: setResearchMode, savingMode, caption, diagnostics: contextDiagnostics ?? contextPreview, onEditProfile: editProfile, onSubmit: submitMessage, onStop: stopStream, onAttach: attach, attachmentsEnabled: !preview, onRoomFiles: threadRoom && !preview ? toggleRoomFiles : undefined, roomItems, roomId: threadRoomId ?? "", roomLabel, roomSelectionNotice, roomsLoading, onRoomChange: activeId ? rooms.length ? changeComposerRoom : undefined : chooseDraftRoom, attachmentPanel: filePickerOpen && threadRoom ? <RoomFilePicker roomId={threadRoom.id} selectedIds={selectedFileIds} disabled={controlsDisabled || sending || streaming} onChange={setSelectedFileIds} /> : null, chatRole: activeChatRole, customInstructions: activeCustomInstructions, savingRole, onChatRoleChange: changeChatRole, onCustomInstructionsSave: saveCustomInstructions, onChatRoleReset: resetChatRole };
 
   return <main className="chat-workspace">
     <ChatSidebar {...sidebarProps} collapsed={desktopSidebarCollapsed} desktopToggleRef={desktopCollapseButtonRef} desktopExpandRef={desktopExpandButtonRef} onCollapse={collapseDesktopSidebar} onExpand={expandDesktopSidebar} />

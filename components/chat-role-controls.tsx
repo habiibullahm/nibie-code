@@ -19,6 +19,8 @@ type Props = {
   saving?: boolean;
   onRoleChange: (role: ChatRole) => void;
   onInstructionsSave: (instructions: string | null) => void;
+  /** Persist general + cleared instructions in one operation (avoids busy-flag races). */
+  onReset: () => void;
 };
 
 const roleItems: MenuItem<ChatRole>[] = CHAT_ROLES.map((value) => ({
@@ -35,6 +37,7 @@ export function ChatRoleControls({
   saving = false,
   onRoleChange,
   onInstructionsSave,
+  onReset,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(instructions ?? "");
@@ -68,8 +71,7 @@ export function ChatRoleControls({
 
   function reset() {
     setDraft("");
-    onInstructionsSave(null);
-    if (role !== "general") onRoleChange("general");
+    onReset();
     close();
   }
 
