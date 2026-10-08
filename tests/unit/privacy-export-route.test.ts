@@ -22,6 +22,12 @@ const message = {
   created_at: "2026-03-01T00:00:01.000Z",
   reply_to_message_id: null,
 };
+const attachment = {
+  id: "66666666-6666-4666-8666-666666666666",
+  message_id: message.id,
+  original_name: "notes.txt",
+  extracted_text: "attachment body",
+};
 
 function signedIn(userId: string | null, rows: Record<string, unknown[]>) {
   const filters: Array<[string, string]> = [];
@@ -56,39 +62,58 @@ describe("GET /api/account/export", () => {
   });
 
   it("rejects a caller-supplied user id and does not query", async () => {
-    const { from } = signedIn("owner-a", { conversations: [conversation], messages: [message] });
+    const { from } = signedIn("owner-a", {
+      conversations: [conversation],
+      messages: [message],
+      message_attachments: [attachment],
+    });
     const response = await GET(request("/api/account/export?user_id=owner-b"));
     expect(response.status).toBe(400);
     expect(from).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({ error: "Export is limited to your account." });
   });
 
-  it("exports only the verified owner's rows", async () => {
-    const { filters, tables } = signedIn("owner-a", { conversations: [conversation], messages: [message] });
+  it("exports only the verified owner's rows including attachment names and text", async () => {
+    const { filters, tables } = signedIn("owner-a", {
+      conversations: [conversation],
+      messages: [message],
+      message_attachments: [attachment],
+    });
     const response = await GET(request("/api/account/export?userId=owner-b"));
     expect(response.status).toBe(400);
     expect(tables).toEqual([]);
 
     const ok = await GET(request());
     expect(ok.status).toBe(200);
-    expect(ok.headers.get("content-disposition")).toContain("nibie-export-v1.json");
+    expect(ok.headers.get("content-disposition")).toContain("nibie-export-v2.json");
     expect(ok.headers.get("cache-control")).toBe("no-store");
     const body = await ok.json();
     expect(body).toMatchObject({
       product: "Nibie",
-      exportVersion: 1,
-      conversations: [{ id: conversation.id, selectedModel: "Fast", messages: [{ content: "only mine" }] }],
+      exportVersion: 2,
+      conversations: [{
+        id: conversation.id,
+        selectedModel: "Fast",
+        messages: [{
+          content: "only mine",
+          attachments: [{ originalName: "notes.txt", extractedText: "attachment body" }],
+        }],
+      }],
     });
     expect(JSON.stringify(body)).not.toContain("owner-b");
-    expect(filters).toEqual([["user_id", "owner-a"], ["user_id", "owner-a"]]);
-    expect(tables).toEqual(["conversations", "messages"]);
+    expect(filters).toEqual([
+      ["user_id", "owner-a"],
+      ["user_id", "owner-a"],
+      ["user_id", "owner-a"],
+    ]);
+    expect(tables).toEqual(["conversations", "messages", "message_attachments"]);
   });
 
-  it("exports an empty account as version 1 with no conversations", async () => {
-    signedIn("owner-a", { conversations: [], messages: [] });
+  it("exports an empty account as version 2 with no conversations", async () => {
+    signedIn("owner-a", { conversations: [], messages: [], message_attachments: [] });
     const response = await GET(request());
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({ product: "Nibie", exportVersion: 1, conversations: [] });
+    await expect(response.json()).resolves.toMatchObject({ product: "Nibie", exportVersion: 2, conversations: [] });
   });
 
   it("fails closed when a read errors and does not return a partial file", async () => {

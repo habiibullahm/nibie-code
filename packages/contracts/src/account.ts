@@ -7,6 +7,11 @@ import {
   isDeleteAllConfirmed,
 } from "./account-export.js";
 
+const exportedAttachmentSchema = z.object({
+  originalName: z.string().min(1),
+  extractedText: z.string().min(1),
+}).strict();
+
 const exportedMessageSchema = z.object({
   id: z.string().min(1),
   role: z.enum(["user", "assistant"]),
@@ -15,6 +20,7 @@ const exportedMessageSchema = z.object({
   position: z.number().int(),
   createdAt: z.string().min(1),
   replyToMessageId: z.string().nullable(),
+  attachments: z.array(exportedAttachmentSchema),
 }).strict();
 
 const exportedConversationSchema = z.object({

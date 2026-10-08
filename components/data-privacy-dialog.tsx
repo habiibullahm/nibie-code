@@ -38,7 +38,7 @@ export function DataPrivacyPanel({ preview, busy, onDeleted }: Props) {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = "nibie-export-v1.json";
+      link.download = "nibie-export-v2.json";
       link.click();
       URL.revokeObjectURL(url);
     } catch {

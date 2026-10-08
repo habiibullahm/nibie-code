@@ -1,6 +1,7 @@
 export const EXPORT_PRODUCT = "Nibie" as const;
-export const EXPORT_VERSION = 1 as const;
+export const EXPORT_VERSION = 2 as const;
 export const EXPORT_PAGE_SIZE = 1000;
+export const EXPORT_FILENAME = "nibie-export-v2.json" as const;
 
 // Exact phrase, after trimming surrounding whitespace. Other casings do not confirm.
 export const DELETE_ALL_CONFIRMATION = "DELETE";

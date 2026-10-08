@@ -130,7 +130,7 @@ Signed in:
 - Open Settings → General; verify the server-supplied remaining allowance/reset, then verify exhausted-state copy. No usage preflight occurs before Send
 - Context panel names profile, room, pinned context, file context, summary, and recent messages without quoting About you, the brief, pin text, or file text
 - Create a Room, put a thread in it, delete the Room, and open that thread from the general list
-- Export downloads `nibie-export-v1.json` and does not accept `user_id`
+- Export downloads `nibie-export-v2.json` (includes owner attachment names + extracted text) and does not accept `user_id`
 - Delete-all refuses a missing or wrong confirmation
 
 ## Known limitations
