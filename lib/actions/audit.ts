@@ -74,7 +74,7 @@ export type ActionRunRow = {
 
 /**
  * Insert a new action_runs row via server-controlled RPC (non-terminal statuses only).
- * Soft-fails for callers that still need a truthful in-memory outcome when persistence is down.
+ * Returns null on persistence failure; `executeAction` fails closed before running the Action when supabase is provided.
  */
 export async function insertActionRun(input: InsertActionRunInput): Promise<ActionRunRow | null> {
   const status = input.status ?? "running";

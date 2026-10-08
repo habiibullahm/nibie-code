@@ -3,7 +3,12 @@ name: Preview App DB Migration
 # INTERIM: Preview and Production Vercel targets share one Supabase/Postgres today.
 # Prefer an isolated Preview database. Until that exists, this job may apply only
 # strictly additive Drizzle migrations (gated below) under the `production`
-# environment — enable required reviewers on that environment.
+# environment — enable required reviewers on that environment as a second gate.
+#
+# Shared DB writes are NOT automatic on every PR synchronize. They require either:
+#   - PR label `allow-shared-db-migrate` (explicit approval after reviewing SQL), or
+#   - `workflow_dispatch` (manual run).
+# Without that, the job refuses to migrate (and fails when drizzle SQL changed).
 #
 # Not the PR Guard "Integration DB + RLS" job (local Docker only).
 # Not Supabase GitHub "Preview" branching (skipped here; migrations live in drizzle/).
@@ -22,7 +27,7 @@ on:
       - 'drizzle.config.ts'
       - 'scripts/check-preview-migrations-additive.mjs'
       - '.github/workflows/preview-app-db-migration.yml'
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
   workflow_dispatch:
 
 permissions:
@@ -60,7 +65,44 @@ jobs:
           git fetch --no-tags origin main 2>/dev/null || true
           node scripts/check-preview-migrations-additive.mjs
 
+      - name: Decide whether to write to shared app DB
+        id: decide
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          LABEL_CSV: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main 2>/dev/null || true
+          CHANGED="$(git diff --name-only origin/main...HEAD -- 'drizzle/*.sql' || true)"
+          if [[ -z "${CHANGED//[$' \t\r\n']/}" ]]; then
+            echo "apply=false" >> "$GITHUB_OUTPUT"
+            echo "reason=no_drizzle_sql_changes" >> "$GITHUB_OUTPUT"
+            echo "No new/changed drizzle SQL vs origin/main; skip shared DB write."
+            exit 0
+          fi
+          echo "Changed SQL vs origin/main:"
+          printf '%s\n' "$CHANGED"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "apply=true" >> "$GITHUB_OUTPUT"
+            echo "reason=workflow_dispatch" >> "$GITHUB_OUTPUT"
+            echo "Explicit workflow_dispatch — shared DB migrate allowed."
+            exit 0
+          fi
+          if [[ ",${LABEL_CSV}," == *",allow-shared-db-migrate,"* ]]; then
+            echo "apply=true" >> "$GITHUB_OUTPUT"
+            echo "reason=pr_label" >> "$GITHUB_OUTPUT"
+            echo "PR label allow-shared-db-migrate present — shared DB migrate allowed."
+            exit 0
+          fi
+          echo "apply=false" >> "$GITHUB_OUTPUT"
+          echo "reason=missing_label" >> "$GITHUB_OUTPUT"
+          echo "::error::Shared app DB migrate refused without explicit approval."
+          echo "::error::Review the drizzle SQL, then add label allow-shared-db-migrate (re-runs this workflow) or run workflow_dispatch."
+          echo "::error::Do not rely on silent PR CI writes; Production environment required reviewers should also stay enabled."
+          exit 1
+
       - name: Check migration connection
+        if: steps.decide.outputs.apply == 'true'
         env:
           POSTGRES_URL_NON_POOLING: ${{ secrets.POSTGRES_URL_NON_POOLING }}
         shell: bash
@@ -79,6 +121,7 @@ jobs:
           fi
 
       - name: Probe database connection
+        if: steps.decide.outputs.apply == 'true'
         env:
           DATABASE_URL: ${{ secrets.POSTGRES_URL_NON_POOLING }}
         run: |
@@ -100,11 +143,13 @@ jobs:
           '
 
       - name: Apply migrations
+        if: steps.decide.outputs.apply == 'true'
         env:
           DATABASE_URL: ${{ secrets.POSTGRES_URL_NON_POOLING }}
         run: npm run db:migrate
 
       - name: Verify action_runs and server write RPCs when journal includes them
+        if: steps.decide.outputs.apply == 'true'
         env:
           DATABASE_URL: ${{ secrets.POSTGRES_URL_NON_POOLING }}
         run: |
