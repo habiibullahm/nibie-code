@@ -93,8 +93,13 @@ test("growing composer stays below messages at desktop, tablet, and mobile sizes
     const fiveLineHeight = await textarea.evaluate((element) => element.getBoundingClientRect().height);
 
     await textarea.fill(Array.from({ length: 10 }, (_, index) => `Prompt line ${index + 1}`).join("\n"));
-    await expect.poll(() => textarea.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(fiveLineHeight);
+    // Larger composer type can reach max-height by five lines on short viewports; only require growth while still under the cap.
+    const maxTextareaHeight = await textarea.evaluate((element) => Number.parseFloat(getComputedStyle(element).maxHeight));
+    if (fiveLineHeight < maxTextareaHeight - 1) {
+      await expect.poll(() => textarea.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(fiveLineHeight);
+    }
     const tenLineHeight = await textarea.evaluate((element) => element.getBoundingClientRect().height);
+    expect(tenLineHeight).toBeLessThanOrEqual(maxTextareaHeight + 2);
 
     const longPrompt = Array.from({ length: 80 }, (_, index) => `const value${index + 1} = "line ${index + 1}: explain the decision and fallback behavior";`).join("\n");
     await textarea.fill("");
@@ -244,8 +249,8 @@ test("Room and model menus align to their controls", async ({ page }) => {
     const menuBox = await menu.boundingBox();
     expect(buttonBox).not.toBeNull();
     expect(menuBox).not.toBeNull();
-    if (menuName === "Select room") expect(Math.abs(menuBox!.x - buttonBox!.x)).toBeLessThan(1);
-    else expect(Math.abs(menuBox!.x + menuBox!.width - buttonBox!.x - buttonBox!.width)).toBeLessThan(1);
+    // Room and Model open left-aligned; Research is last and opens right-aligned via CSS.
+    expect(Math.abs(menuBox!.x - buttonBox!.x)).toBeLessThan(1);
     await page.keyboard.press("Escape");
     await expect(menu).toHaveCount(0);
   }
