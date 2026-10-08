@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc, modelOptions, contextCapabilities, withoutAttachments, attachmentState, stopState, messageSourceInserts } = vi.hoisted(() => {
+const { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc, spendOk, modelOptions, contextCapabilities, withoutAttachments, attachmentState, stopState, messageSourceInserts } = vi.hoisted(() => {
   const createClient = vi.fn(); const stream = vi.fn(); const claim = vi.fn(); const usageReserve = vi.fn(); const usageStart = vi.fn(); const usageRelease = vi.fn();
   const insertActionRun = () => query({ data: { id: "a1111111-1111-4111-8111-111111111111", status: "running", started_at: new Date().toISOString() }, error: null });
   const completeActionRun = () => query({ data: true, error: null });
-  const rpc = vi.fn((name: string, args: unknown) => name === "search_room_file_chunks" ? Promise.resolve({ data: [], error: null }) : name === "insert_action_run" ? insertActionRun() : name === "complete_action_run" ? completeActionRun() : name === "reserve_weekly_ai_usage" ? usageReserve(args) : name === "start_weekly_ai_usage" ? usageStart(args) : name === "release_weekly_ai_usage" ? usageRelease(args) : claim(name, args));
+  const spendOk = () => query({ data: { accepted: true, reserved_micros: 150000, user_remaining_micros: 4_850_000, global_remaining_micros: 49_850_000 }, error: null });
+  const rpc = vi.fn((name: string, args: unknown) => name === "search_room_file_chunks" ? Promise.resolve({ data: [], error: null }) : name === "insert_action_run" ? insertActionRun() : name === "complete_action_run" ? completeActionRun() : name === "reserve_weekly_ai_usage" ? usageReserve(args) : name === "start_weekly_ai_usage" ? usageStart(args) : name === "release_weekly_ai_usage" ? usageRelease(args) : name === "reserve_ai_spend" ? spendOk() : name === "finalize_ai_spend" ? query({ data: true, error: null }) : name === "release_ai_spend" ? query({ data: true, error: null }) : claim(name, args));
   const attachmentState: { result: { data: unknown; error: unknown }; reads: unknown[][] } = { result: { data: [], error: null }, reads: [] };
   const stopState = { status: "streaming" as string | null, reads: 0 };
   const messageSourceInserts: unknown[] = [];
@@ -69,7 +70,7 @@ const { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc
                   : from(table),
     };
   };
-  return { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc, modelOptions: vi.fn(), contextCapabilities: vi.fn(() => ({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 })), withoutAttachments, attachmentState, stopState, messageSourceInserts };
+  return { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc, spendOk, modelOptions: vi.fn(), contextCapabilities: vi.fn(() => ({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 })), withoutAttachments, attachmentState, stopState, messageSourceInserts };
 });
 const researchMocks = vi.hoisted(() => ({
   runDeepResearch: vi.fn(),
@@ -103,7 +104,7 @@ const webMocks = vi.hoisted(() => {
   };
 });
 vi.mock("@/lib/supabase/server", () => ({ createSupabaseServerClient: async () => withoutAttachments(await createClient()) }));
-vi.mock("@/lib/ai/provider", () => ({ chatProvider: { stream } }));
+vi.mock("@/lib/ai/provider", () => ({ chatProvider: { stream }, configuredModelLabel: (mode: string) => mode }));
 vi.mock("@/lib/ai/registry", () => ({ getModelOptions: modelOptions, contextCapabilitiesFor: contextCapabilities, providerFor: (mode: string) => mode === "Fast" ? "sumopod" : "openai" }));
 // The thread summary read and its after-response maintenance are their own module (tested in thread-summary-store.test.ts).
 // Mocked here so the ordered table results above stay about the reply itself.
@@ -139,8 +140,9 @@ describe("POST /api/chat", () => {
     createClient.mockReset(); stream.mockReset(); modelOptions.mockReset().mockReturnValue(allModes);
     contextCapabilities.mockReset().mockReturnValue({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 });
     claim.mockReset().mockReturnValue(query({ data: assistant, error: null }));
-    usageReserve.mockReset().mockImplementation(({ p_logical_mode }: { p_logical_mode: "Fast" | "Balanced" | "High" }) => {
-      const credits_charged = { Fast: 1, Balanced: 3, High: 6 }[p_logical_mode];
+    usageReserve.mockReset().mockImplementation(({ p_logical_mode, p_usage_kind }: { p_logical_mode: "Fast" | "Balanced" | "High"; p_usage_kind?: "chat" | "research" }) => {
+      const base = { Fast: 1, Balanced: 3, High: 6 }[p_logical_mode];
+      const credits_charged = p_usage_kind === "research" ? base + 6 : base;
       return query({ data: { accepted: true, credits_charged, credits_used: credits_charged, credits_remaining: 500 - credits_charged, reset_at: "2026-10-05T00:00:00.000Z" }, error: null });
     });
     usageRelease.mockReset().mockImplementation(() => query({ data: true, error: null }));
@@ -269,7 +271,7 @@ describe("POST /api/chat", () => {
     stream.mockResolvedValue(sseBody("charged"));
     expect((await POST(validRequest())).status).toBe(200);
     expect(usageReserve).toHaveBeenCalledOnce();
-    expect(usageReserve).toHaveBeenCalledWith({ p_generation_id: assistantId, p_logical_mode: "Balanced" });
+    expect(usageReserve).toHaveBeenCalledWith({ p_generation_id: assistantId, p_logical_mode: "Balanced", p_usage_kind: "chat" });
     expect(usageStart).toHaveBeenCalledWith({ p_generation_id: assistantId });
     expect(stream).toHaveBeenCalledOnce();
     expect(usageRelease).not.toHaveBeenCalled();
@@ -294,7 +296,7 @@ describe("POST /api/chat", () => {
     const response = await POST(new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify({ ...await request.json(), model }) }));
     expect(response.status).toBe(200);
     expect(cost).toBe(({ Fast: 1, Balanced: 3, High: 6 } as const)[model]);
-    expect(usageReserve).toHaveBeenCalledWith({ p_generation_id: assistantId, p_logical_mode: model });
+    expect(usageReserve).toHaveBeenCalledWith({ p_generation_id: assistantId, p_logical_mode: model, p_usage_kind: "chat" });
     expect(stream).toHaveBeenCalledOnce();
   });
 
@@ -574,7 +576,7 @@ describe("POST /api/chat", () => {
     expect((await POST(regenerating)).status).toBe(200);
     expect(claim).toHaveBeenCalledWith("regenerate_assistant_message", { p_conversation_id: "conversation", p_user_message_id: "b79e56e1-b479-46f4-97d3-30b2e22be90e" });
     expect(usageReserve).toHaveBeenCalledOnce();
-    expect(usageReserve).toHaveBeenCalledWith({ p_generation_id: assistantId, p_logical_mode: "Balanced" });
+    expect(usageReserve).toHaveBeenCalledWith({ p_generation_id: assistantId, p_logical_mode: "Balanced", p_usage_kind: "chat" });
     expect(stream).toHaveBeenCalledOnce();
     claim.mockClear();
     const invalid = new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify({ conversationId: "5e9bdcca-9205-4fea-a773-13952bb78c44", userMessageId: "b79e56e1-b479-46f4-97d3-30b2e22be90e", regenerate: "yes" }) });
@@ -980,7 +982,7 @@ describe("POST /api/chat", () => {
     const question = "What does our deployment pipeline do?";
 
     afterEach(() => {
-      rpc.mockImplementation((name: string, args: unknown) => name === "search_room_file_chunks" ? Promise.resolve({ data: [], error: null }) : name === "insert_action_run" ? query({ data: { id: "a1111111-1111-4111-8111-111111111111", status: "running", started_at: new Date().toISOString() }, error: null }) : name === "complete_action_run" ? query({ data: true, error: null }) : name === "reserve_weekly_ai_usage" ? usageReserve(args) : name === "start_weekly_ai_usage" ? usageStart(args) : name === "release_weekly_ai_usage" ? usageRelease(args) : claim(name, args));
+      rpc.mockImplementation((name: string, args: unknown) => name === "search_room_file_chunks" ? Promise.resolve({ data: [], error: null }) : name === "insert_action_run" ? query({ data: { id: "a1111111-1111-4111-8111-111111111111", status: "running", started_at: new Date().toISOString() }, error: null }) : name === "complete_action_run" ? query({ data: true, error: null }) : name === "reserve_weekly_ai_usage" ? usageReserve(args) : name === "start_weekly_ai_usage" ? usageStart(args) : name === "release_weekly_ai_usage" ? usageRelease(args) : name === "reserve_ai_spend" ? spendOk() : name === "finalize_ai_spend" ? query({ data: true, error: null }) : name === "release_ai_spend" ? query({ data: true, error: null }) : claim(name, args));
     });
 
     function roomClient(userContent: string, writes: unknown[] = []) {
@@ -1015,6 +1017,9 @@ describe("POST /api/chat", () => {
         if (name === "reserve_weekly_ai_usage") return usageReserve(args);
         if (name === "start_weekly_ai_usage") return usageStart(args);
         if (name === "release_weekly_ai_usage") return usageRelease(args);
+        if (name === "reserve_ai_spend") return spendOk();
+        if (name === "finalize_ai_spend") return query({ data: true, error: null });
+        if (name === "release_ai_spend") return query({ data: true, error: null });
         return claim(name, args);
       });
       stream.mockResolvedValue(providerChunks(["Pipeline ships the backend."], "stop"));
@@ -1047,6 +1052,9 @@ describe("POST /api/chat", () => {
         if (name === "reserve_weekly_ai_usage") return usageReserve(args);
         if (name === "start_weekly_ai_usage") return usageStart(args);
         if (name === "release_weekly_ai_usage") return usageRelease(args);
+        if (name === "reserve_ai_spend") return spendOk();
+        if (name === "finalize_ai_spend") return query({ data: true, error: null });
+        if (name === "release_ai_spend") return query({ data: true, error: null });
         return claim(name, args);
       });
       stream.mockResolvedValue(providerChunks(["Ok."], "stop"));
@@ -1069,6 +1077,9 @@ describe("POST /api/chat", () => {
           if (name === "reserve_weekly_ai_usage") return usageReserve(args);
           if (name === "start_weekly_ai_usage") return usageStart(args);
           if (name === "release_weekly_ai_usage") return usageRelease(args);
+          if (name === "reserve_ai_spend") return spendOk();
+          if (name === "finalize_ai_spend") return query({ data: true, error: null });
+          if (name === "release_ai_spend") return query({ data: true, error: null });
           return claim(name, args);
         });
         stream.mockResolvedValue(providerChunks(["Done."], "stop"));
@@ -1496,7 +1507,7 @@ describe("POST /api/chat", () => {
         web: [researchWeb],
         contradictions: [],
         incompleteNotice: null,
-        usagePolicy: { id: "temporary_undercount_v1", summary: "test" },
+        usagePolicy: { id: "research_metered_v1", summary: "test" },
         metrics: {
           modelCallCount: 1,
           searchQueryCount: 2,
@@ -1541,7 +1552,7 @@ describe("POST /api/chat", () => {
         web: [],
         contradictions: [],
         incompleteNotice: "Deep Research could not collect usable sources. Please try again later or switch to Normal.",
-        usagePolicy: { id: "temporary_undercount_v1", summary: "test" },
+        usagePolicy: { id: "research_metered_v1", summary: "test" },
         metrics: {
           modelCallCount: 1,
           searchQueryCount: 1,
@@ -1604,7 +1615,7 @@ describe("POST /api/chat", () => {
         web: [researchWeb],
         contradictions: [],
         incompleteNotice: "Deep Research ran out of time before synthesis.",
-        usagePolicy: { id: "temporary_undercount_v1", summary: "test" },
+        usagePolicy: { id: "research_metered_v1", summary: "test" },
         metrics: {
           modelCallCount: 1,
           searchQueryCount: 2,

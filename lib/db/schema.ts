@@ -1,4 +1,5 @@
 import {
+  bigint,
   boolean,
   check,
   customType,
@@ -270,6 +271,7 @@ export const weeklyUsageReservations = pgTable(
     weekStart: date("week_start", { mode: "date" }).notNull(),
     logicalMode: weeklyUsageMode("logical_mode").notNull(),
     creditsCharged: integer("credits_charged").notNull(),
+    usageKind: text("usage_kind").notNull().default("chat"),
     releasedAt: timestamp("released_at", { withTimezone: true, mode: "date" }),
     startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
@@ -277,6 +279,57 @@ export const weeklyUsageReservations = pgTable(
   (table) => [
     index("weekly_usage_reservations_user_week_idx").on(table.userId, table.weekStart),
     check("weekly_usage_reservations_credits_positive", sql`${table.creditsCharged} > 0`),
+    check("weekly_usage_reservations_usage_kind_check", sql`${table.usageKind} IN ('chat', 'research')`),
+  ],
+);
+
+// Dollar spend ceilings (USD micros) — distinct from weekly product credits.
+export const aiSpendUserDaily = pgTable(
+  "ai_spend_user_daily",
+  {
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    dayUtc: date("day_utc", { mode: "date" }).notNull(),
+    microsUsed: bigint("micros_used", { mode: "number" }).notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Composite PK via unique — drizzle maps SQL PK (user_id, day_utc).
+    unique("ai_spend_user_daily_pk").on(table.userId, table.dayUtc),
+    check("ai_spend_user_daily_micros_nonnegative", sql`${table.microsUsed} >= 0`),
+  ],
+);
+
+export const aiSpendGlobalHourly = pgTable(
+  "ai_spend_global_hourly",
+  {
+    hourUtc: timestamp("hour_utc", { withTimezone: true, mode: "date" }).primaryKey(),
+    microsUsed: bigint("micros_used", { mode: "number" }).notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("ai_spend_global_hourly_micros_nonnegative", sql`${table.microsUsed} >= 0`),
+  ],
+);
+
+export const aiSpendReservations = pgTable(
+  "ai_spend_reservations",
+  {
+    generationId: uuid("generation_id").primaryKey().references(() => messages.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    dayUtc: date("day_utc", { mode: "date" }).notNull(),
+    hourUtc: timestamp("hour_utc", { withTimezone: true, mode: "date" }).notNull(),
+    reservedMicros: bigint("reserved_micros", { mode: "number" }).notNull(),
+    actualMicros: bigint("actual_micros", { mode: "number" }),
+    releasedAt: timestamp("released_at", { withTimezone: true, mode: "date" }),
+    finalizedAt: timestamp("finalized_at", { withTimezone: true, mode: "date" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("ai_spend_reservations_user_day_idx").on(table.userId, table.dayUtc),
+    check("ai_spend_reservations_reserved_positive", sql`${table.reservedMicros} > 0`),
+    check("ai_spend_reservations_actual_nonnegative", sql`${table.actualMicros} IS NULL OR ${table.actualMicros} >= 0`),
   ],
 );
 
@@ -448,7 +501,7 @@ export const messageResearch = pgTable(
     modelCallCount: integer("model_call_count").notNull().default(0),
     durationMs: integer("duration_ms").notNull().default(0),
     timeSensitive: boolean("time_sensitive").notNull().default(false),
-    usagePolicy: text("usage_policy").notNull().default("temporary_undercount_v1"),
+    usagePolicy: text("usage_policy").notNull().default("research_metered_v1"),
     incompleteReason: text("incomplete_reason"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
   },

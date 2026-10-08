@@ -1,18 +1,17 @@
 import type { ResearchUsagePolicy } from "@/lib/research/types";
+import { RESEARCH_CREDIT_OVERHEAD, researchCreditCost } from "@/lib/usage/policy";
 
 /**
- * Temporary Deep Research metering policy (V1).
+ * Deep Research metering policy (Cost Guard).
  *
- * Credits still reserve once via the selected Fast/Balanced/High mode for the
- * final synthesis stream. Planner + optional follow-up model calls and multi-query
- * search/fetch are NOT separately charged yet — that undercounts true cost.
- * Observability reports modelCallCount, searchQueryCount, pagesFetched, durationMs.
- * Do not pretend credits fully meter Deep Research until a dedicated weight lands.
+ * Credits reserve `researchCreditCost[mode]` = synthesis mode cost + fixed multi-call
+ * overhead (planner + follow-up + search/fetch budget). Distinct from chat mode credits
+ * so multi-call research cannot undercount as one mode credit.
  */
 export const RESEARCH_USAGE_POLICY: ResearchUsagePolicy = {
-  id: "temporary_undercount_v1",
+  id: "research_metered_v1",
   summary:
-    "Deep Research V1 charges the selected mode once for synthesis only; planner/follow-up model calls and multi-query search/fetch are undercounted until a dedicated credit weight ships.",
+    `Deep Research reserves synthesis mode credits plus a ${RESEARCH_CREDIT_OVERHEAD}-credit multi-call overhead (planner, follow-up, search/fetch). Fast/Balanced/High research costs are ${researchCreditCost.Fast}/${researchCreditCost.Balanced}/${researchCreditCost.High}.`,
 };
 
 export function researchUsagePolicyFields() {

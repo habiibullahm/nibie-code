@@ -2,10 +2,10 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getAuthenticatedUser } from "@/lib/auth/get-user";
 import { schemaUnavailable } from "@/lib/chat/schema-error";
-import { validateConversationId, validateMessage } from "@/lib/chat/validation";
+import { validateConversationId, validateMessage, type ChatModel } from "@/lib/chat/validation";
 import { resolveMode } from "@/lib/chat/models";
 import { modelChoiceInputSchema, normalizeSavedMode } from "@/lib/chat/legacy-mode";
-import { chatProvider } from "@/lib/ai/provider";
+import { chatProvider, configuredModelLabel } from "@/lib/ai/provider";
 import { toProviderMessages } from "@/lib/ai/provider-messages";
 import { contextCapabilitiesFor, getModelOptions, providerFor } from "@/lib/ai/registry";
 import { createReasoningStreamFilter, sanitizeModelOutput } from "@/lib/ai/sanitize-model-output";
@@ -34,7 +34,10 @@ import type { MemoryRecord, RecallOperationStatus } from "@/lib/recall/types";
 import { operationalCodes } from "@/lib/observability/codes";
 import { logError, logInfo, logWarn } from "@/lib/observability/logger";
 import { requestIdFrom } from "@/lib/observability/request-id";
-import { weeklyCreditCost, WEEKLY_FREE_CREDIT_LIMIT } from "@/lib/usage/policy";
+import { finalizeGenerationSpend, releaseUsageHold, reserveUsageBeforeGeneration, startWeeklyUsage } from "@/lib/usage/guards";
+import type { UsageKind } from "@/lib/usage/policy";
+import { estimateUsageFromText, withCostEstimate, type GenerationCostEstimate, type ProviderTokenUsage } from "@/lib/usage/provider-usage";
+import { failureCategoryFrom, logGenerationTelemetry } from "@/lib/usage/telemetry";
 import { createDeepResearchChatResponse } from "@/lib/research/chat-stream";
 import { createAutoWebActionChatResponse } from "@/lib/actions/auto-web-response";
 import { decideWebSearch } from "@/lib/web/routing";
@@ -48,18 +51,9 @@ const encoder = new TextEncoder();
 const safeError = "Nibie couldn't complete that response. Please try again.";
 function event(type: string, data: unknown) { return `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`; }
 
-type WeeklyReservationRow = {
-  accepted: boolean;
-  credits_charged: number;
-  credits_used: number;
-  credits_remaining: number;
-  reset_at: string;
-};
-
 /**
- * Shared HTTP weekly-usage gate for paths that open SSE before synthesis
- * (Action/web.search and Deep Research). Exhausted accounts get the same 429 JSON as Fast path
- * so the client can set weeklyLimitResetAt.
+ * Shared HTTP usage gate for paths that open SSE before synthesis
+ * (Action/web.search and Deep Research). Enforces weekly credits AND dollar spend ceilings.
  *
  * On accept, the reservation is kept held for this generation id. Downstream streams must not
  * release-then-re-reserve: `reserve_weekly_ai_usage` returns accepted=false once released_at is set.
@@ -68,18 +62,11 @@ type WeeklyReservationRow = {
 async function rejectWeeklyUsageBeforeStream(input: {
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
   assistantId: string;
-  mode: keyof typeof weeklyCreditCost;
+  mode: ChatModel;
   requestId: string;
+  usageKind?: UsageKind;
 }): Promise<NextResponse | null> {
-  const { supabase, assistantId, mode, requestId } = input;
-  const release = async () => {
-    try {
-      const { error } = await supabase.rpc("release_weekly_ai_usage", { p_generation_id: assistantId });
-      if (error) logError("weekly_usage.reservation.release_failed", { requestId, logicalMode: mode, code: operationalCodes.requestFailed });
-    } catch {
-      logError("weekly_usage.reservation.release_failed", { requestId, logicalMode: mode, code: operationalCodes.requestFailed });
-    }
-  };
+  const { supabase, assistantId, mode, requestId, usageKind = "chat" } = input;
   const markError = async (content: string) => {
     try {
       await supabase.from("messages").update({ content, status: "error" }).eq("id", assistantId).eq("status", "streaming");
@@ -88,75 +75,39 @@ async function rejectWeeklyUsageBeforeStream(input: {
     }
   };
 
-  const reservationStartedAt = Date.now();
-  let reservation: WeeklyReservationRow | null = null;
-  let reservationError: unknown = null;
-  try {
-    const result = await supabase.rpc("reserve_weekly_ai_usage", {
-      p_generation_id: assistantId,
-      p_logical_mode: mode,
-    }).single<WeeklyReservationRow>();
-    reservation = result.data;
-    reservationError = result.error;
-  } catch {
-    reservationError = new Error("Reservation request failed.");
-  }
-  const usageReservationMs = Date.now() - reservationStartedAt;
-
-  if (
-    reservationError
-    || !reservation
-    || typeof reservation.accepted !== "boolean"
-    || !Number.isInteger(reservation.credits_remaining)
-    || reservation.credits_remaining < 0
-    || reservation.credits_remaining > WEEKLY_FREE_CREDIT_LIMIT
-    || typeof reservation.reset_at !== "string"
-    || !Number.isFinite(Date.parse(reservation.reset_at))
-  ) {
-    logError("weekly_usage.reservation.failed", { requestId, logicalMode: mode, durationMs: usageReservationMs, code: operationalCodes.requestFailed });
-    await release();
-    await markError("Response unavailable.");
-    return NextResponse.json({ error: safeError }, { status: 503 });
-  }
-
-  if (!reservation.accepted) {
-    logWarn("weekly_usage.limit.rejected", {
+  const gate = await reserveUsageBeforeGeneration({
+    supabase,
+    generationId: assistantId,
+    mode,
+    usageKind,
+    requestId,
+  });
+  if (gate.ok) {
+    logInfo("weekly_usage.reservation.held_for_stream", {
       requestId,
       logicalMode: mode,
-      creditsCharged: 0,
-      creditsRemaining: reservation.credits_remaining,
+      usageKind,
+      creditsCharged: gate.creditsCharged,
+      spendReservedMicros: gate.spendReservedMicros,
     });
-    await markError("Weekly usage limit reached.");
+    return null;
+  }
+
+  await markError(gate.code === operationalCodes.weeklyUsageLimitRejected
+    ? "Weekly usage limit reached."
+    : gate.code === operationalCodes.aiSpendLimitRejected
+      ? "AI spend budget reached."
+      : "Response unavailable.");
+
+  if (gate.status === 429) {
     return NextResponse.json({
-      code: operationalCodes.weeklyUsageLimitRejected,
-      error: "You've reached your weekly Nibie usage limit.",
-      creditsRemaining: reservation.credits_remaining,
-      resetAt: reservation.reset_at,
+      code: gate.code,
+      error: gate.error,
+      ...(typeof gate.creditsRemaining === "number" ? { creditsRemaining: gate.creditsRemaining } : {}),
+      ...(gate.resetAt ? { resetAt: gate.resetAt } : {}),
     }, { status: 429, headers: { "x-request-id": requestId } });
   }
-
-  if (reservation.credits_charged !== weeklyCreditCost[mode]) {
-    logError("weekly_usage.reservation.failed", {
-      requestId,
-      logicalMode: mode,
-      durationMs: usageReservationMs,
-      reason: "policy_mismatch",
-      code: operationalCodes.requestFailed,
-    });
-    await release();
-    await markError("Response unavailable.");
-    return NextResponse.json({ error: safeError }, { status: 503 });
-  }
-
-  logInfo("weekly_usage.reservation.accepted", {
-    requestId,
-    logicalMode: mode,
-    creditsCharged: reservation.credits_charged,
-    creditsRemaining: reservation.credits_remaining,
-    reservationLatencyMs: usageReservationMs,
-    heldForStream: true,
-  });
-  return null;
+  return NextResponse.json({ error: safeError }, { status: 503 });
 }
 
 export async function POST(request: Request) {
@@ -349,6 +300,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       assistantId: assistant.id,
       mode,
       requestId,
+      usageKind: "research",
     });
     if (weeklyRejected) return weeklyRejected;
     const planMode = (availableModes.includes("Fast") ? "Fast" : mode) as typeof mode;
@@ -547,62 +499,44 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
     return new Response(null, { status: 499 });
   }
 
-  // Reserve after validation, ownership, the idempotent generation claim, and context construction. The database derives the
-  // week and credits from its clock and the trusted logical mode; no client preflight is needed.
+  // Reserve weekly credits AND dollar spend after validation/claim/context. Client never sends cost or balance.
+  const usageKind: UsageKind = "chat";
+  let usageReservationMs = 0;
+  let spendReservedMicros = 0;
   const releaseReservation = async () => {
-    try {
-      const { error } = await supabase.rpc("release_weekly_ai_usage", { p_generation_id: assistant.id });
-      if (error) logError("weekly_usage.reservation.release_failed", { requestId, logicalMode: mode, code: operationalCodes.requestFailed });
-    } catch {
-      logError("weekly_usage.reservation.release_failed", { requestId, logicalMode: mode, code: operationalCodes.requestFailed });
-    }
+    await releaseUsageHold({ supabase, generationId: assistant.id, requestId, logicalMode: mode });
   };
-  const reservationStartedAt = Date.now();
-  let reservation: { accepted: boolean; credits_charged: number; credits_used: number; credits_remaining: number; reset_at: string } | null = null;
-  let reservationError: unknown = null;
-  try {
-    const result = await supabase.rpc("reserve_weekly_ai_usage", {
-      p_generation_id: assistant.id,
-      p_logical_mode: mode,
-    }).single<{ accepted: boolean; credits_charged: number; credits_used: number; credits_remaining: number; reset_at: string }>();
-    reservation = result.data;
-    reservationError = result.error;
-  } catch {
-    reservationError = new Error("Reservation request failed.");
-  }
-  const usageReservationMs = Date.now() - reservationStartedAt;
-  if (reservationError || !reservation || typeof reservation.accepted !== "boolean"
-    || !Number.isInteger(reservation.credits_remaining) || reservation.credits_remaining < 0 || reservation.credits_remaining > WEEKLY_FREE_CREDIT_LIMIT
-    || typeof reservation.reset_at !== "string" || !Number.isFinite(Date.parse(reservation.reset_at))) {
-    logError("weekly_usage.reservation.failed", { requestId, logicalMode: mode, durationMs: usageReservationMs, code: operationalCodes.requestFailed });
-    await releaseReservation();
-    try { await persist(clientCancelled ? "Response stopped." : "Response unavailable.", clientCancelled ? "interrupted" : "error"); }
-    finally { request.signal.removeEventListener("abort", onRequestAbort); }
-    if (clientCancelled || request.signal.aborted) return new Response(null, { status: 499 });
-    return NextResponse.json({ error: safeError }, { status: 503 });
-  }
-  if (!reservation.accepted) {
-    logWarn("weekly_usage.limit.rejected", { requestId, logicalMode: mode, creditsCharged: 0, creditsRemaining: reservation.credits_remaining });
-    try { await persist("Weekly usage limit reached.", "error"); }
-    finally { request.signal.removeEventListener("abort", onRequestAbort); }
-    return NextResponse.json({
-      code: operationalCodes.weeklyUsageLimitRejected,
-      error: "You've reached your weekly Nibie usage limit.",
-      creditsRemaining: reservation.credits_remaining,
-      resetAt: reservation.reset_at,
-    }, { status: 429, headers: { "x-request-id": requestId } });
-  }
-  if (reservation.credits_charged !== weeklyCreditCost[mode]) {
-    logError("weekly_usage.reservation.failed", { requestId, logicalMode: mode, durationMs: usageReservationMs, reason: "policy_mismatch", code: operationalCodes.requestFailed });
-    await releaseReservation();
-    try { await persist("Response unavailable.", "error"); }
-    finally { request.signal.removeEventListener("abort", onRequestAbort); }
-    return NextResponse.json({ error: safeError }, { status: 503 });
-  }
-  logInfo("weekly_usage.reservation.accepted", {
-    requestId, logicalMode: mode, creditsCharged: reservation.credits_charged,
-    creditsRemaining: reservation.credits_remaining, reservationLatencyMs: usageReservationMs,
+  const gate = await reserveUsageBeforeGeneration({
+    supabase,
+    generationId: assistant.id,
+    mode,
+    usageKind,
+    requestId,
   });
+  if (!gate.ok) {
+    try {
+      await persist(
+        gate.code === operationalCodes.weeklyUsageLimitRejected
+          ? "Weekly usage limit reached."
+          : gate.code === operationalCodes.aiSpendLimitRejected
+            ? "AI spend budget reached."
+            : clientCancelled ? "Response stopped." : "Response unavailable.",
+        gate.status === 429 ? "error" : clientCancelled ? "interrupted" : "error",
+      );
+    } finally { request.signal.removeEventListener("abort", onRequestAbort); }
+    if (clientCancelled || request.signal.aborted) return new Response(null, { status: 499 });
+    if (gate.status === 429) {
+      return NextResponse.json({
+        code: gate.code,
+        error: gate.error,
+        ...(typeof gate.creditsRemaining === "number" ? { creditsRemaining: gate.creditsRemaining } : {}),
+        ...(gate.resetAt ? { resetAt: gate.resetAt } : {}),
+      }, { status: 429, headers: { "x-request-id": requestId } });
+    }
+    return NextResponse.json({ error: safeError }, { status: 503 });
+  }
+  usageReservationMs = gate.usageReservationMs;
+  spendReservedMicros = gate.spendReservedMicros;
 
   if (clientCancelled || request.signal.aborted) {
     await releaseReservation();
@@ -645,15 +579,8 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
     return NextResponse.json({ error: providerTimedOut ? timeoutError : safeError }, { status: providerTimedOut ? 504 : 502 });
   }
 
-  let usageStarted = false;
-  try {
-    const { data, error } = await supabase.rpc("start_weekly_ai_usage", { p_generation_id: assistant.id });
-    usageStarted = data === true && !error;
-  } catch {
-    usageStarted = false;
-  }
+  const usageStarted = await startWeeklyUsage({ supabase, generationId: assistant.id, requestId, logicalMode: mode });
   if (!usageStarted) {
-    logError("weekly_usage.start.failed", { requestId, logicalMode: mode, code: operationalCodes.requestFailed });
     aborter.abort();
     await releaseReservation();
     try { await persist(clientCancelled ? "Response stopped." : "Response unavailable.", clientCancelled ? "interrupted" : "error"); }
@@ -665,6 +592,10 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   // Summary maintenance runs after the response finishes, and only for a reply saved as complete. It is best effort:
   // whatever happens to it, the saved reply stays as it is.
   const summaryMaintenance = deferThreadSummaryMaintenance({ supabase, conversationId: conversation.id, requestId });
+  const promptChars = prompt.reduce((sum, message) => sum + message.content.length, 0);
+  let providerUsage: ProviderTokenUsage | null = null;
+  let costEstimate: GenerationCostEstimate | null = null;
+  let failureCategory = failureCategoryFrom({});
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const reasoningFilter = createReasoningStreamFilter();
@@ -734,12 +665,18 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
           ...(citationViews.length ? { sources: citationViews } : {}),
         })));
         for await (const item of readOpenAiSse(responseStream, aborter.signal)) {
-          if (item.type === "done") { completed = true; finishReason = item.finishReason ?? "unspecified"; break; }
+          if (item.type === "done") {
+            completed = true;
+            finishReason = item.finishReason ?? "unspecified";
+            if (item.usage) providerUsage = item.usage;
+            break;
+          }
           feedModelText(item.text);
         }
         seal();
         if (userStopped || clientCancelled || request.signal.aborted) {
           const saved = await save("interrupted");
+          failureCategory = failureCategoryFrom({ interrupted: true });
           logWarn("chat.response.interrupted", { requestId, status: "interrupted", durationMs: durationMs() });
           if (!clientCancelled) controller.enqueue(encoder.encode(saved !== "failed" ? event("status", { status: "interrupted" }) : event("error", { error: safeError })));
         } else if (completed && output.length > 0) {
@@ -750,15 +687,19 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
             controller.enqueue(encoder.encode(event("status", { status: "complete" })));
           } else if (saved === "stopped") {
             // Stop landed after the provider finished but before this save: the stopped reply stands.
+            failureCategory = failureCategoryFrom({ interrupted: true });
             reportStopped();
           } else {
             await save("error");
+            failureCategory = failureCategoryFrom({ stage: "persist" });
             logError("chat.response.failed", { requestId, stage: "persist", code: operationalCodes.assistantPersistFailed, status: "error", durationMs: durationMs() });
             controller.enqueue(encoder.encode(event("error", { error: safeError })));
           }
         } else if (await save("error") === "stopped") {
+          failureCategory = failureCategoryFrom({ interrupted: true });
           reportStopped();
         } else {
+          failureCategory = failureCategoryFrom({ stage: "stream", finishReason });
           logError("chat.response.failed", { requestId, stage: "stream", code: operationalCodes.aiProviderFailed, status: "error", durationMs: durationMs() });
           controller.enqueue(encoder.encode(event("error", { error: safeError })));
         }
@@ -768,15 +709,43 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
         let saved: "saved" | "stopped" | "failed" = "failed";
         try { saved = await save(userStopped || clientCancelled || request.signal.aborted ? "interrupted" : "error"); } catch { logError("chat.persistence.failed", { requestId, code: operationalCodes.assistantPersistFailed, stage: "persist" }); }
         const interrupted = saved === "stopped" || userStopped || clientCancelled || request.signal.aborted;
+        failureCategory = failureCategoryFrom({
+          interrupted,
+          finishReason,
+          stage: interrupted ? undefined : "stream",
+        });
         if (interrupted) logWarn("chat.response.interrupted", { requestId, status: "interrupted", durationMs: durationMs() });
         else logError("chat.response.failed", { requestId, stage: "stream", code: operationalCodes.aiProviderFailed, status: "error", durationMs: durationMs() });
         if (!interrupted) controller.enqueue(encoder.encode(event("error", { error: error instanceof ProviderStreamError ? error.message : providerTimedOut ? timeoutError : safeError })));
         else if (!clientCancelled) controller.enqueue(encoder.encode(saved !== "failed" ? event("status", { status: "interrupted" }) : event("error", { error: safeError })));
       } finally {
-        logInfo("chat.response.metrics", {
-          requestId, logicalMode: mode, provider: providerFor(mode), providerTtftMs, generationDurationMs: Date.now() - providerStartedAt,
-          appBeforeProviderMs: providerStartedAt - requestStartedAt, usageReservationMs, totalDurationMs: Date.now() - requestStartedAt, finishReason,
-          outputChars: output.length, streamCompleted: completed,
+        costEstimate = withCostEstimate(
+          mode,
+          providerUsage ?? estimateUsageFromText({ promptChars, outputChars: output.length }),
+        );
+        await finalizeGenerationSpend({
+          supabase,
+          generationId: assistant.id,
+          actualMicros: costEstimate.estimatedUsdMicros,
+          requestId,
+        });
+        logGenerationTelemetry({
+          requestId,
+          logicalMode: mode,
+          provider: providerFor(mode),
+          model: configuredModelLabel(mode),
+          usageKind,
+          usage: costEstimate,
+          providerTtftMs,
+          generationDurationMs: Date.now() - providerStartedAt,
+          totalDurationMs: Date.now() - requestStartedAt,
+          finishReason,
+          failureCategory,
+          streamCompleted: completed,
+          outputChars: output.length,
+          usageReservationMs,
+          spendReservedMicros,
+          spendAccepted: true,
         });
         clearTimeout(timeout);
         clearInterval(stopWatch);

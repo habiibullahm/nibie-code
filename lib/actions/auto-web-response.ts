@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { chatProvider } from "@/lib/ai/provider";
+import { chatProvider, configuredModelLabel } from "@/lib/ai/provider";
 import { toProviderMessages } from "@/lib/ai/provider-messages";
 import { contextCapabilitiesFor, providerFor } from "@/lib/ai/registry";
 import { createReasoningStreamFilter } from "@/lib/ai/sanitize-model-output";
@@ -32,7 +32,9 @@ import { operationalCodes } from "@/lib/observability/codes";
 import { logError, logInfo, logWarn } from "@/lib/observability/logger";
 import type { UserPreferences } from "@/lib/preferences/types";
 import type { MemoryRecord, RecallOperationStatus } from "@/lib/recall/types";
-import { weeklyCreditCost, WEEKLY_FREE_CREDIT_LIMIT } from "@/lib/usage/policy";
+import { finalizeGenerationSpend, releaseUsageHold, reserveUsageBeforeGeneration, startWeeklyUsage } from "@/lib/usage/guards";
+import { estimateUsageFromText, withCostEstimate, type ProviderTokenUsage } from "@/lib/usage/provider-usage";
+import { failureCategoryFrom, logGenerationTelemetry } from "@/lib/usage/telemetry";
 import type { WebContextInput } from "@/lib/web/types";
 
 const encoder = new TextEncoder();
@@ -189,20 +191,17 @@ export async function createAutoWebActionChatResponse(input: AutoWebActionChatIn
   };
 
   const releaseReservation = async () => {
-    try {
-      const { error } = await supabase.rpc("release_weekly_ai_usage", { p_generation_id: assistant.id });
-      if (error) logError("weekly_usage.reservation.release_failed", { requestId, logicalMode: mode, code: operationalCodes.requestFailed });
-    } catch {
-      logError("weekly_usage.reservation.release_failed", { requestId, logicalMode: mode, code: operationalCodes.requestFailed });
-    }
+    await releaseUsageHold({ supabase, generationId: assistant.id, requestId, logicalMode: mode });
   };
 
   const summaryMaintenance = deferThreadSummaryMaintenance({ supabase, conversationId, requestId });
   let usageReservationMs = 0;
+  let spendReservedMicros = 0;
   let providerStartedAt = Date.now();
   let providerTtftMs: number | null = null;
   let finishReason = "unspecified";
   let providerTimedOut = false;
+  let providerUsage: ProviderTokenUsage | null = null;
   const timeoutError = "The provider took too long to finish this response. Please try again.";
 
   const stream = new ReadableStream<Uint8Array>({
@@ -396,86 +395,27 @@ export async function createAutoWebActionChatResponse(input: AutoWebActionChatIn
 
         // Preflight may already hold this generation's reservation; never release-then-re-reserve.
         if (!weeklyUsageReserved) {
-          const reservationStartedAt = Date.now();
-          let reservation: {
-            accepted: boolean;
-            credits_charged: number;
-            credits_used: number;
-            credits_remaining: number;
-            reset_at: string;
-          } | null = null;
-          let reservationError: unknown = null;
-          try {
-            const result = await supabase
-              .rpc("reserve_weekly_ai_usage", {
-                p_generation_id: assistant.id,
-                p_logical_mode: mode,
-              })
-              .single<{
-                accepted: boolean;
-                credits_charged: number;
-                credits_used: number;
-                credits_remaining: number;
-                reset_at: string;
-              }>();
-            reservation = result.data;
-            reservationError = result.error;
-          } catch {
-            reservationError = new Error("Reservation request failed.");
-          }
-          usageReservationMs = Date.now() - reservationStartedAt;
-          if (
-            reservationError ||
-            !reservation ||
-            typeof reservation.accepted !== "boolean" ||
-            !Number.isInteger(reservation.credits_remaining) ||
-            reservation.credits_remaining < 0 ||
-            reservation.credits_remaining > WEEKLY_FREE_CREDIT_LIMIT ||
-            typeof reservation.reset_at !== "string" ||
-            !Number.isFinite(Date.parse(reservation.reset_at))
-          ) {
-            logError("weekly_usage.reservation.failed", {
-              requestId,
-              logicalMode: mode,
-              durationMs: usageReservationMs,
-              code: operationalCodes.requestFailed,
-            });
-            await releaseReservation();
-            await persist(clientCancelled ? "Response stopped." : "Response unavailable.", clientCancelled ? "interrupted" : "error");
-            enqueue("error", { error: safeError });
-            return;
-          }
-          if (!reservation.accepted) {
-            logWarn("weekly_usage.limit.rejected", {
-              requestId,
-              logicalMode: mode,
-              creditsCharged: 0,
-              creditsRemaining: reservation.credits_remaining,
-            });
-            await persist("Weekly usage limit reached.", "error");
-            enqueue("error", { error: "You've reached your weekly Nibie usage limit." });
-            return;
-          }
-          if (reservation.credits_charged !== weeklyCreditCost[mode]) {
-            logError("weekly_usage.reservation.failed", {
-              requestId,
-              logicalMode: mode,
-              durationMs: usageReservationMs,
-              reason: "policy_mismatch",
-              code: operationalCodes.requestFailed,
-            });
-            await releaseReservation();
-            await persist("Response unavailable.", "error");
-            enqueue("error", { error: safeError });
-            return;
-          }
-          logInfo("weekly_usage.reservation.accepted", {
+          const gate = await reserveUsageBeforeGeneration({
+            supabase,
+            generationId: assistant.id,
+            mode,
+            usageKind: "chat",
             requestId,
-            logicalMode: mode,
-            creditsCharged: reservation.credits_charged,
-            creditsRemaining: reservation.credits_remaining,
-            reservationLatencyMs: usageReservationMs,
           });
+          if (!gate.ok) {
+            await persist(
+              gate.code === operationalCodes.weeklyUsageLimitRejected
+                ? "Weekly usage limit reached."
+                : gate.code === operationalCodes.aiSpendLimitRejected
+                  ? "AI spend budget reached."
+                  : clientCancelled ? "Response stopped." : "Response unavailable.",
+              gate.status === 429 || !clientCancelled ? "error" : "interrupted",
+            );
+            enqueue("error", { error: gate.error });
+            return;
+          }
+          usageReservationMs = gate.usageReservationMs;
+          spendReservedMicros = gate.spendReservedMicros;
         }
 
         if (clientCancelled || aborter.signal.aborted || userStopped) {
@@ -507,15 +447,8 @@ export async function createAutoWebActionChatResponse(input: AutoWebActionChatIn
           return;
         }
 
-        let usageStarted = false;
-        try {
-          const { data, error } = await supabase.rpc("start_weekly_ai_usage", { p_generation_id: assistant.id });
-          usageStarted = data === true && !error;
-        } catch {
-          usageStarted = false;
-        }
+        const usageStarted = await startWeeklyUsage({ supabase, generationId: assistant.id, requestId, logicalMode: mode });
         if (!usageStarted) {
-          logError("weekly_usage.start.failed", { requestId, logicalMode: mode, code: operationalCodes.requestFailed });
           clearTimeout(timeout);
           aborter.abort();
           await releaseReservation();
@@ -581,6 +514,7 @@ export async function createAutoWebActionChatResponse(input: AutoWebActionChatIn
             if (item.type === "done") {
               completed = true;
               finishReason = item.finishReason ?? "unspecified";
+              if (item.usage) providerUsage = item.usage;
               break;
             }
             feedModelText(item.text);
@@ -632,18 +566,36 @@ export async function createAutoWebActionChatResponse(input: AutoWebActionChatIn
           }
         } finally {
           clearTimeout(timeout);
-          logInfo("chat.response.metrics", {
+          const costEstimate = withCostEstimate(
+            mode,
+            providerUsage ?? estimateUsageFromText({
+              promptChars: prompt.reduce((sum, message) => sum + message.content.length, 0),
+              outputChars: output.length,
+            }),
+          );
+          await finalizeGenerationSpend({
+            supabase,
+            generationId: assistant.id,
+            actualMicros: costEstimate.estimatedUsdMicros,
+            requestId,
+          });
+          logGenerationTelemetry({
             requestId,
             logicalMode: mode,
             provider: providerFor(mode),
+            model: configuredModelLabel(mode),
+            usageKind: "chat",
+            usage: costEstimate,
             providerTtftMs,
             generationDurationMs: Date.now() - providerStartedAt,
-            appBeforeProviderMs: providerStartedAt - requestStartedAt,
-            usageReservationMs,
             totalDurationMs: Date.now() - requestStartedAt,
             finishReason,
-            outputChars: output.length,
+            failureCategory: failureCategoryFrom({ finishReason }),
             streamCompleted: completed,
+            outputChars: output.length,
+            usageReservationMs,
+            spendReservedMicros,
+            spendAccepted: true,
             actionId: WEB_SEARCH_ACTION_ID,
           });
         }

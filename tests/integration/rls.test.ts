@@ -59,12 +59,40 @@ describe("Supabase row-level security", () => {
     return generationId;
   }
 
-  async function reserveUsage(userId: string, generationId: string, mode: "Fast" | "Balanced" | "High") {
-    return asUser(userId, (tx) => tx`select * from public.reserve_weekly_ai_usage(${generationId}::uuid, ${mode}::public.weekly_usage_mode)`);
+  async function reserveUsage(
+    userId: string,
+    generationId: string,
+    mode: "Fast" | "Balanced" | "High",
+    usageKind: "chat" | "research" = "chat",
+  ) {
+    return asUser(userId, (tx) => tx`
+      select * from public.reserve_weekly_ai_usage(
+        ${generationId}::uuid,
+        ${mode}::public.weekly_usage_mode,
+        ${usageKind}::text
+      )
+    `);
   }
 
   async function startUsage(userId: string, generationId: string) {
     return asUser(userId, (tx) => tx`select public.start_weekly_ai_usage(${generationId}::uuid) as started`);
+  }
+
+  async function reserveSpend(
+    userId: string,
+    generationId: string,
+    reservedMicros: number,
+    userDailyLimit: number,
+    globalHourlyLimit: number,
+  ) {
+    return asUser(userId, (tx) => tx`
+      select * from public.reserve_ai_spend(
+        ${generationId}::uuid,
+        ${reservedMicros}::bigint,
+        ${userDailyLimit}::bigint,
+        ${globalHourlyLimit}::bigint
+      )
+    `);
   }
 
   beforeAll(async () => {
@@ -72,6 +100,13 @@ describe("Supabase row-level security", () => {
     await sql`drop table if exists public.thread_summaries cascade`;
     await sql`drop function if exists public.save_thread_summary(uuid, text, text, text, text, text, text, integer) cascade`;
     await sql`drop function if exists public.guard_thread_summary_update() cascade`;
+    await sql`drop table if exists public.ai_spend_reservations cascade`;
+    await sql`drop table if exists public.ai_spend_user_daily cascade`;
+    await sql`drop table if exists public.ai_spend_global_hourly cascade`;
+    await sql`drop function if exists public.reconcile_stale_ai_usage(integer) cascade`;
+    await sql`drop function if exists public.reserve_ai_spend(uuid, bigint, bigint, bigint) cascade`;
+    await sql`drop function if exists public.finalize_ai_spend(uuid, bigint) cascade`;
+    await sql`drop function if exists public.release_ai_spend(uuid) cascade`;
     await sql`drop table if exists public.weekly_usage_reservations cascade`;
     await sql`drop table if exists public.weekly_ai_usage cascade`;
     await sql`drop type if exists public.weekly_usage_mode cascade`;
@@ -153,6 +188,47 @@ describe("Supabase row-level security", () => {
     const rows = await asUser(owner, (tx) => tx`select credits_used, fast_requests, balanced_requests, high_requests from public.weekly_ai_usage`);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toEqual({ credits_used: 10, fast_requests: 1, balanced_requests: 1, high_requests: 1 });
+  });
+
+  it("meters Deep Research above a single mode credit", async () => {
+    const owner = await createUsageUser();
+    const generation = await createGeneration(owner);
+    const [reserved] = await reserveUsage(owner, generation, "Balanced", "research");
+    expect(reserved).toMatchObject({ accepted: true, credits_charged: 9, credits_used: 9, credits_remaining: 491 });
+    const [usage] = await asUser(owner, (tx) => tx`select credits_used, balanced_requests from public.weekly_ai_usage`);
+    expect(usage).toEqual({ credits_used: 9, balanced_requests: 1 });
+  });
+
+  it("enforces dollar spend ceilings independently of weekly credits and reconciles stale holds", async () => {
+    const owner = await createUsageUser();
+    const okGeneration = await createGeneration(owner);
+    const blockedGeneration = await createGeneration(owner);
+    const staleGeneration = await createGeneration(owner);
+
+    const [accepted] = await reserveSpend(owner, okGeneration, 100_000, 150_000, 1_000_000);
+    expect(accepted).toMatchObject({ accepted: true, reserved_micros: 100_000 });
+
+    const [rejected] = await reserveSpend(owner, blockedGeneration, 100_000, 150_000, 1_000_000);
+    expect(rejected).toMatchObject({ accepted: false, reserved_micros: 0 });
+
+    await reserveSpend(owner, staleGeneration, 40_000, 1_000_000, 1_000_000);
+    await sql`update public.messages set status = 'error' where id = ${staleGeneration}`;
+    await sql`update public.ai_spend_reservations set created_at = now() - interval '20 minutes' where generation_id = ${staleGeneration}`;
+    await sql`update public.weekly_usage_reservations set created_at = now() - interval '20 minutes' where generation_id = ${staleGeneration}`;
+
+    // Also leave an unstarted weekly credit hold on the stale generation so reconcile can refund it.
+    // Spend already reserved above; weekly reserve separately.
+    const weeklyGen = await createGeneration(owner);
+    await reserveUsage(owner, weeklyGen, "Fast");
+    await sql`update public.messages set status = 'error' where id = ${weeklyGen}`;
+    await sql`update public.weekly_usage_reservations set created_at = now() - interval '20 minutes' where generation_id = ${weeklyGen}`;
+
+    await asServiceRole(async (tx) => {
+      const rows = await tx`select * from public.reconcile_stale_ai_usage(600)`;
+      expect(rows[0]).toMatchObject({ weekly_released: 1, spend_released: 1 });
+    });
+
+    await expect(asUser(owner, (tx) => tx`select * from public.reconcile_stale_ai_usage(600)`)).rejects.toThrow();
   });
 
   it("rejects a concurrent race at exactly 500 credits without resetting counters", async () => {

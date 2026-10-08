@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { creditsRemaining, utcWeekReset, utcWeekStart, weeklyCreditCost, WEEKLY_FREE_CREDIT_LIMIT } from "@/lib/usage/policy";
+import { creditCostFor, creditsRemaining, researchCreditCost, utcWeekReset, utcWeekStart, weeklyCreditCost, WEEKLY_FREE_CREDIT_LIMIT } from "@/lib/usage/policy";
 import { weeklyLimitNotice } from "@/lib/usage/format";
 
 describe("weekly free AI usage policy", () => {
   it("assigns the fixed product costs to Fast, Balanced, and High", () => {
     expect(weeklyCreditCost).toEqual({ Fast: 1, Balanced: 3, High: 6 });
+  });
+
+  it("meters Deep Research above a single mode credit", () => {
+    expect(researchCreditCost).toEqual({ Fast: 7, Balanced: 9, High: 12 });
+    expect(creditCostFor("Balanced", "research")).toBe(9);
+    expect(creditCostFor("Balanced", "chat")).toBe(3);
   });
 
   it("uses Monday 00:00 UTC as the week boundary", () => {

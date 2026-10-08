@@ -1,6 +1,9 @@
 import { z } from "zod";
+import { extractProviderUsage, type ProviderTokenUsage } from "@/lib/usage/provider-usage";
 
-export type OpenAiStreamEvent = { type: "delta"; text: string } | { type: "done"; finishReason?: string };
+export type OpenAiStreamEvent =
+  | { type: "delta"; text: string }
+  | { type: "done"; finishReason?: string; usage?: ProviderTokenUsage };
 
 const finishErrors: Record<string, string> = {
   length: "The model reached its output limit before finishing. Please retry or ask it to continue.",
@@ -20,6 +23,7 @@ export async function* readOpenAiSse(body: ReadableStream<Uint8Array>, signal?: 
   const decoder = new TextDecoder("utf-8", { fatal: true });
   let buffer = "";
   let finishReason: string | undefined;
+  let usage: ProviderTokenUsage | undefined;
   const abort = () => { void reader.cancel().catch(() => undefined); };
   signal?.addEventListener("abort", abort, { once: true });
   try {
@@ -35,11 +39,17 @@ export async function* readOpenAiSse(body: ReadableStream<Uint8Array>, signal?: 
         if (!payload) continue;
         if (payload === "[DONE]") {
           if (finishReason && finishReason !== "stop") throw new ProviderStreamError(finishReason);
-          yield { type: "done", ...(finishReason ? { finishReason } : {}) };
+          yield { type: "done", ...(finishReason ? { finishReason } : {}), ...(usage ? { usage } : {}) };
           return;
         }
-        const parsed = JSON.parse(payload) as { error?: unknown; choices?: { delta?: { content?: unknown }; finish_reason?: unknown }[] } | null;
+        const parsed = JSON.parse(payload) as {
+          error?: unknown;
+          usage?: unknown;
+          choices?: { delta?: { content?: unknown }; finish_reason?: unknown }[];
+        } | null;
         if (!parsed || parsed.error) throw new Error("AI provider stream failed.");
+        const extracted = extractProviderUsage(parsed.usage);
+        if (extracted) usage = extracted;
         const choice = parsed.choices?.[0];
         const text = choice?.delta?.content;
         if (typeof text === "string" && text) {
@@ -53,7 +63,7 @@ export async function* readOpenAiSse(body: ReadableStream<Uint8Array>, signal?: 
       }
       if (done) {
         // Some compatible gateways close after the final finish_reason without a [DONE] line.
-        if (finishReason === "stop") { yield { type: "done", finishReason }; return; }
+        if (finishReason === "stop") { yield { type: "done", finishReason, ...(usage ? { usage } : {}) }; return; }
         if (finishReason) throw new ProviderStreamError(finishReason);
         throw new Error("Provider stream ended before completion.");
       }
