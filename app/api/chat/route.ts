@@ -48,6 +48,107 @@ const encoder = new TextEncoder();
 const safeError = "Nibie couldn't complete that response. Please try again.";
 function event(type: string, data: unknown) { return `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`; }
 
+type WeeklyReservationRow = {
+  accepted: boolean;
+  credits_charged: number;
+  credits_used: number;
+  credits_remaining: number;
+  reset_at: string;
+};
+
+/**
+ * Shared HTTP weekly-usage gate for paths that open SSE before the normal reserve point
+ * (Action/web.search and Deep Research). Exhausted accounts get the same 429 JSON as Fast path
+ * so the client can set weeklyLimitResetAt. On accept, the reservation is released so those
+ * streams keep their existing reserve → start → release lifecycle.
+ */
+async function rejectWeeklyUsageBeforeStream(input: {
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  assistantId: string;
+  mode: keyof typeof weeklyCreditCost;
+  requestId: string;
+}): Promise<NextResponse | null> {
+  const { supabase, assistantId, mode, requestId } = input;
+  const release = async () => {
+    try {
+      const { error } = await supabase.rpc("release_weekly_ai_usage", { p_generation_id: assistantId });
+      if (error) logError("weekly_usage.reservation.release_failed", { requestId, logicalMode: mode, code: operationalCodes.requestFailed });
+    } catch {
+      logError("weekly_usage.reservation.release_failed", { requestId, logicalMode: mode, code: operationalCodes.requestFailed });
+    }
+  };
+  const markError = async (content: string) => {
+    try {
+      await supabase.from("messages").update({ content, status: "error" }).eq("id", assistantId).eq("status", "streaming");
+    } catch {
+      logError("chat.persistence.failed", { requestId, code: operationalCodes.assistantPersistFailed, stage: "persist", status: "error" });
+    }
+  };
+
+  const reservationStartedAt = Date.now();
+  let reservation: WeeklyReservationRow | null = null;
+  let reservationError: unknown = null;
+  try {
+    const result = await supabase.rpc("reserve_weekly_ai_usage", {
+      p_generation_id: assistantId,
+      p_logical_mode: mode,
+    }).single<WeeklyReservationRow>();
+    reservation = result.data;
+    reservationError = result.error;
+  } catch {
+    reservationError = new Error("Reservation request failed.");
+  }
+  const usageReservationMs = Date.now() - reservationStartedAt;
+
+  if (
+    reservationError
+    || !reservation
+    || typeof reservation.accepted !== "boolean"
+    || !Number.isInteger(reservation.credits_remaining)
+    || reservation.credits_remaining < 0
+    || reservation.credits_remaining > WEEKLY_FREE_CREDIT_LIMIT
+    || typeof reservation.reset_at !== "string"
+    || !Number.isFinite(Date.parse(reservation.reset_at))
+  ) {
+    logError("weekly_usage.reservation.failed", { requestId, logicalMode: mode, durationMs: usageReservationMs, code: operationalCodes.requestFailed });
+    await release();
+    await markError("Response unavailable.");
+    return NextResponse.json({ error: safeError }, { status: 503 });
+  }
+
+  if (!reservation.accepted) {
+    logWarn("weekly_usage.limit.rejected", {
+      requestId,
+      logicalMode: mode,
+      creditsCharged: 0,
+      creditsRemaining: reservation.credits_remaining,
+    });
+    await markError("Weekly usage limit reached.");
+    return NextResponse.json({
+      code: operationalCodes.weeklyUsageLimitRejected,
+      error: "You've reached your weekly Nibie usage limit.",
+      creditsRemaining: reservation.credits_remaining,
+      resetAt: reservation.reset_at,
+    }, { status: 429, headers: { "x-request-id": requestId } });
+  }
+
+  if (reservation.credits_charged !== weeklyCreditCost[mode]) {
+    logError("weekly_usage.reservation.failed", {
+      requestId,
+      logicalMode: mode,
+      durationMs: usageReservationMs,
+      reason: "policy_mismatch",
+      code: operationalCodes.requestFailed,
+    });
+    await release();
+    await markError("Response unavailable.");
+    return NextResponse.json({ error: safeError }, { status: 503 });
+  }
+
+  await release();
+  return null;
+}
+
 export async function POST(request: Request) {
   const requestId = requestIdFrom(request);
   try { return await respond(request, requestId, Date.now()); }
@@ -233,6 +334,13 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   // Deep Research is an explicit alternate path: bounded multi-source orchestrator + cited synthesis.
   // It does not use auto web routing and must not overload Fast/Balanced/High.
   if (deepResearch) {
+    const weeklyRejected = await rejectWeeklyUsageBeforeStream({
+      supabase,
+      assistantId: assistant.id,
+      mode,
+      requestId,
+    });
+    if (weeklyRejected) return weeklyRejected;
     const planMode = (availableModes.includes("Fast") ? "Fast" : mode) as typeof mode;
     return createDeepResearchChatResponse({
       request,
@@ -261,6 +369,13 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   // Deterministic routing decides; no extra LLM round for the Action decision. Fast path (no search) is unchanged.
   const webDecision = decideWebSearch(userMessage.content, { hasRoomFileContext: Boolean(files?.length) });
   if (webDecision.search) {
+    const weeklyRejected = await rejectWeeklyUsageBeforeStream({
+      supabase,
+      assistantId: assistant.id,
+      mode,
+      requestId,
+    });
+    if (weeklyRejected) return weeklyRejected;
     return createAutoWebActionChatResponse({
       request,
       requestId,

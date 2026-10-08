@@ -1106,6 +1106,28 @@ describe("POST /api/chat", () => {
       expect(events.filter((event) => event.type === "delta").map((event) => event.type === "delta" ? event.text : "").join("")).not.toMatch(/\[SOURCE:|Sources/i);
     });
 
+    it("rejects an exhausted allowance with HTTP 429 before the Action web stream", async () => {
+      const writes: unknown[] = [];
+      readyClient(writes);
+      webMocks.decideWebSearch.mockReturnValue({ search: true, reason: "news" });
+      usageReserve.mockReturnValue(query({
+        data: { accepted: false, credits_charged: 0, credits_used: 500, credits_remaining: 0, reset_at: "2026-10-05T00:00:00.000Z" },
+        error: null,
+      }));
+      const response = await POST(validRequest());
+      expect(response.status).toBe(429);
+      expect(await response.json()).toEqual({
+        code: "WEEKLY_USAGE_LIMIT",
+        error: "You've reached your weekly Nibie usage limit.",
+        creditsRemaining: 0,
+        resetAt: "2026-10-05T00:00:00.000Z",
+      });
+      expect(webMocks.runWebSearchPipeline).not.toHaveBeenCalled();
+      expect(stream).not.toHaveBeenCalled();
+      expect(usageRelease).not.toHaveBeenCalled();
+      expect(writes).toContainEqual(expect.objectContaining({ content: "Weekly usage limit reached.", status: "error" }));
+    });
+
     it("grounds the reply in web sources when search is configured", async () => {
       readyClient([]);
       stream.mockResolvedValue(providerChunks(["Node 22."], "stop"));
@@ -1528,9 +1550,32 @@ describe("POST /api/chat", () => {
       const response = await POST(deepRequest());
       expect(response.status).toBe(200);
       await expect(Array.fromAsync(readChatSse(response.body!))).rejects.toThrow(/could not collect usable sources/i);
-      expect(usageReserve).not.toHaveBeenCalled();
+      // Preflight weekly gate reserves then releases; synthesis never reserves again on empty fail.
+      expect(usageReserve).toHaveBeenCalledOnce();
+      expect(usageRelease).toHaveBeenCalledOnce();
       expect(stream).not.toHaveBeenCalled();
       expect(researchMocks.runDeepResearch).toHaveBeenCalledOnce();
+    });
+
+    it("rejects an exhausted allowance with HTTP 429 before Deep Research streams", async () => {
+      const writes: unknown[] = [];
+      readyClient(writes);
+      usageReserve.mockReturnValue(query({
+        data: { accepted: false, credits_charged: 0, credits_used: 500, credits_remaining: 0, reset_at: "2026-10-05T00:00:00.000Z" },
+        error: null,
+      }));
+      const response = await POST(deepRequest());
+      expect(response.status).toBe(429);
+      expect(await response.json()).toEqual({
+        code: "WEEKLY_USAGE_LIMIT",
+        error: "You've reached your weekly Nibie usage limit.",
+        creditsRemaining: 0,
+        resetAt: "2026-10-05T00:00:00.000Z",
+      });
+      expect(researchMocks.runDeepResearch).not.toHaveBeenCalled();
+      expect(stream).not.toHaveBeenCalled();
+      expect(usageRelease).not.toHaveBeenCalled();
+      expect(writes).toContainEqual(expect.objectContaining({ content: "Weekly usage limit reached.", status: "error" }));
     });
 
     it("synthesizes as incomplete on gather_deadline with evidence (not Stopped)", async () => {
