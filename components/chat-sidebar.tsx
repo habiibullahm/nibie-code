@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
-import { Archive, ChevronDown, ChevronRight, DoorOpen, MessageSquare, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Plus, RotateCcw, Search, Settings, SquarePen, Trash2, X } from "lucide-react";
+import { Archive, ChevronDown, ChevronRight, DoorOpen, LoaderCircle, MessageSquare, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Plus, RotateCcw, Search, Settings, SquarePen, Trash2, X } from "lucide-react";
 import { SIGN_OUT_LABEL } from "@/lib/privacy/sign-out";
 import { AccountMenu } from "@/components/account-menu";
 import type { WhatsNewPreview } from "@/lib/changelog";
@@ -9,6 +9,17 @@ import { Brand, BrandMark, type BrandActivity } from "@/components/brand";
 import { chatPath } from "@/lib/routes";
 import { groupFor, groupThreads, historyGroups, requestTime } from "@/lib/chat/groups";
 import type { ConversationSummary, RoomSummary } from "@/lib/chat/read";
+import {
+  highlightMatchParts,
+  SEARCH_DEBOUNCE_MS,
+  SEARCH_MAX_QUERY,
+  SEARCH_MIN_CHARS,
+  searchLocalConversations,
+  type ChatSearchHit,
+  type ChatSearchMessageHit,
+  type ChatSearchPayload,
+  type LocalSearchConversation,
+} from "@/lib/chat/search";
 
 const noopSubscribe = () => () => undefined;
 
@@ -24,6 +35,8 @@ type Props = {
   email: string;
   name: string;
   releasePreview?: WhatsNewPreview | null;
+  /** Preview-only corpus with message bodies for local content search. */
+  searchCorpus?: LocalSearchConversation[];
   // The server's clock when the page was rendered; used (with the UTC calendar) until hydration has finished.
   renderedAt?: number;
   mobile?: boolean;
@@ -37,6 +50,7 @@ type Props = {
   onCollapse?: () => void;
   onClose: () => void;
   onOpen: (id: string | null) => void;
+  onOpenMessage?: (conversationId: string, messageId: string) => void;
   onOpenRoom: (id: string) => void;
   onNewThreadInRoom: (id: string) => void;
   onDeleteRoom: (id: string) => Promise<{ error?: string }>;
@@ -49,36 +63,320 @@ type Props = {
   onMove: (item: ConversationSummary, roomId: string | null) => Promise<void>;
 };
 
-function ConversationSearchDialog({ conversations, archivedConversations, onOpen, onRestore, onClose }: Pick<Props, "conversations" | "archivedConversations" | "onOpen" | "onRestore" | "onClose">) {
+function SearchHighlight({ text, query }: { text: string; query: string }) {
+  return <>{highlightMatchParts(text, query).map((part, index) => part.match
+    ? <mark key={index} className="chat-search-mark">{part.text}</mark>
+    : <span key={index}>{part.text}</span>)}</>;
+}
+
+function contextLabel(hit: ChatSearchHit) {
+  const room = hit.roomName?.trim() || "General";
+  if (hit.kind === "message") {
+    const role = hit.role === "assistant" ? "Assistant" : "User";
+    return `${room} · ${role}`;
+  }
+  return room;
+}
+
+function ConversationSearchDialog({
+  conversations,
+  archivedConversations,
+  rooms,
+  preview,
+  searchCorpus,
+  onOpen,
+  onOpenMessage,
+  onRestore,
+  onClose,
+}: Pick<Props, "conversations" | "archivedConversations" | "rooms" | "preview" | "searchCorpus" | "onOpen" | "onOpenMessage" | "onRestore" | "onClose">) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const titleId = useId();
   const [search, setSearch] = useState("");
-  const query = search.trim().toLowerCase();
-  const matches = query ? conversations.filter((item) => item.title.toLowerCase().includes(query)) : conversations;
-  const archivedMatches = query ? archivedConversations.filter((item) => item.title.toLowerCase().includes(query)) : [];
-  const count = matches.length + archivedMatches.length;
+  const [remote, setRemote] = useState<ChatSearchPayload | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [messageSearchFailed, setMessageSearchFailed] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const requestId = useRef(0);
+  const trimmed = search.trim();
+  const query = trimmed.toLowerCase();
+  const contentReady = trimmed.length >= SEARCH_MIN_CHARS;
+
+  const localTitleMatches = useMemo(
+    () => (query ? conversations.filter((item) => item.title.toLowerCase().includes(query)) : conversations),
+    [conversations, query],
+  );
+  const localArchivedTitleMatches = useMemo(
+    () => (query ? archivedConversations.filter((item) => item.title.toLowerCase().includes(query)) : []),
+    [archivedConversations, query],
+  );
+
+  const localPayload = useMemo(() => {
+    if (!contentReady || !searchCorpus) return null;
+    return searchLocalConversations(searchCorpus, rooms, trimmed);
+  }, [contentReady, searchCorpus, rooms, trimmed]);
+
+  const payload = preview ? localPayload : remote;
+  const fallbackTitleHits = localTitleMatches.map((item) => ({
+    kind: "conversation" as const,
+    conversationId: item.id,
+    title: item.title,
+    roomId: item.room_id,
+    roomName: rooms.find((room) => room.id === item.room_id)?.name ?? null,
+    archived: false,
+  }));
+  const fallbackArchivedHits = localArchivedTitleMatches.map((item) => ({
+    kind: "conversation" as const,
+    conversationId: item.id,
+    title: item.title,
+    roomId: item.room_id,
+    roomName: rooms.find((room) => room.id === item.room_id)?.name ?? null,
+    archived: true,
+  }));
+  const conversationHits = contentReady ? (payload?.conversations ?? fallbackTitleHits) : [];
+  const messageHits = contentReady ? (payload?.messages ?? []) : [];
+  const archivedHits = contentReady
+    ? (payload?.archived ?? fallbackArchivedHits)
+    : fallbackArchivedHits;
+
+  // Below the content-search threshold, keep the previous recent/title-only list.
+  const recentOrTitle = contentReady ? conversationHits : fallbackTitleHits;
+
+  const flatResults = useMemo(() => {
+    const rows: Array<{ key: string; hit: ChatSearchHit; group: "conversation" | "message" | "archived" }> = [];
+    for (const hit of recentOrTitle) rows.push({ key: `c-${hit.conversationId}`, hit, group: "conversation" });
+    for (const hit of messageHits) rows.push({ key: `m-${hit.messageId}`, hit, group: "message" });
+    for (const hit of archivedHits) rows.push({ key: `a-${hit.kind}-${hit.kind === "message" ? hit.messageId : hit.conversationId}`, hit, group: "archived" });
+    return rows;
+  }, [recentOrTitle, messageHits, archivedHits]);
+
+  useEffect(() => { setSelectedIndex(0); }, [trimmed]);
+  useEffect(() => {
+    if (selectedIndex >= flatResults.length) setSelectedIndex(Math.max(0, flatResults.length - 1));
+  }, [flatResults.length, selectedIndex]);
+
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const dialog = dialogRef.current;
     dialog?.showModal();
-    dialog?.querySelector<HTMLInputElement>("input")?.focus();
+    // Prevent unexpected page scroll when focusing the search field.
+    inputRef.current?.focus({ preventScroll: true });
     return () => { dialog?.close(); previous?.focus(); };
   }, []);
-  return <dialog ref={dialogRef} className="chat-search-dialog" aria-labelledby={titleId} onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); onClose(); } }} onCancel={(event) => { event.preventDefault(); onClose(); }} onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+
+  useEffect(() => {
+    if (preview || !contentReady) {
+      setRemote(null);
+      setSearching(false);
+      setMessageSearchFailed(false);
+      return;
+    }
+    const controller = new AbortController();
+    const id = ++requestId.current;
+    setSearching(true);
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/chat/search?q=${encodeURIComponent(trimmed.slice(0, SEARCH_MAX_QUERY))}`, {
+          method: "GET",
+          credentials: "same-origin",
+          headers: { Accept: "application/json" },
+          signal: controller.signal,
+        });
+        if (id !== requestId.current) return;
+        if (!response.ok) {
+          setMessageSearchFailed(true);
+          setRemote({
+            query: trimmed,
+            conversations: localTitleMatches.map((item) => ({
+              kind: "conversation",
+              conversationId: item.id,
+              title: item.title,
+              roomId: item.room_id,
+              roomName: rooms.find((room) => room.id === item.room_id)?.name ?? null,
+              archived: false,
+            })),
+            messages: [],
+            archived: localArchivedTitleMatches.map((item) => ({
+              kind: "conversation",
+              conversationId: item.id,
+              title: item.title,
+              roomId: item.room_id,
+              roomName: rooms.find((room) => room.id === item.room_id)?.name ?? null,
+              archived: true,
+            })),
+            messageSearchFailed: true,
+          });
+          return;
+        }
+        const data = await response.json() as ChatSearchPayload;
+        if (id !== requestId.current) return;
+        setRemote(data);
+        setMessageSearchFailed(Boolean(data.messageSearchFailed));
+      } catch (error) {
+        if (controller.signal.aborted || id !== requestId.current) return;
+        setMessageSearchFailed(true);
+        setRemote({
+          query: trimmed,
+          conversations: localTitleMatches.map((item) => ({
+            kind: "conversation",
+            conversationId: item.id,
+            title: item.title,
+            roomId: item.room_id,
+            roomName: rooms.find((room) => room.id === item.room_id)?.name ?? null,
+            archived: false,
+          })),
+          messages: [],
+          archived: localArchivedTitleMatches.map((item) => ({
+            kind: "conversation",
+            conversationId: item.id,
+            title: item.title,
+            roomId: item.room_id,
+            roomName: rooms.find((room) => room.id === item.room_id)?.name ?? null,
+            archived: true,
+          })),
+          messageSearchFailed: true,
+        });
+        void error;
+      } finally {
+        if (id === requestId.current) setSearching(false);
+      }
+    }, SEARCH_DEBOUNCE_MS);
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [preview, contentReady, trimmed, localTitleMatches, localArchivedTitleMatches, rooms]);
+
+  function activate(hit: ChatSearchHit) {
+    if (hit.archived) return;
+    onClose();
+    if (hit.kind === "message" && onOpenMessage) onOpenMessage(hit.conversationId, hit.messageId);
+    else onOpen(hit.conversationId);
+  }
+
+  function onDialogKeyDown(event: ReactKeyboardEvent<HTMLDialogElement>) {
+    event.stopPropagation();
+    if (event.key === "Escape") { event.preventDefault(); onClose(); return; }
+    if (!flatResults.length) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setSelectedIndex((index) => (index + 1) % flatResults.length);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setSelectedIndex((index) => (index <= 0 ? flatResults.length - 1 : index - 1));
+      return;
+    }
+    if (event.key === "Enter") {
+      const row = flatResults[selectedIndex];
+      if (!row || row.hit.archived) return;
+      event.preventDefault();
+      activate(row.hit);
+    }
+  }
+
+  const total = flatResults.length;
+  const empty = contentReady && !searching && total === 0;
+  const status = !trimmed
+    ? "Search conversation titles and saved message content."
+    : searching
+      ? "Searching…"
+      : messageSearchFailed
+        ? "Message search is temporarily unavailable. Showing conversation titles only."
+        : empty
+          ? "No matching conversations or messages."
+          : `${total} ${total === 1 ? "result" : "results"}`;
+
+  let resultOffset = 0;
+  const conversationStart = resultOffset;
+  resultOffset += recentOrTitle.length;
+  const messageStart = resultOffset;
+  resultOffset += messageHits.length;
+  const archivedStart = resultOffset;
+
+  return <dialog ref={dialogRef} className="chat-search-dialog" aria-labelledby={titleId} onKeyDown={onDialogKeyDown} onCancel={(event) => { event.preventDefault(); onClose(); }} onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <div className="chat-search-panel">
-      <header className="settings-header"><h1 id={titleId}>Search chats</h1><button type="button" className="icon-button" aria-label="Close search" onClick={onClose}><X size={18} /></button></header>
-      <label className="history-search"><Search size={16} aria-hidden="true" /><input type="search" aria-label="Search chat titles, including archived chats" placeholder="Search chat titles" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
+      <header className="settings-header chat-search-header"><h1 id={titleId}>Search chats</h1><button type="button" className="icon-button" aria-label="Close search" onClick={onClose}><X size={18} /></button></header>
+      <label className="history-search chat-search-input">
+        <Search size={16} aria-hidden="true" />
+        <input
+          ref={inputRef}
+          type="search"
+          aria-label="Search conversations and messages"
+          placeholder="Search conversations and messages…"
+          maxLength={SEARCH_MAX_QUERY}
+          value={search}
+          onChange={(event) => setSearch(event.target.value.slice(0, SEARCH_MAX_QUERY))}
+        />
+        {search ? <button type="button" className="chat-search-clear" aria-label="Clear search" onClick={() => { setSearch(""); inputRef.current?.focus({ preventScroll: true }); }}><X size={14} aria-hidden="true" /></button> : null}
+      </label>
       <div className="chat-search-results">
-        <p className="history-search-status" role="status">{query ? count ? `${count} ${count === 1 ? "chat" : "chats"} found` : "No chats found." : "Search chat titles, including archived chats."}</p>
-        {matches.length > 0 && <section className="history-group" aria-label="Chat search results"><h2>{query ? "Chats" : "Recent chats"}</h2>{matches.map((item) => <button type="button" className="history-item" key={item.id} title={item.title} onClick={() => { onClose(); onOpen(item.id); }}><MessageSquare size={15} aria-hidden="true" /><span>{item.title}</span></button>)}</section>}
-        {archivedMatches.length > 0 && <section className="history-group" aria-label="Archived search results"><h2>Archived</h2>{archivedMatches.map((item) => <div className="history-entry" key={item.id}><span className="history-item archived-item" title={item.title}><Archive size={15} aria-hidden="true" /><span>{item.title}</span></span><button type="button" className="history-action" aria-label={`Restore ${item.title}`} title="Restore" onClick={() => onRestore(item)}><RotateCcw size={15} aria-hidden="true" /></button></div>)}</section>}
+        <p className="history-search-status" role="status" aria-live="polite">
+          {searching ? <LoaderCircle size={14} className="chat-search-spinner" aria-hidden="true" /> : null}
+          <span>{status}</span>
+          {empty ? <span className="chat-search-status-secondary">Try a different word or phrase.</span> : null}
+        </p>
+        {recentOrTitle.length > 0 && <section className="history-group" aria-label={contentReady ? "Conversation title matches" : "Recent chats"}>
+          <h2>{contentReady ? "Conversations" : "Recent chats"}</h2>
+          {recentOrTitle.map((hit, index) => {
+            const selected = selectedIndex === conversationStart + index;
+            return <button type="button" className={`chat-search-row is-title${selected ? " is-selected" : ""}`} key={hit.conversationId} aria-label={hit.title} aria-selected={selected} onMouseEnter={() => setSelectedIndex(conversationStart + index)} onClick={() => activate(hit)}>
+              <MessageSquare size={15} aria-hidden="true" />
+              <span className="chat-search-row-body">
+                <span className="chat-search-row-title" aria-hidden="true">{contentReady ? <SearchHighlight text={hit.title} query={trimmed} /> : hit.title}</span>
+                {contentReady ? <span className="chat-search-row-meta" aria-hidden="true">Title match · {contextLabel(hit)}</span> : null}
+              </span>
+            </button>;
+          })}
+        </section>}
+        {messageHits.length > 0 && <section className="history-group" aria-label="Message matches">
+          <h2>Messages</h2>
+          {messageHits.map((hit, index) => {
+            const selected = selectedIndex === messageStart + index;
+            return <button type="button" className={`chat-search-row is-message${selected ? " is-selected" : ""}`} key={hit.messageId} aria-label={`${hit.title}: ${hit.snippet}`} aria-selected={selected} onMouseEnter={() => setSelectedIndex(messageStart + index)} onClick={() => activate(hit)}>
+              <MessageSquare size={15} aria-hidden="true" />
+              <span className="chat-search-row-body" aria-hidden="true">
+                <span className="chat-search-row-title">{hit.title}</span>
+                <span className="chat-search-row-snippet"><SearchHighlight text={hit.snippet} query={trimmed} /></span>
+                <span className="chat-search-row-meta">{contextLabel(hit)}</span>
+              </span>
+            </button>;
+          })}
+        </section>}
+        {archivedHits.length > 0 && <section className="history-group" aria-label="Archived search results">
+          <h2>Archived</h2>
+          {archivedHits.map((hit, index) => {
+            const selected = selectedIndex === archivedStart + index;
+            const summary: ConversationSummary = {
+              id: hit.conversationId,
+              title: hit.title,
+              selected_model: "Balanced",
+              room_id: hit.roomId,
+              archived_at: new Date().toISOString(),
+              created_at: "",
+              updated_at: "",
+            };
+            return <div className={`history-entry chat-search-archived${selected ? " is-selected" : ""}`} key={hit.kind === "message" ? hit.messageId : hit.conversationId} onMouseEnter={() => setSelectedIndex(archivedStart + index)}>
+              <span className="chat-search-row is-archived" title={hit.title}>
+                <Archive size={15} aria-hidden="true" />
+                <span className="chat-search-row-body">
+                  <span className="chat-search-row-title">{contentReady ? <SearchHighlight text={hit.title} query={trimmed} /> : hit.title}</span>
+                  {hit.kind === "message" ? <span className="chat-search-row-snippet"><SearchHighlight text={(hit as ChatSearchMessageHit).snippet} query={trimmed} /></span> : null}
+                  <span className="chat-search-row-meta">{contextLabel(hit)}</span>
+                </span>
+              </span>
+              <button type="button" className="history-action" aria-label={`Restore ${hit.title}`} title="Restore" onClick={() => onRestore(summary)}><RotateCcw size={15} aria-hidden="true" /></button>
+            </div>;
+          })}
+        </section>}
       </div>
     </div>
   </dialog>;
 }
 
 // Memoized: streaming tokens and typing never re-render the history list.
-export const ChatSidebar = memo(function ChatSidebar({ conversations, archivedConversations, rooms, activeId, activeRoomId, busy, activity, preview, email, name, releasePreview = null, renderedAt, mobile = false, drawerRef, closeMenuRef, desktopToggleRef, desktopExpandRef, collapsed = false, settingsActive = false, onCollapse, onExpand, onClose, onOpen, onOpenRoom, onNewThreadInRoom, onDeleteRoom, onCreateRoom, onNewChat, onOpenSettings, onRename, onArchive, onRestore, onMove }: Props) {
+export const ChatSidebar = memo(function ChatSidebar({ conversations, archivedConversations, rooms, activeId, activeRoomId, busy, activity, preview, email, name, releasePreview = null, searchCorpus, renderedAt, mobile = false, drawerRef, closeMenuRef, desktopToggleRef, desktopExpandRef, collapsed = false, settingsActive = false, onCollapse, onExpand, onClose, onOpen, onOpenMessage, onOpenRoom, onNewThreadInRoom, onDeleteRoom, onCreateRoom, onNewChat, onOpenSettings, onRename, onArchive, onRestore, onMove }: Props) {
   // Server render and hydration group by the UTC calendar from the server's clock so both agree; once mounted, the viewer's own clock and
   // time zone are used (the grouping is recomputed whenever the list changes).
   const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false);
@@ -225,6 +523,6 @@ export const ChatSidebar = memo(function ChatSidebar({ conversations, archivedCo
       </form>
     </dialog>}
     <div className="account-area"><div className="account-row"><AccountMenu email={email} name={name} releasePreview={releasePreview} signOutLabel={SIGN_OUT_LABEL} onOpenSettings={onOpenSettings} compact={collapsed && !mobile} /><button type="button" className={"icon-button account-settings" + (settingsActive ? " is-active" : "")} aria-label="Settings" title="Settings" aria-current={settingsActive ? "page" : undefined} onClick={onOpenSettings}><Settings size={16} aria-hidden="true" /></button></div></div>
-    {searchOpen && <ConversationSearchDialog conversations={conversations} archivedConversations={archivedConversations} onOpen={onOpen} onRestore={onRestore} onClose={() => setSearchOpen(false)} />}
+    {searchOpen && <ConversationSearchDialog conversations={conversations} archivedConversations={archivedConversations} rooms={rooms} preview={preview} searchCorpus={searchCorpus} onOpen={onOpen} onOpenMessage={onOpenMessage} onRestore={onRestore} onClose={() => setSearchOpen(false)} />}
   </aside>;
 });
