@@ -41,15 +41,22 @@ test.describe("unified chat search", () => {
 
   test("offers Restore for archived matches and handles Unicode / literals", async ({ page }) => {
     const dialog = await openSearch(page);
-    await dialog.getByRole("searchbox").fill("migrate Supabase");
+    const input = dialog.getByRole("searchbox");
+    await input.fill("migrate Supabase");
     await expect(dialog.getByRole("heading", { name: "Archived" })).toBeVisible();
-    await expect(dialog.getByRole("button", { name: "Restore Old Database Notes" })).toBeVisible();
+    await expect(dialog.locator(".chat-search-clear")).toHaveCount(1);
+    await expect(dialog.getByRole("button", { name: "Restore Old Database Notes" }).first()).toBeVisible();
+    await dialog.getByRole("button", { name: "Restore Old Database Notes" }).first().click();
+    await expect(page.getByRole("dialog", { name: "Search chats" })).toHaveCount(0);
+    await expect(page.locator(".desktop-sidebar").locator('[data-conversation-id="preview-archived-db"]')).toBeVisible();
 
-    await dialog.getByRole("searchbox").fill("100%_");
-    await expect(dialog.getByRole("button", { name: /Debouncing a search box/ }).first()).toBeVisible();
+    await page.locator(".desktop-sidebar").getByRole("button", { name: "Search conversations", exact: true }).click();
+    const again = page.getByRole("dialog", { name: "Search chats" });
+    await again.getByRole("searchbox").fill("100%_");
+    await expect(again.getByRole("button", { name: /Debouncing a search box/ }).first()).toBeVisible();
 
-    await dialog.getByRole("searchbox").fill("debounce");
-    await expect(dialog.getByRole("button", { name: /Debouncing a search box/ }).first()).toBeVisible();
+    await again.getByRole("searchbox").fill("debounce");
+    await expect(again.getByRole("button", { name: /Debouncing a search box/ }).first()).toBeVisible();
   });
 
   test("supports keyboard navigation and Escape", async ({ page }) => {

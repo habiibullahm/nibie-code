@@ -757,7 +757,9 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   });
   const restore = useStableCallback(async (item: ConversationSummary) => {
     if (preview) {
-      setLocalConversations((items) => items.some((entry) => entry.id === item.id) ? items : [{ ...item, archived_at: null }, ...items]);
+      const archived = previewArchivedConversations.find((entry) => entry.id === item.id);
+      const restored = { ...(archived ?? item), archived_at: null };
+      setLocalConversations((items) => items.some((entry) => entry.id === item.id) ? items : [restored, ...items]);
       return;
     }
     const result = await restoreConversationAction(item.id);
@@ -973,8 +975,14 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const roomThreads = activeRoom ? shownConversations.filter((item) => item.room_id === activeRoom.id) : [];
   const searchCorpus = useMemo(() => {
     if (!preview) return undefined;
-    return [...previewConversations, ...previewArchivedConversations];
-  }, [preview, previewConversations, previewArchivedConversations]);
+    // Exclude preview archived threads the user already restored in this session.
+    const restoredIds = new Set(localConversations.map((item) => item.id));
+    return [
+      ...previewConversations,
+      ...previewArchivedConversations.filter((item) => !restoredIds.has(item.id)),
+      ...localConversations,
+    ];
+  }, [preview, previewConversations, previewArchivedConversations, localConversations]);
   const sidebarProps = { conversations: shownConversations, archivedConversations: preview ? previewArchivedConversations.filter((item) => !localConversations.some((entry) => entry.id === item.id)) : archivedConversations, rooms, activeId: history, activeRoomId: showRoom ? selectedRoomId : threadRoom?.id ?? null, busy: controlsDisabled || recovering, activity: assistantActivity, preview, email, name: accountName, releasePreview, renderedAt, settingsActive: settingsOpen, searchCorpus, onClose: closeDrawer, onOpen: openConversation, onOpenMessage: openConversationAtMessage, onOpenRoom: openRoom, onNewThreadInRoom: newThreadInRoom, onDeleteRoom: deleteRoomFromSidebar, onCreateRoom: openRoomSetup, onNewChat: newChat, onOpenSettings: openSettings, onRename: rename, onArchive: archive, onRestore: restore, onMove: moveThread };
   const composerProps = { ref: composerRef, dockRef: composerDockRef, sending: sending || recovering || movingThread !== null, streaming, mode, models, onModelChange: changeModel, researchMode, onResearchModeChange: setResearchMode, savingMode, caption, diagnostics: contextDiagnostics ?? contextPreview, onEditProfile: editProfile, onSubmit: submitMessage, onStop: stopStream, onAttach: attach, attachmentsEnabled: !preview, onRoomFiles: threadRoom && !preview ? toggleRoomFiles : undefined, roomItems, roomId: threadRoomId ?? "", roomLabel, roomSelectionNotice, roomsLoading, onRoomChange: activeId ? rooms.length ? changeComposerRoom : undefined : chooseDraftRoom, attachmentPanel: filePickerOpen && threadRoom ? <RoomFilePicker roomId={threadRoom.id} selectedIds={selectedFileIds} disabled={controlsDisabled || sending || streaming} onChange={setSelectedFileIds} /> : null };
 

@@ -248,8 +248,25 @@ function ConversationSearchDialog({
     };
   }, [preview, contentReady, trimmed, localTitleMatches, localArchivedTitleMatches, rooms]);
 
+  function restoreHit(hit: ChatSearchHit) {
+    const summary: ConversationSummary = {
+      id: hit.conversationId,
+      title: hit.title,
+      selected_model: "Balanced",
+      room_id: hit.roomId,
+      archived_at: new Date().toISOString(),
+      created_at: "",
+      updated_at: "",
+    };
+    onClose();
+    onRestore(summary);
+  }
+
   function activate(hit: ChatSearchHit) {
-    if (hit.archived) return;
+    if (hit.archived) {
+      restoreHit(hit);
+      return;
+    }
     onClose();
     if (hit.kind === "message" && onOpenMessage) onOpenMessage(hit.conversationId, hit.messageId);
     else onOpen(hit.conversationId);
@@ -277,7 +294,7 @@ function ConversationSearchDialog({
     }
     if (event.key === "Enter") {
       const row = flatResults[activeIndex];
-      if (!row || row.hit.archived) return;
+      if (!row) return;
       event.preventDefault();
       activate(row.hit);
     }
@@ -355,25 +372,17 @@ function ConversationSearchDialog({
           <h2>Archived</h2>
           {archivedHits.map((hit, index) => {
             const selected = activeIndex === archivedStart + index;
-            const summary: ConversationSummary = {
-              id: hit.conversationId,
-              title: hit.title,
-              selected_model: "Balanced",
-              room_id: hit.roomId,
-              archived_at: new Date().toISOString(),
-              created_at: "",
-              updated_at: "",
-            };
-            return <div className={`history-entry chat-search-archived${selected ? " is-selected" : ""}`} key={hit.kind === "message" ? hit.messageId : hit.conversationId} onMouseEnter={() => setSelectedIndex(archivedStart + index)}>
-              <span className="chat-search-row is-archived" title={hit.title}>
+            const key = hit.kind === "message" ? hit.messageId : hit.conversationId;
+            return <div className={`history-entry chat-search-archived${selected ? " is-selected" : ""}`} key={key} onMouseEnter={() => setSelectedIndex(archivedStart + index)}>
+              <button type="button" className="chat-search-row is-archived" aria-label={`Restore ${hit.title}`} aria-current={selected ? "true" : undefined} title={`Restore ${hit.title}`} onClick={() => restoreHit(hit)}>
                 <Archive size={15} aria-hidden="true" />
-                <span className="chat-search-row-body">
+                <span className="chat-search-row-body" aria-hidden="true">
                   <span className="chat-search-row-title">{contentReady ? <SearchHighlight text={hit.title} query={trimmed} /> : hit.title}</span>
                   {hit.kind === "message" ? <span className="chat-search-row-snippet"><SearchHighlight text={(hit as ChatSearchMessageHit).snippet} query={trimmed} /></span> : null}
-                  <span className="chat-search-row-meta">{contextLabel(hit)}</span>
+                  <span className="chat-search-row-meta">{contextLabel(hit)} · Restore to open</span>
                 </span>
-              </span>
-              <button type="button" className="history-action" aria-label={`Restore ${hit.title}`} title="Restore" onClick={() => onRestore(summary)}><RotateCcw size={15} aria-hidden="true" /></button>
+              </button>
+              <button type="button" className="history-action" aria-label={`Restore ${hit.title}`} title="Restore" onClick={() => restoreHit(hit)}><RotateCcw size={15} aria-hidden="true" /></button>
             </div>;
           })}
         </section>}
