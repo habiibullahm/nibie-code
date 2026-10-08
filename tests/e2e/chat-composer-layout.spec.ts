@@ -216,6 +216,9 @@ test("expand and collapse preserve draft, focus, selection, and send reset", asy
   await expand.click();
   await expect(page.getByRole("button", { name: "Collapse composer" })).toBeVisible();
   await page.getByRole("button", { name: "Collapse composer" }).click();
+  // Collapse restores selection on the next animation frame; wait past that before choosing a range to assert.
+  await expect(textarea).toBeFocused();
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   await textarea.evaluate((element: HTMLTextAreaElement) => {
     element.focus();
     element.setSelectionRange(12, 24);
@@ -246,7 +249,7 @@ test("expand and collapse preserve draft, focus, selection, and send reset", asy
 test("Room and model menus align to their controls", async ({ page }) => {
   await openSampleConversation(page, 1440, 900);
   const controls = page.locator(".composer-secondary-tools");
-  for (const { name, menuName } of [{ name: /^Room:/, menuName: "Select room" }, { name: /^Model:/, menuName: "Model" }]) {
+  for (const { name, menuName } of [{ name: /^Room:/, menuName: "Select room" }, { name: /^Model:/, menuName: "Select model" }]) {
     const button = controls.getByRole("button", { name });
     const buttonBox = await button.boundingBox();
     await button.click();
