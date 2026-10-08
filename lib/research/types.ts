@@ -33,8 +33,8 @@ export type ResearchContradiction = {
 };
 
 export type ResearchUsagePolicy = {
-  /** Stable id for the temporary metering policy. */
-  id: "temporary_undercount_v1";
+  /** Stable id for the research metering policy. */
+  id: "research_metered_v1" | "temporary_undercount_v1";
   /** Human-readable honesty note for docs/logs (never secrets). */
   summary: string;
 };

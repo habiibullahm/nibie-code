@@ -25,27 +25,27 @@ describe("provider adapter routes each mode server-side", () => {
   it("Fast calls the gateway with DeepSeek V4.1 Flash and an explicit output ceiling so hidden reasoning cannot use it all", async () => {
     configure(); const { body, sent } = stubFetch();
     expect(await openAiCompatibleProvider.stream("Fast", messages, new AbortController().signal)).toBe(body);
-    expect(sent(0)).toEqual({ url: "https://gateway.invalid/v1/chat/completions", authorization: "Bearer gateway-key", body: { model: "deepseek-v4.1-flash:netra", messages, stream: true, max_tokens: 8192 } });
+    expect(sent(0)).toEqual({ url: "https://gateway.invalid/v1/chat/completions", authorization: "Bearer gateway-key", body: { model: "deepseek-v4.1-flash:netra", messages, stream: true, stream_options: { include_usage: true }, max_tokens: 8192 } });
   });
 
   it("Balanced calls OpenAI with GPT-6 Luna and sends no reasoning parameter", async () => {
     configure(); const { sent } = stubFetch();
     await openAiCompatibleProvider.stream("Balanced", messages, new AbortController().signal);
-    expect(sent(0)).toEqual({ url: "https://api.openai.com/v1/chat/completions", authorization: "Bearer openai-key", body: { model: "gpt-6-luna", messages, stream: true } });
+    expect(sent(0)).toEqual({ url: "https://api.openai.com/v1/chat/completions", authorization: "Bearer openai-key", body: { model: "gpt-6-luna", messages, stream: true, stream_options: { include_usage: true } } });
   });
 
   it("High calls OpenAI with GPT-6.1 Sol and always sends reasoning_effort high", async () => {
     configure(); const { sent } = stubFetch();
     await openAiCompatibleProvider.stream("High", messages, new AbortController().signal);
-    expect(sent(0)).toEqual({ url: "https://api.openai.com/v1/chat/completions", authorization: "Bearer openai-key", body: { model: "gpt-6.1-sol", messages, stream: true, reasoning_effort: "high" } });
+    expect(sent(0)).toEqual({ url: "https://api.openai.com/v1/chat/completions", authorization: "Bearer openai-key", body: { model: "gpt-6.1-sol", messages, stream: true, stream_options: { include_usage: true }, reasoning_effort: "high" } });
   });
 
   it("Balanced sends medium when the server configures it, High keeps its own setting, and Fast never sends one", async () => {
     configure(); const { sent } = stubFetch();
     vi.stubEnv("OPENAI_BALANCED_REASONING_EFFORT", "medium"); vi.stubEnv("OPENAI_HIGH_REASONING_EFFORT", "high");
     for (const mode of ["Balanced", "High", "Fast"] as const) await openAiCompatibleProvider.stream(mode, messages, new AbortController().signal);
-    expect(sent(0).body).toEqual({ model: "gpt-6-luna", messages, stream: true, reasoning_effort: "medium" });
-    expect(sent(1).body).toEqual({ model: "gpt-6.1-sol", messages, stream: true, reasoning_effort: "high" });
+    expect(sent(0).body).toEqual({ model: "gpt-6-luna", messages, stream: true, stream_options: { include_usage: true }, reasoning_effort: "medium" });
+    expect(sent(1).body).toEqual({ model: "gpt-6.1-sol", messages, stream: true, stream_options: { include_usage: true }, reasoning_effort: "high" });
     expect(sent(2).body).not.toHaveProperty("reasoning_effort");
     // The output ceiling belongs to the Sumopod request only; OpenAI reasoning models use a different parameter and are left alone.
     expect(sent(0).body).not.toHaveProperty("max_tokens");
@@ -78,7 +78,7 @@ describe("provider adapter routes each mode server-side", () => {
     configure(); const { fetchMock, sent } = stubFetch();
     vi.stubEnv("OPENAI_BASE_URL", "http://not-https.example"); vi.stubEnv("OPENAI_BALANCED_REASONING_EFFORT", "nonsense"); vi.stubEnv("OPENAI_HIGH_REASONING_EFFORT", "nonsense");
     await openAiCompatibleProvider.stream("Fast", messages, new AbortController().signal);
-    expect(sent(0)).toEqual({ url: "https://gateway.invalid/v1/chat/completions", authorization: "Bearer gateway-key", body: { model: "deepseek-v4.1-flash:netra", messages, stream: true, max_tokens: 8192 } });
+    expect(sent(0)).toEqual({ url: "https://gateway.invalid/v1/chat/completions", authorization: "Bearer gateway-key", body: { model: "deepseek-v4.1-flash:netra", messages, stream: true, stream_options: { include_usage: true }, max_tokens: 8192 } });
     for (const mode of ["Balanced", "High"] as const) await expect(openAiCompatibleProvider.stream(mode, messages, new AbortController().signal)).rejects.toThrow(`Unavailable model mode: ${mode}`);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

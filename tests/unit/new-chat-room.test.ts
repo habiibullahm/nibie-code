@@ -18,7 +18,7 @@ const { withoutAttachments } = vi.hoisted(() => {
   } };
 });
 vi.mock("@/lib/supabase/server", () => ({ createSupabaseServerClient: async () => withoutAttachments(await createClient()) }));
-vi.mock("@/lib/ai/provider", () => ({ chatProvider: { stream } }));
+vi.mock("@/lib/ai/provider", () => ({ chatProvider: { stream }, configuredModelLabel: (mode: string) => mode }));
 vi.mock("@/lib/ai/registry", () => ({
   getModelOptions: () => ({ models: [{ id: "Balanced", label: "Balanced", description: "" }] }),
   contextCapabilitiesFor: () => ({ contextWindowTokens: 16_384, maxOutputTokens: 2_048 }),
@@ -72,6 +72,12 @@ describe("new chat room persistence and server context", () => {
       ? { id: messageId, position: 1 }
       : name === "reserve_weekly_ai_usage"
         ? { accepted: true, credits_charged: 3, credits_used: 3, credits_remaining: 497, reset_at: "2026-10-05T00:00:00.000Z" }
+        : name === "reserve_ai_spend"
+        ? { accepted: true, reserved_micros: 150000, user_remaining_micros: 4850000, global_remaining_micros: 49850000 }
+        : name === "finalize_ai_spend"
+          ? true
+        : name === "release_ai_spend"
+          ? true
         : name === "start_weekly_ai_usage"
           ? true
         : { id: assistantId, position: 2, content: "", status: "streaming", replayed: false }));
@@ -133,7 +139,13 @@ describe("new chat room persistence and server context", () => {
     });
     createClient.mockResolvedValue({ auth, from, rpc: (name: string) => query(name === "reserve_weekly_ai_usage"
       ? { accepted: true, credits_charged: 3, credits_used: 3, credits_remaining: 497, reset_at: "2026-10-05T00:00:00.000Z" }
-      : name === "start_weekly_ai_usage" ? true : { id: assistantId, position: 3, content: "", status: "streaming", replayed: false }) });
+      : name === "reserve_ai_spend"
+        ? { accepted: true, reserved_micros: 150000, user_remaining_micros: 4850000, global_remaining_micros: 49850000 }
+        : name === "finalize_ai_spend"
+          ? true
+        : name === "release_ai_spend"
+          ? true
+        : name === "start_weekly_ai_usage" ? true : { id: assistantId, position: 3, content: "", status: "streaming", replayed: false }) });
     for (const target of [roomId, roomB, null]) {
       from.mockClear(); reads = 0; stream.mockClear();
       expect(await moveConversationAction(conversationId, target)).toEqual({});

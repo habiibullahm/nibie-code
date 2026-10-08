@@ -5,9 +5,9 @@ import type { ActionCapability, ActionErrorCode, ActionRunStatus } from "@/lib/a
 import { createActionAuditClient } from "@/lib/supabase/service-role";
 
 const SECRET_KEY =
-  /^(?:.*(?:api[_-]?key|access[_-]?token|refresh[_-]?token|secret|password|passwd|authorization|cookie|credential|bearer|private[_-]?key).*)$/i;
+  /(?:api[_-]?key|access[_-]?token|refresh[_-]?token|github[_-]?token|^token$|secret|password|passwd|authorization|cookie|credential|bearer|private[_-]?key)/i;
 const SECRET_VALUE =
-  /\b(?:sk-[a-zA-Z0-9]{10,}|Bearer\s+[A-Za-z0-9._-]{8,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b/g;
+  /\b(?:sk-[a-zA-Z0-9]{10,}|gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|Bearer\s+[A-Za-z0-9._-]{8,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b/g;
 
 const MAX_SUMMARY_LEN = 240;
 

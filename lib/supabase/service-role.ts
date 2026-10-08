@@ -4,10 +4,10 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { getSupabasePublicConfig } from "@/lib/config/supabase";
 
 /**
- * Server-only Supabase client for privileged Action audit RPCs.
+ * Server-only Supabase client for privileged RPCs (Action audit, AI spend, reconcile).
  * Never import from client components. Never put this key in NEXT_PUBLIC_*.
  */
-export function createActionAuditClient(
+export function createServiceRoleClient(
   env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env,
 ): SupabaseClient | null {
   const key = env.SUPABASE_SERVICE_ROLE_KEY?.trim();
@@ -31,6 +31,13 @@ export function createActionAuditClient(
       detectSessionInUrl: false,
     },
   });
+}
+
+/** Back-compat alias used by Action audit call sites. */
+export function createActionAuditClient(
+  env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env,
+): SupabaseClient | null {
+  return createServiceRoleClient(env);
 }
 
 function isServiceRoleMaterial(key: string): boolean {

@@ -33,6 +33,7 @@ import {
   executeAction,
   fenceActionText,
   formatActionResultForModel,
+  GITHUB_READ_ACTION_IDS,
   MAX_ACTIONS_PER_GENERATION,
   sanitizeActionInputSummary,
   WEB_SEARCH_ACTION_ID,
@@ -50,12 +51,15 @@ function ctx(signal: AbortSignal = new AbortController().signal): ActionExecutio
 }
 
 describe("Actions registry", () => {
-  it("allowlists web.search and rejects unknown ids", () => {
+  it("allowlists web.search + GitHub Read Actions and rejects unknown ids", () => {
     expect(isRegisteredAction(WEB_SEARCH_ACTION_ID)).toBe(true);
     expect(getAction(WEB_SEARCH_ACTION_ID)?.capability).toBe("read");
-    expect(listRegisteredActions().map((a) => a.id)).toEqual([WEB_SEARCH_ACTION_ID]);
+    const ids = listRegisteredActions().map((a) => a.id);
+    expect(ids).toEqual([WEB_SEARCH_ACTION_ID, ...GITHUB_READ_ACTION_IDS]);
+    expect(ids.every((id) => getAction(id)?.capability === "read")).toBe(true);
     expect(isRegisteredAction("shell.exec")).toBe(false);
     expect(getAction("gmail.send")).toBeUndefined();
+    expect(getAction("github.issues.create")).toBeUndefined();
   });
 });
 
@@ -91,11 +95,13 @@ describe("Actions audit sanitize", () => {
       apiKey: "sk-secret-should-not-persist",
       authorization: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.aaaa.bbbb",
       cookie: "session=abc",
+      github_token: "ghp_" + "x".repeat(36),
     });
     expect(summary).toContain("latest Node.js");
     expect(summary).not.toContain("sk-secret");
     expect(summary).not.toContain("Bearer");
     expect(summary).not.toContain("session=abc");
+    expect(summary).not.toContain("ghp_");
     expect(summary).toContain("[redacted]");
     expect(summary.length).toBeLessThanOrEqual(240);
   });

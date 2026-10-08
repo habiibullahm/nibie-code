@@ -8,6 +8,7 @@ What's new in Nibie.
 
 ### Added
 
+- Nibie now enforces an AI spend budget separate from your weekly credits, so expensive replies stop with a clear “try again later” message when the budget is reached instead of keeping spend going.
 - Code in Nibie's answers is now syntax-highlighted in calm, muted colors for common languages, including shell commands and their flags.
 - When Nibie searches the web for a reply, you can see “Searching the web…” while it runs and “Used Web Search” on the finished answer — a first step toward clear, stoppable Actions without changing ordinary chat.
 - Choose Deep Research from the Research menu for a bounded multi-source researched answer with citations, progress stages, and Incomplete/Failed labels when collection is partial or fails.
@@ -22,7 +23,12 @@ What's new in Nibie.
 
 ### Changed
 
+<<<<<<< HEAD
 - Composer controls show clear Room, Model, and Deep Research Off/On labels; Deep Research On has a stronger selected state; wait labels stay mode-aware (Responding…, Thinking… in High, Researching… in Deep Research); replies have a slightly tighter vertical rhythm for easier scanning.
+=======
+- Deep Research now uses a higher weekly credit cost that covers the full multi-step research run (planning, search, and synthesis), not just a single reply.
+- Model and Research controls are clearer: Research shows Off or Deep Research (with a stronger selected state when Deep Research is on), and replies have a slightly tighter vertical rhythm for easier scanning.
+>>>>>>> origin/main
 - Improved message input readability, code example controls, and conversation navigation across desktop and mobile.
 - Sources under a reply are now tucked into a single quiet line showing where the answer came from; open it to see each source with its title and site, or click a citation number to jump straight to it.
 - Nibie now uses an abstract ribbon mark instead of a letter-like symbol. Replies are shown as plain text without a name header, and a quiet status (Responding…, Thinking… in High, or Researching… in Deep Research) appears only if the wait lasts more than a moment and disappears as soon as the answer starts.
@@ -38,6 +44,7 @@ What's new in Nibie.
 
 ### Fixed
 
+- Deep Research dollar accounting now includes planner, search, and synthesis costs, so stopping or failing mid-run no longer refunds work that already ran.
 - Web Search and Deep Research no longer lose a valid weekly credit reservation between the allowance check and the reply, which could block an answer even when credits remained.
 - Web search now grounds Indonesian market condition/direction asks (for example “kondisi IHSG”, “arah pasar saham”) even when the message omits an explicit freshness word like “hari ini”, while still skipping definitional asks like “apa itu IHSG?”.
 - Web citation markers no longer appear as raw `[SOURCE:web:…]` text when the model streams a handle across chunk boundaries; they convert to clickable `[n]` markers with the Sources list.
