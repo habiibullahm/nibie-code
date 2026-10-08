@@ -64,6 +64,7 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const selectionRef = useRef<{ start: number; end: number; direction: "forward" | "backward" | "none" } | null>(null);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
   const attachments = useDraftAttachments();
@@ -90,6 +91,16 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
     }
     setCanExpand(fitCollapsedTextarea(element));
   }, [draft, expanded, attachments.items.length]);
+  // Remember the last focused selection so Expand/Collapse can restore it after the button steals focus.
+  useEffect(() => {
+    const onSelectionChange = () => {
+      const element = textareaRef.current;
+      if (!element || document.activeElement !== element) return;
+      selectionRef.current = { start: element.selectionStart, end: element.selectionEnd, direction: element.selectionDirection };
+    };
+    document.addEventListener("selectionchange", onSelectionChange);
+    return () => document.removeEventListener("selectionchange", onSelectionChange);
+  }, []);
   useEffect(() => {
     const element = textareaRef.current;
     if (!element) return;
@@ -196,7 +207,7 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
 
   function toggleExpanded() {
     const textarea = textareaRef.current;
-    const selection = textarea ? { start: textarea.selectionStart, end: textarea.selectionEnd, direction: textarea.selectionDirection } : null;
+    const selection = selectionRef.current ?? (textarea ? { start: textarea.selectionStart, end: textarea.selectionEnd, direction: textarea.selectionDirection } : null);
     setExpanded((value) => !value);
     requestAnimationFrame(() => {
       if (!textarea) return;
@@ -218,10 +229,10 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
     {attachmentPanel}
     <div ref={composerRef} className={`composer${expanded ? " is-expanded" : ""}${dragging ? " is-dropping" : ""}`} role={expanded ? "dialog" : undefined} aria-modal={expanded ? "true" : undefined} aria-label={expanded ? "Expanded message composer" : undefined} onKeyDown={handleExpandedKeyDown}>
       <form ref={formRef} className={`composer-form${hasAttachments ? " has-attachments" : ""}${isActive ? " is-active" : ""}`} onSubmit={(event) => { event.preventDefault(); submit(); }}>
-        {expanded ? <div className="composer-expanded-header"><span className="composer-expanded-label">Message</span><button className="composer-icon" type="button" aria-label="Collapse composer" title="Collapse composer" aria-expanded="true" onClick={toggleExpanded}><Minimize2 size={16} aria-hidden="true" /></button></div> : null}
+        {expanded ? <div className="composer-expanded-header"><span className="composer-expanded-label">Message</span><button className="composer-icon" type="button" aria-label="Collapse composer" title="Collapse composer" aria-expanded="true" onMouseDown={(event) => event.preventDefault()} onClick={toggleExpanded}><Minimize2 size={16} aria-hidden="true" /></button></div> : null}
         <div className="composer-content">
           <ComposerAttachments items={attachments.items} notice={attachments.notice} disabled={sending} onRemove={attachments.remove} onRetry={attachments.retry} />
-          <textarea ref={textareaRef} aria-label="Message Nibie" placeholder={centered ? "Ask Nibie anything..." : "Reply to Nibie..."} enterKeyHint={enterToSend ? "send" : "enter"} value={draft} rows={1} onChange={(event) => { expandedBeforeClearRef.current = null; setDraft(event.target.value); }} onKeyDown={handleKeyDown} />
+          <textarea ref={textareaRef} aria-label="Message Nibie" placeholder={centered ? "Ask Nibie anything..." : "Reply to Nibie..."} enterKeyHint={enterToSend ? "send" : "enter"} value={draft} rows={1} onChange={(event) => { expandedBeforeClearRef.current = null; setDraft(event.target.value); }} onKeyDown={handleKeyDown} onSelect={(event) => { const element = event.currentTarget; selectionRef.current = { start: element.selectionStart, end: element.selectionEnd, direction: element.selectionDirection }; }} />
         </div>
         {attachmentsEnabled ? <input ref={fileInputRef} className="composer-file-input" type="file" multiple accept={ATTACHMENT_ACCEPT} tabIndex={-1} aria-hidden="true" onChange={(event) => { attachments.add([...(event.target.files ?? [])]); event.target.value = ""; }} /> : null}
         <div className="composer-footer">
@@ -234,7 +245,7 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
           </span>
           <div className="composer-actions">
             <ContextIndicator diagnostics={diagnostics} onEditProfile={onEditProfile} />
-            {!expanded && canExpand ? <button className="composer-icon composer-expand" type="button" aria-label="Expand composer" title="Expand composer" aria-expanded="false" onClick={toggleExpanded}><Maximize2 size={16} aria-hidden="true" /></button> : null}
+            {!expanded && canExpand ? <button className="composer-icon composer-expand" type="button" aria-label="Expand composer" title="Expand composer" aria-expanded="false" onMouseDown={(event) => event.preventDefault()} onClick={toggleExpanded}><Maximize2 size={16} aria-hidden="true" /></button> : null}
             {streaming ? <button key="stop" className="send-button" type="button" aria-label="Stop response" onClick={onStop}><X size={18} /></button> : <button key="send" className="send-button" type="submit" aria-label="Send message" disabled={!draft.trim() || sending || attachmentsBlocked}>{sending ? <span className="send-spinner" /> : <ArrowUp size={18} strokeWidth={2.3} />}</button>}
           </div>
         </div>

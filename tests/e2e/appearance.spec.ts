@@ -17,7 +17,7 @@ test.describe("theme", () => {
     const page = await context.newPage();
     await page.goto("/login");
     expect(await theme(page)).toBe("dark");
-    expect(await background(page)).toBe("rgb(21, 20, 18)");
+    expect(await background(page)).toBe("rgb(23, 23, 23)");
     await context.close();
   });
 
@@ -101,7 +101,7 @@ test.describe("brand", () => {
     await expect(page.locator('link[rel~="icon"]').first()).toHaveAttribute("href", /icon/);
     await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveCount(1);
     await expect(page.locator('meta[name="application-name"]')).toHaveAttribute("content", "Nibie");
-    await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute("content", "#151412");
+    await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute("content", "#171717");
   });
 });
 

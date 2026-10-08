@@ -33,13 +33,16 @@ for (const [width, height] of [[390, 844], [1024, 768], [1440, 900]] as const) {
     const result = await layout(page);
     expect(result.pageOverflow).toBe(0);
     expect(result.markdownOverflow).toBe(0);
-    // Chat-sized hierarchy: body 14–15px, H2 at most ~17px, H3 between body and H2, inline code smaller than its text.
+    // Chat-sized hierarchy: body 15.5px (Phase A), H2 at most ~17px, H3 between body and H2, inline code smaller than its text.
     expect(result.body).toBeGreaterThanOrEqual(14);
-    expect(result.body).toBeLessThanOrEqual(15);
+    expect(result.body).toBeLessThanOrEqual(15.5);
     expect(result.listItem).toBe(result.body);
     expect(result.h2).toBeLessThanOrEqual(17);
     expect(result.h2).toBeGreaterThan(result.h3);
-    expect(result.h3).toBeGreaterThanOrEqual(result.body);
+    // H3: 15px desktop (under body); 16px mobile (between body 15.5 and H2 16.5).
+    expect(result.h3).toBeGreaterThanOrEqual(15);
+    if (width <= 760) expect(result.h3).toBeGreaterThanOrEqual(result.body);
+    else expect(result.h3).toBeLessThanOrEqual(result.body);
     expect(result.inlineCode).toBeLessThan(result.body);
     // Long code lines scroll inside the block; the table never grows past the answer.
     expect(result.codeScrollsInside).toBe(true);
@@ -73,22 +76,22 @@ test("a stray H1 is no larger than H2", async ({ page }) => {
   expect(sizes[0]).toBeLessThanOrEqual(sizes[1]);
 });
 
-test("the code block copy icon copies the exact code and confirms it", async ({ page, context }) => {
+test("the code block Copy and Wrap controls copy the exact code and confirm it", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await openSample(page);
   const copy = page.getByRole("button", { name: "Copy ts code block" });
+  const wrap = page.getByRole("button", { name: "Wrap code" });
   await expect(copy.locator("svg.lucide-copy")).toBeVisible();
-  // Icon only: no visible label, a compact square target.
-  const hiddenLabel = async () => (await copy.locator("span").boundingBox())!.width;
-  expect(await hiddenLabel()).toBeLessThanOrEqual(1);
-  const box = (await copy.boundingBox())!;
-  expect(box.width).toBeLessThanOrEqual(34);
+  await expect(copy).toContainText("Copy");
+  await expect(wrap).toContainText("Wrap");
+  await expect(wrap).toHaveAttribute("aria-pressed", "false");
+  await wrap.click();
+  await expect(wrap).toHaveAttribute("aria-pressed", "true");
+  await expect(wrap).toContainText("Unwrap");
   await copy.click();
   await expect(copy.locator("svg.lucide-check")).toBeVisible();
-  // "Copied" is announced to screen readers and shown as the tooltip, not as visible text.
   await expect(copy).toContainText("Copied");
   await expect(copy).toHaveAttribute("title", "Copied");
-  expect(await hiddenLabel()).toBeLessThanOrEqual(1);
   const copied = await page.evaluate(() => navigator.clipboard.readText());
   expect(copied.startsWith("export async function cachedFetch(url: string, etag?: string)")).toBe(true);
   expect(copied.endsWith("}")).toBe(true);

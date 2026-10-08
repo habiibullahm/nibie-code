@@ -52,15 +52,16 @@ describe("assistant formatting examples", () => {
     expect(html).toContain("<code>groupBy</code>");
   });
 
-  it("every fenced code block has a copy button with a copy icon, with or without a language", () => {
+  it("every fenced code block has labelled Copy and Wrap controls, with or without a language", () => {
     const html = render("```bash\nnpm run build\n```\n\n```\nplain text block\n```");
-    expect((html.match(/<button[^>]*class="copy-button is-compact is-icon-only"/g) ?? []).length).toBe(2);
+    expect((html.match(/copy-button is-compact/g) ?? []).length).toBe(4);
     expect(html).toContain('aria-label="Copy bash code block"');
     expect(html).toContain('aria-label="Copy code block"');
-    // Icon only: the copy icon is the whole visible control; the name comes from aria-label and the tooltip.
-    expect((html.match(/<button[^>]*class="copy-button is-compact is-icon-only"[^>]*><svg[^>]*lucide-copy/g) ?? []).length).toBe(2);
-    expect((html.match(/<span class="visually-hidden" aria-live="polite"><\/span>/g) ?? []).length).toBe(2);
-    expect(html).not.toMatch(/>Copy</);
+    expect((html.match(/aria-label="Wrap code"/g) ?? []).length).toBe(2);
+    expect((html.match(/lucide-copy/g) ?? []).length).toBe(2);
+    expect((html.match(/lucide-wrap-text/g) ?? []).length).toBe(2);
+    expect(html).toMatch(/>Copy</);
+    expect(html).toMatch(/>Wrap</);
     expect(html).toContain('<div class="code-block-header"><span>text</span>');
   });
 

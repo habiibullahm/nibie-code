@@ -44,8 +44,8 @@ function CodeBlock({ language, text }: { language: string | undefined; text: str
     <div className="code-block-header">
       <span>{language ?? "text"}</span>
       <div className="code-block-actions">
-        <button type="button" className="copy-button is-compact is-icon-only code-wrap-button" aria-label="Wrap code" aria-pressed={wrapped} title={wrapped ? "Disable line wrapping" : "Enable line wrapping"} onClick={() => setWrapped((value) => !value)}><WrapText size={14} aria-hidden="true" /></button>
-        <CopyButton text={text} label={language ? `Copy ${language} code block` : "Copy code block"} compact iconOnly />
+        <button type="button" className="copy-button is-compact code-wrap-button" aria-label={wrapped ? "Unwrap code" : "Wrap code"} aria-pressed={wrapped} title={wrapped ? "Disable line wrapping" : "Enable line wrapping"} onClick={() => setWrapped((value) => !value)}><WrapText size={13} aria-hidden="true" /><span>{wrapped ? "Unwrap" : "Wrap"}</span></button>
+        <CopyButton text={text} label={language ? `Copy ${language} code block` : "Copy code block"} compact />
       </div>
     </div>
     <pre tabIndex={0}><code>{highlighted ?? text}</code></pre>
