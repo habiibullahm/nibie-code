@@ -127,6 +127,8 @@ describe("Supabase row-level security", () => {
     await sql`drop type if exists public.citation_source_kind cascade`;
     await sql`drop table if exists public.attachment_upload_sessions cascade`;
     await sql`drop table if exists public.message_attachments cascade`;
+    await sql`drop table if exists public.workbench_document_versions cascade`;
+    await sql`drop table if exists public.workbench_revision_runs cascade`;
     await sql`drop table if exists public.workbench_documents cascade`;
     // Chunks reference room_files; drop them first so a re-migrate after incomplete cleanup cannot hit 42P07.
     await sql`drop table if exists public.room_file_chunks cascade`;
@@ -585,6 +587,28 @@ describe("Supabase row-level security", () => {
       values (${userB}, ${docGeneral}, 'generating', 'Steal', 2, 'CAS', 'next')
     `)).rejects.toThrow();
 
+    const versionId = randomUUID();
+    await asUser(userA, (tx) => tx`
+      insert into public.workbench_document_versions
+        (id, user_id, document_id, source, title, content, document_revision)
+      values (${versionId}, ${userA}, ${docGeneral}, 'manual', 'CAS', 'next', 2)
+    `);
+    const hiddenVersion = await asUser(userB, (tx) => tx`select id from public.workbench_document_versions where id = ${versionId}`);
+    expect(hiddenVersion).toHaveLength(0);
+    await expect(asUser(userB, (tx) => tx`
+      insert into public.workbench_document_versions
+        (user_id, document_id, source, title, content, document_revision)
+      values (${userB}, ${docGeneral}, 'manual', 'Stolen', 'no', 2)
+    `)).rejects.toThrow();
+    const { versionUpdated, versionDeleted } = await asUser(userB, async (tx) => ({
+      versionUpdated: await tx`update public.workbench_document_versions set title = 'hijacked' where id = ${versionId} returning id`,
+      versionDeleted: await tx`delete from public.workbench_document_versions where id = ${versionId} returning id`,
+    }));
+    expect(versionUpdated).toHaveLength(0);
+    expect(versionDeleted).toHaveLength(0);
+    const [ownerVersion] = await sql`select title, content from public.workbench_document_versions where id = ${versionId}`;
+    expect(ownerVersion).toEqual({ title: "CAS", content: "next" });
+
     await asUser(userA, (tx) => tx`delete from public.rooms where id = ${roomA}`);
     const [detached] = await asUser(userA, (tx) => tx`select room_id, title, content from public.workbench_documents where id = ${docRoom}`);
     expect(detached).toEqual({ room_id: null, title: "In room", content: "body" });
@@ -592,6 +616,8 @@ describe("Supabase row-level security", () => {
     await asUser(userA, (tx) => tx`delete from public.workbench_documents where id = ${docGeneral}`);
     const gone = await asUser(userA, (tx) => tx`select id from public.workbench_documents where id = ${docGeneral}`);
     expect(gone).toHaveLength(0);
+    const goneVersions = await asUser(userA, (tx) => tx`select id from public.workbench_document_versions where document_id = ${docGeneral}`);
+    expect(goneVersions).toHaveLength(0);
   });
 
   it("scopes vector search and missing-only backfill to owner and Room", async () => {

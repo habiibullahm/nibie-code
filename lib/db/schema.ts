@@ -481,6 +481,43 @@ export const workbenchRevisionRuns = pgTable(
   ],
 );
 
+// Owner-scoped document version snapshots (manual checkpoints + AI Apply). Not every autosave.
+export const workbenchDocumentVersions = pgTable(
+  "workbench_document_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id").notNull(),
+    source: text("source").notNull(),
+    title: text("title").notNull(),
+    content: text("content").notNull(),
+    documentRevision: integer("document_revision").notNull(),
+    revisionRunId: uuid("revision_run_id"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "workbench_document_versions_document_owner_fk",
+      columns: [table.documentId, table.userId],
+      foreignColumns: [workbenchDocuments.id, workbenchDocuments.userId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "workbench_document_versions_revision_run_fk",
+      columns: [table.revisionRunId],
+      foreignColumns: [workbenchRevisionRuns.id],
+    }).onDelete("set null"),
+    index("workbench_document_versions_document_created_idx").on(table.documentId, table.createdAt),
+    index("workbench_document_versions_user_created_idx").on(table.userId, table.createdAt),
+    check("workbench_document_versions_source_check", sql`${table.source} IN ('manual', 'ai')`),
+    check(
+      "workbench_document_versions_title_length",
+      sql`char_length(${table.title}) between 1 and 120 and ${table.title} = btrim(${table.title})`,
+    ),
+    check("workbench_document_versions_content_length", sql`char_length(${table.content}) <= 100000`),
+    check("workbench_document_versions_document_revision_positive", sql`${table.documentRevision} >= 1`),
+  ],
+);
+
 // A chat attachment: text extracted from a file the owner attached to one of their messages.
 // Short-lived staging metadata for direct-to-storage chat uploads. Bytes live in Storage only until finalize/cancel/TTL.
 export const attachmentUploadSessions = pgTable(

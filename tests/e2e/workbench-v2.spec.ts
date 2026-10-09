@@ -6,7 +6,7 @@ test.describe("Workbench V2 panel", () => {
     await page.goto("/preview/workbench-v2");
     await expect(page.getByTestId("workbench-v2-preview")).toBeVisible();
     await expect(page.getByRole("button", { name: "Edit in Workbench" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Document actions" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Document actions" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Expand" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Close" })).toBeVisible();
     await expect(page.getByRole("textbox", { name: "Document title" })).toBeVisible();
@@ -14,6 +14,21 @@ test.describe("Workbench V2 panel", () => {
     const chatBox = await page.locator(".chat-main").boundingBox();
     const panelBox = await page.locator(".workbench-panel").boundingBox();
     expect(chatBox && panelBox && chatBox.width > 360 && panelBox.width >= 440 && panelBox.width <= 560).toBeTruthy();
+  });
+
+  test("exposes version history and export actions from the document menu", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto("/preview/workbench-v2");
+    await page.getByRole("button", { name: "Document actions" }).click();
+    const menu = page.getByRole("menu", { name: "Document actions" });
+    await expect(menu.getByRole("menuitem", { name: "Save version" })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: "Version history" })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: "Download Markdown" })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: "Download plain text" })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: "Copy formatted for Word/Docs" })).toBeVisible();
+    await menu.getByRole("menuitem", { name: "Version history" }).click();
+    await expect(page.getByRole("dialog", { name: "Version history" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Version history" })).toBeVisible();
   });
 
   test("shows Ask Nibie on selected text for inline edit", async ({ page }) => {
