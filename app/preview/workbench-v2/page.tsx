@@ -8,6 +8,10 @@ export default async function WorkbenchV2Preview({
 }) {
   if (process.env.NODE_ENV === "production") notFound();
   const query = await searchParams;
-  const state = query.state === "review" ? "review" : query.state === "prompt" ? "prompt" : "editor";
+  const state =
+    query.state === "review" ? "review"
+    : query.state === "prompt" ? "prompt"
+    : query.state === "preview" ? "preview"
+    : "editor";
   return <WorkbenchPreviewFixture state={state} />;
 }

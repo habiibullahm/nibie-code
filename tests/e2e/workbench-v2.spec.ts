@@ -10,10 +10,29 @@ test.describe("Workbench V2 panel", () => {
     await expect(page.getByRole("link", { name: "Expand" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Close" })).toBeVisible();
     await expect(page.getByRole("textbox", { name: "Document title" })).toBeVisible();
-    await expect(page.getByRole("textbox", { name: "Document", exact: true })).toHaveValue(/patient intake/);
+    await expect(page.getByRole("textbox", { name: "Document", exact: true })).toHaveValue(/Intake checklist/);
+    await expect(page.getByRole("group", { name: "Editor mode" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Write", exact: true })).toHaveAttribute("aria-pressed", "true");
     const chatBox = await page.locator(".chat-main").boundingBox();
     const panelBox = await page.locator(".workbench-panel").boundingBox();
     expect(chatBox && panelBox && chatBox.width > 360 && panelBox.width >= 440 && panelBox.width <= 560).toBeTruthy();
+  });
+
+  test("toggles Write to Preview and renders Markdown", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/preview/workbench-v2");
+    await expect(page.getByRole("textbox", { name: "Document", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Preview", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByLabel("Document preview")).toBeVisible();
+    await expect(page.locator(".workbench-preview .markdown h1")).toHaveText("Clinic onboarding");
+    await expect(page.locator(".workbench-preview .markdown h2").first()).toHaveText("Intake checklist");
+    await expect(page.locator(".workbench-preview .markdown ul li").first()).toHaveText("Confirm patient identity");
+    await expect(page.getByRole("textbox", { name: "Document", exact: true })).toHaveCount(0);
+
+    await page.goto("/preview/workbench-v2?state=preview");
+    await expect(page.getByRole("button", { name: "Preview", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator(".workbench-preview .markdown h1")).toBeVisible();
   });
 
   test("exposes AI Assist prompt and Apply/Discard review", async ({ page }) => {

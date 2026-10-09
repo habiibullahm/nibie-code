@@ -9,6 +9,7 @@ import {
   deleteWorkbenchDocumentAction,
   updateWorkbenchDocumentAction,
 } from "@/app/actions/workbench";
+import { MessageMarkdown } from "@/components/message-markdown";
 import { WorkbenchAiRevision } from "@/components/workbench-ai-revision";
 import { useStableCallback } from "@/components/use-stable-callback";
 import { workbenchDocumentPath, workbenchPath } from "@/lib/routes";
@@ -43,12 +44,14 @@ import { parseWorkbenchWrite } from "@/lib/workbench/validation";
 const saveFailed = "We couldn't save that document. Please try again.";
 
 type Variant = "page" | "panel";
+type EditorMode = "write" | "preview";
 
 type Props = {
   document: WorkbenchDocument;
   roomName?: string | null;
   variant?: Variant;
   onClose?: () => void;
+  initialMode?: EditorMode;
 };
 
 async function readSse(response: Response, signal: AbortSignal, onEvent: (type: string, data: unknown) => void) {
@@ -79,13 +82,14 @@ async function readSse(response: Response, signal: AbortSignal, onEvent: (type: 
   }
 }
 
-export function WorkbenchEditor({ document, roomName = null, variant = "page", onClose }: Props) {
+export function WorkbenchEditor({ document, roomName = null, variant = "page", onClose, initialMode = "write" }: Props) {
   const router = useRouter();
   const documentId = document.id;
   const [state, setState] = useState<WorkbenchEditorState>(() =>
     initialWorkbenchEditorState({ title: document.title, content: document.content }, document.revision ?? 1),
   );
   const [ai, setAi] = useState<WorkbenchAiState>(() => initialWorkbenchAiState());
+  const [mode, setMode] = useState<EditorMode>(initialMode);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [applying, setApplying] = useState(false);
@@ -321,6 +325,11 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
     {!deleteError && state.phase === "conflict" && state.detail ? ` · ${state.detail}` : ""}
     {!deleteError && state.phase === "failed" ? <button type="button" onClick={() => void persist()}>Retry</button> : null}
   </>;
+  const modeToggle = <div className="workbench-mode" role="group" aria-label="Editor mode">
+    <button type="button" className={mode === "write" ? "is-active" : undefined} aria-pressed={mode === "write"} onClick={() => setMode("write")}>Write</button>
+    <button type="button" className={mode === "preview" ? "is-active" : undefined} aria-pressed={mode === "preview"} onClick={() => setMode("preview")}>Preview</button>
+  </div>;
+
   const headerActions = <>
     <button type="button" className="icon-button" aria-label="AI Assist" title="AI Assist" disabled={editingLocked || state.phase === "conflict"} onClick={() => updateAi((latest) => openWorkbenchAiPrompt(latest))}>
       <WandSparkles size={16} aria-hidden="true" />
@@ -344,7 +353,23 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
     <form className="workbench-stage" onSubmit={(event) => event.preventDefault()} onBlur={handleBlur}>
       {roomName && variant === "page" ? <p className="workbench-room">Room · {roomName}</p> : null}
       <input className="workbench-title" aria-label="Document title" autoComplete="off" value={state.draft.title} maxLength={workbenchTitleLimit} disabled={editingLocked} onChange={(event) => changeDraft({ title: event.target.value })} />
-      <textarea className="workbench-body" aria-label="Document" value={state.draft.content} maxLength={workbenchContentLimit} disabled={editingLocked} onChange={(event) => changeDraft({ content: event.target.value })} />
+      {mode === "write" ? (
+        <textarea
+          className="workbench-body"
+          aria-label="Document"
+          placeholder="Write in Markdown…"
+          value={state.draft.content}
+          maxLength={workbenchContentLimit}
+          disabled={editingLocked}
+          onChange={(event) => changeDraft({ content: event.target.value })}
+        />
+      ) : (
+        <div className="workbench-preview" aria-label="Document preview" tabIndex={0}>
+          {state.draft.content.trim()
+            ? <MessageMarkdown content={state.draft.content} />
+            : <p className="workbench-preview-empty">Nothing to preview yet. Switch to Write and add Markdown.</p>}
+        </div>
+      )}
     </form>
   </>;
 
@@ -352,6 +377,7 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
     return <div className="workbench-panel-editor">
       <header className="workbench-panel-top">
         <p className={statusClass} role="status">{statusDetail}</p>
+        {modeToggle}
         <div className="workbench-panel-actions">{headerActions}</div>
       </header>
       {body}
@@ -362,6 +388,7 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
     <header className="workbench-top">
       <Link className="workbench-back" href={workbenchPath} aria-label="Back to documents" title="Back to documents"><ArrowLeft size={16} aria-hidden="true" /></Link>
       <p className={statusClass} role="status">{statusDetail}</p>
+      {modeToggle}
       <div className="workbench-top-actions">{headerActions}</div>
     </header>
     {body}
