@@ -3,15 +3,16 @@ import { expect, test, type Page } from "@playwright/test";
 /**
  * Mocked Response Quality V2 UX coverage (Issue #73 / PR #77).
  * Intercepts `/api/chat` in the browser — no live provider spend.
- * Uses the chat-core workspace harness so MessageRow responding/waiting UI is real.
+ * Workspace harness covers MessageRow responding/waiting UI; composer fixture covers multi-mode payloads.
  */
 
 declare global {
   interface Window {
     qualityStream?: {
       release: () => void;
-      requests: { model: string; content: string }[];
+      requests: { model: string; conversationId?: string; userMessageId?: string }[];
     };
+    chatRequests?: { model: string; content: string }[];
   }
 }
 
@@ -35,13 +36,22 @@ async function mockQualityStream(page: Page, options: { holdBeforeFirstToken?: b
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const state = { release, requests: [] as { model: string; content: string }[] };
+    const state = { release, requests: [] as { model: string; conversationId?: string; userMessageId?: string }[] };
     window.qualityStream = state;
     window.fetch = async (input, init) => {
       if (input !== "/api/chat") return original(input, init);
-      const body = JSON.parse(String(init?.body ?? "{}")) as { model?: string; content?: string };
+      // Workspace posts { conversationId, userMessageId, model } — not the message text.
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        model?: string;
+        conversationId?: string;
+        userMessageId?: string;
+      };
       const model = body.model === "Fast" || body.model === "High" || body.model === "Balanced" ? body.model : "Balanced";
-      state.requests.push({ model, content: String(body.content ?? "") });
+      state.requests.push({
+        model,
+        conversationId: body.conversationId,
+        userMessageId: body.userMessageId,
+      });
       const text = answersByMode[model];
       const stream = new ReadableStream<Uint8Array>({
         async start(controller) {
@@ -60,6 +70,7 @@ async function mockQualityStream(page: Page, options: { holdBeforeFirstToken?: b
 }
 
 async function stubWorkspaceActions(page: Page) {
+  // Same pattern as high-stream: persist-message server actions only.
   await page.route("**/preview/chat-core**", async (route) => {
     if (route.request().method() !== "POST") return route.continue();
     if (!route.request().headers()["next-action"]) return route.abort();
@@ -101,44 +112,26 @@ for (const mode of modes) {
     await expect(assistant.locator(".response-thinking")).toHaveCount(0);
     await expect(assistant.getByRole("button", { name: "Copy response" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Stop response" })).toHaveCount(0);
+    // Empty composer disables Send; fill then confirm the next turn is available (same as high-stream).
+    await page.getByRole("textbox", { name: "Message Nibie" }).fill("Thanks");
     await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();
 
     const requests = await page.evaluate(() => window.qualityStream!.requests);
-    expect(requests).toEqual([{ model: mode, content: `Explain indexes for ${mode}.` }]);
-    expect(requests[0].content.length).toBeGreaterThan(0);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].model).toBe(mode);
+    expect(requests[0].conversationId).toBe(conversation);
+    expect(requests[0].userMessageId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
     expect(errors).toEqual([]);
   });
 }
 
-test("composer picker can switch Fast → Balanced → High and each completed reply stays non-empty", async ({ page }) => {
-  const errors: string[] = [];
-  page.on("pageerror", (error) => errors.push(error.message));
-  await stubWorkspaceActions(page);
-  await mockQualityStream(page);
-  await page.goto(`/preview/chat-core?workspace=1&mode=Balanced&conversation=${conversation}`);
-
-  for (const mode of modes) {
-    await page.getByRole("button", { name: /^Model:/ }).click();
-    await page.getByRole("menuitemradio", { name: new RegExp("^" + mode) }).click();
-    await expect(page.getByRole("button", { name: `Model: ${mode}`, exact: true })).toBeVisible();
-    await page.getByRole("textbox", { name: "Message Nibie" }).fill(`Quality check ${mode}`);
-    await page.getByRole("button", { name: "Send message" }).click();
-    const assistant = page.locator(".message-row.assistant").last();
-    await expect(assistant.locator(".markdown")).toContainText(answers[mode]);
-    await expect(assistant.locator(".markdown")).not.toHaveText("");
-    await expect(assistant.locator(".visually-hidden[role='status']")).toHaveCount(0);
-    await expect(assistant.getByRole("button", { name: "Copy response" })).toBeVisible();
-  }
-
-  expect(await page.evaluate(() => window.qualityStream!.requests.map((row) => row.model))).toEqual([...modes]);
-  expect(errors).toEqual([]);
-});
-
-test("chat-core fixture: Fast, Balanced, and High complete with visible non-empty assistant text", async ({ page }) => {
+test("chat-core fixture: picker switches Fast → Balanced → High with non-empty completed text", async ({ page }) => {
   await page.addInitScript(() => {
     const original = window.fetch;
     const records: { model: string; content: string }[] = [];
-    Object.assign(window, { chatRequests: records });
+    window.chatRequests = records;
     window.fetch = async (input, options) => {
       if (input !== "/api/chat") return original(input, options);
       const payload = JSON.parse(options!.body as string) as { model: string; content: string };
@@ -163,10 +156,12 @@ test("chat-core fixture: Fast, Balanced, and High complete with visible non-empt
   for (const mode of modes) {
     await page.getByRole("button", { name: /^Model:/ }).click();
     await page.getByRole("menuitemradio", { name: new RegExp("^" + mode) }).click();
+    await expect(page.getByRole("button", { name: `Model: ${mode}`, exact: true })).toBeVisible();
     await page.getByRole("textbox", { name: "Message Nibie" }).fill(`Fixture ${mode}`);
     await page.getByRole("button", { name: "Send message" }).click();
     await expect(page.getByLabel("Response status", { exact: true })).toHaveText("complete");
     await expect(page.getByLabel("Assistant text", { exact: true })).toHaveText(`Completed ${mode} answer.`);
     await expect(page.getByLabel("Assistant text", { exact: true })).not.toHaveText("");
   }
+  expect(await page.evaluate(() => window.chatRequests!.map((row) => row.model))).toEqual([...modes]);
 });
