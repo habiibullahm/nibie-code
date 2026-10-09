@@ -60,7 +60,7 @@ Writes set `user_id` from `claims.sub`. Export rejects query keys `user_id`, `us
 | --- | --- | --- |
 | `POST /api/chat` | [`app/api/chat/route.ts`](../../app/api/chat/route.ts) | Authenticated SSE generation |
 | `GET /api/account/export` | [`app/api/account/export/route.ts`](../../app/api/account/export/route.ts) | Owner JSON export |
-| `GET /api/conversations/:id/transcript` | [`app/api/conversations/[id]/transcript/route.ts`](../../app/api/conversations/[id]/transcript/route.ts) | Owner plain/Markdown transcript |
+| `GET /api/conversations/:id/transcript` | [`app/api/conversations/[id]/transcript/route.ts`](../../app/api/conversations/[id]/transcript/route.ts) | Owner plain-text transcript (copy) |
 | `GET /auth/callback` | [`app/auth/callback/route.ts`](../../app/auth/callback/route.ts) | Code exchange, then redirect |
 | Auth actions | [`app/actions/auth.ts`](../../app/actions/auth.ts) | Sign in, sign up, global sign out |
 | Chat actions | [`app/actions/chat.ts`](../../app/actions/chat.ts) | Conversation CRUD and message RPCs |

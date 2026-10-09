@@ -141,21 +141,26 @@ describe("GET /api/conversations/[id]/transcript", () => {
     ]);
   });
 
-  it("downloads Markdown with a safe disposition for archived threads", async () => {
+  it("returns plain text for archived owner threads and rejects markdown format", async () => {
     signedIn("owner-a", {
       conversation: { ...conversation, title: "Archived/Notes", archived_at: "2026-03-02T00:00:00.000Z" as unknown as null },
     });
-    const response = await GET(
-      request(`/api/conversations/${conversationId}/transcript?format=markdown&download=1`),
+    const archived = await GET(request(`/api/conversations/${conversationId}/transcript`), {
+      params: Promise.resolve({ id: conversationId }),
+    });
+    expect(archived.status).toBe(200);
+    expect(archived.headers.get("content-type")).toContain("text/plain");
+    expect(archived.headers.get("content-disposition")).toBeNull();
+    const body = await archived.text();
+    expect(body).toContain("Archived/Notes");
+    expect(body).toContain("Hello world");
+    expect(body).not.toContain("<think>");
+
+    const markdown = await GET(
+      request(`/api/conversations/${conversationId}/transcript?format=markdown`),
       { params: Promise.resolve({ id: conversationId }) },
     );
-    expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toContain("text/markdown");
-    expect(response.headers.get("content-disposition")).toContain("archived-notes.md");
-    const body = await response.text();
-    expect(body).toContain("# Archived/Notes");
-    expect(body).toContain("Hello **world**");
-    expect(body).not.toContain("<think>");
+    expect(markdown.status).toBe(400);
   });
 
   it("rejects invalid conversation ids", async () => {

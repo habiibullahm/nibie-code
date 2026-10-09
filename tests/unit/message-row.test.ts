@@ -5,8 +5,9 @@ import { MessageRow } from "../../components/message-row";
 import type { PersistedMessage } from "../../lib/chat/read";
 
 const noop = () => {};
-const render = (message: Partial<PersistedMessage>, waitLabel?: string) => renderToStaticMarkup(createElement(MessageRow, {
+const render = (message: Partial<PersistedMessage>, waitLabel?: string, highlighted = false) => renderToStaticMarkup(createElement(MessageRow, {
   waitLabel,
+  highlighted,
   message: { id: "m1", role: "assistant", content: "", position: 2, status: "complete", ...message } as PersistedMessage,
   initial: "M", isLast: true, isLastUser: false, canMutate: true, disabled: false, editing: false,
   onRegenerate: noop, onStartEdit: noop, onCancelEdit: noop, onSaveEdit: noop,
@@ -41,6 +42,13 @@ describe("assistant MessageRow", () => {
     expect(html).not.toContain("response-thinking");
     expect(html).not.toContain("message-author");
     expect(html).not.toContain('role="status"');
+  });
+
+  it("exposes a stable message anchor and optional search highlight", () => {
+    const html = render({ status: "complete", content: "Done." }, undefined, true);
+    expect(html).toContain('data-message-id="m1"');
+    expect(html).toContain('id="message-m1"');
+    expect(html).toContain("is-search-highlight");
   });
 
   it("keeps the Stopped and error labels without the Nibie name", () => {

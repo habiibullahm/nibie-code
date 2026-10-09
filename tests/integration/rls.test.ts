@@ -450,6 +450,56 @@ describe("Supabase row-level security", () => {
     expect(ownerRow.content).toBe("private message");
   });
 
+  it("keeps owner-scoped chat content search from leaking across users and non-complete rows", async () => {
+    const roomA = randomUUID();
+    const owned = randomUUID();
+    const archived = randomUUID();
+    const completeMsg = randomUUID();
+    const streamingMsg = randomUUID();
+    const archivedMsg = randomUUID();
+    const unique = `search-token-${randomUUID()}`;
+    await asUser(userA, (tx) => tx`insert into public.rooms (id, user_id, name) values (${roomA}, ${userA}, 'Search Room')`);
+    await asUser(userA, async (tx) => {
+      await tx`insert into public.conversations (id, user_id, room_id, title) values (${owned}, ${userA}, ${roomA}, 'Owned search thread')`;
+      await tx`insert into public.conversations (id, user_id, title, archived_at) values (${archived}, ${userA}, 'Archived search thread', now())`;
+      await tx`insert into public.messages (id, conversation_id, user_id, role, content, position, status) values
+        (${completeMsg}, ${owned}, ${userA}, 'user', ${`Please remember ${unique} forever`}, 1, 'complete'),
+        (${streamingMsg}, ${owned}, ${userA}, 'assistant', ${`streaming ${unique}`}, 2, 'streaming'),
+        (${archivedMsg}, ${archived}, ${userA}, 'user', ${`archived ${unique}`}, 1, 'complete')`;
+    });
+    await sql`insert into public.messages (id, conversation_id, user_id, role, content, position, status) values
+      (${randomUUID()}, ${conversationB}, ${userB}, 'user', ${`private ${unique}`}, 2, 'complete')`;
+
+    const ownerHits = await asUser(userA, (tx) =>
+      tx`select m.id, m.status, c.archived_at
+         from public.messages m
+         join public.conversations c on c.id = m.conversation_id and c.user_id = m.user_id
+         where m.status = 'complete' and m.content ilike ${"%" + unique + "%"}
+         order by m.created_at desc`,
+    );
+    expect(ownerHits.map((row) => row.id).sort()).toEqual([archivedMsg, completeMsg].sort());
+    expect(ownerHits.every((row) => row.status === "complete")).toBe(true);
+
+    const strangerHits = await asUser(userB, (tx) =>
+      tx`select m.id from public.messages m
+         where m.status = 'complete' and m.content ilike ${"%" + unique + "%"}`,
+    );
+    expect(strangerHits.map((row) => row.id)).not.toContain(completeMsg);
+    expect(strangerHits.map((row) => row.id)).not.toContain(archivedMsg);
+
+    const malformed = await asUser(userA, (tx) =>
+      tx`select id from public.messages where content ilike ${"%\\%_%"} and status = 'complete' limit 5`,
+    );
+    expect(Array.isArray(malformed)).toBe(true);
+
+    // Clean up fixtures so later suite cases that assert exact room lists stay deterministic.
+    await asUser(userA, async (tx) => {
+      await tx`delete from public.messages where conversation_id in (${owned}, ${archived})`;
+      await tx`delete from public.conversations where id in (${owned}, ${archived})`;
+      await tx`delete from public.rooms where id = ${roomA}`;
+    });
+  });
+
   it("keeps rooms owner-scoped and leaves general threads valid when a room is deleted", async () => {
     const roomA = randomUUID();
     const roomB = randomUUID();

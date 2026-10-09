@@ -9,9 +9,6 @@ import {
   TRANSCRIPT_NOT_FOUND_ERROR,
   TRANSCRIPT_PAGE_SIZE,
   buildTranscriptText,
-  contentDispositionAttachment,
-  transcriptFilename,
-  type TranscriptFormat,
   type TranscriptMessageInput,
 } from "@/lib/chat/transcript";
 
@@ -29,16 +26,11 @@ function owned(query: OrderedQuery, ...columns: string[]) {
   return columns.reduce((current, column) => current.order(column, { ascending: true }), query);
 }
 
-function parseFormat(value: string | null): TranscriptFormat | null {
-  if (value == null || value === "" || value === "markdown") return "markdown";
-  if (value === "plain") return "plain";
-  return null;
-}
-
 function jsonError(error: string, status: number) {
   return NextResponse.json({ error }, { status });
 }
 
+/** Owner-scoped plain-text transcript for clipboard copy. */
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const supabase = await createSupabaseServerClient();
@@ -56,9 +48,10 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     const parsedId = validateConversationId(id);
     if (!parsedId.success) return jsonError("Choose a valid conversation.", 400);
 
-    const format = parseFormat(url.searchParams.get("format"));
-    if (!format) return jsonError("Unsupported transcript format.", 400);
-    const download = url.searchParams.get("download") === "1" || url.searchParams.get("download") === "true";
+    const format = url.searchParams.get("format");
+    if (format != null && format !== "" && format !== "plain") {
+      return jsonError("Unsupported transcript format.", 400);
+    }
 
     const { data: conversation, error: conversationError } = await supabase
       .from("conversations")
@@ -92,26 +85,18 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     const built = buildTranscriptText(
       { id: conversation.id, title: conversation.title ?? "Untitled conversation" },
       messages,
-      format,
+      "plain",
     );
     if ("error" in built) return jsonError(built.error, built.status);
 
-    const filename = transcriptFilename(conversation.title ?? "conversation");
-    const contentType = format === "plain"
-      ? "text/plain; charset=utf-8"
-      : "text/markdown; charset=utf-8";
-    const headers: Record<string, string> = {
-      "content-type": contentType,
-      "cache-control": "no-store",
-      "x-content-type-options": "nosniff",
-    };
-    if (download) {
-      headers["content-disposition"] = contentDispositionAttachment(
-        format === "plain" ? filename.replace(/\.md$/i, ".txt") : filename,
-      );
-    }
-
-    return new NextResponse(built.text, { status: 200, headers });
+    return new NextResponse(built.text, {
+      status: 200,
+      headers: {
+        "content-type": "text/plain; charset=utf-8",
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+      },
+    });
   } catch {
     return jsonError(TRANSCRIPT_LOAD_ERROR, 503);
   }
