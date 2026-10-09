@@ -26,7 +26,7 @@ const layout = (page: Page) => page.evaluate(() => {
   };
 });
 
-for (const [width, height] of [[390, 844], [1024, 768], [1440, 900]] as const) {
+for (const [width, height] of [[320, 568], [390, 844], [768, 1024], [1024, 768], [1440, 900]] as const) {
   test(`assistant Markdown reads cleanly at ${width}px without widening the page`, async ({ page }) => {
     await page.setViewportSize({ width, height });
     await openSample(page);
@@ -47,9 +47,50 @@ for (const [width, height] of [[390, 844], [1024, 768], [1440, 900]] as const) {
     // Long code lines scroll inside the block; the table never grows past the answer.
     expect(result.codeScrollsInside).toBe(true);
     expect(result.tableFrame).toBeLessThanOrEqual(result.markdownWidth + 0.5);
-    if (width === 390) expect(result.tableContent).toBeGreaterThan(result.tableFrame);
+    if (width <= 390) expect(result.tableContent).toBeGreaterThan(result.tableFrame);
   });
 }
+
+test("assistant Markdown layout stays readable in light theme at desktop and phone widths", async ({ page }) => {
+  for (const [width, height] of [[390, 844], [1440, 900]] as const) {
+    await page.setViewportSize({ width, height });
+    await page.addInitScript(() => localStorage.setItem("nibie-theme", "light"));
+    await openSample(page);
+    expect(await page.evaluate(() => document.documentElement.getAttribute("data-theme"))).toBe("light");
+    const result = await layout(page);
+    expect(result.pageOverflow).toBe(0);
+    expect(result.markdownOverflow).toBe(0);
+    expect(result.codeScrollsInside).toBe(true);
+    expect(result.tableFrame).toBeLessThanOrEqual(result.markdownWidth + 0.5);
+  }
+});
+
+test("persisted formatting fixture keeps headings, lists, tables, and fences after reload", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await openSample(page);
+  await page.reload();
+  await page.locator(".markdown h2").waitFor();
+  const structure = await page.evaluate(() => {
+    const markdown = document.querySelector(".message-row.assistant .markdown")!;
+    return {
+      h2: markdown.querySelectorAll("h2").length,
+      h3: markdown.querySelectorAll("h3").length,
+      ol: markdown.querySelectorAll("ol").length,
+      ul: markdown.querySelectorAll("ul").length,
+      table: markdown.querySelectorAll("table").length,
+      codeBlock: markdown.querySelectorAll(".code-block").length,
+      text: markdown.textContent ?? "",
+    };
+  });
+  expect(structure.h2).toBeGreaterThan(0);
+  expect(structure.h3).toBeGreaterThan(0);
+  expect(structure.ol).toBeGreaterThan(0);
+  expect(structure.ul).toBeGreaterThan(0);
+  expect(structure.table).toBe(1);
+  expect(structure.codeBlock).toBe(1);
+  expect(structure.text).toContain("Cache-Control");
+  expect(structure.text).toContain("cachedFetch");
+});
 
 test("table cells never split a word or a code token on a phone", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
