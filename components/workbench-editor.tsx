@@ -133,8 +133,7 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
     const start = element.selectionStart;
     const end = element.selectionEnd;
     if (!Number.isInteger(start) || !Number.isInteger(end) || end <= start) {
-      // Keep the last non-empty span while Ask Nibie is open so the click does not clear it.
-      if (aiRef.current.phase === "idle") rememberSelection(null);
+      // Keep the last non-empty span: clicking Ask Nibie collapses the DOM selection.
       return;
     }
     rememberSelection({ start, end, text: element.value.slice(start, end) });
@@ -209,6 +208,16 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
       flush();
     };
   }, [persist]);
+
+  useEffect(() => {
+    function onSelectionChange() {
+      const element = textareaRef.current;
+      if (!element || globalThis.document.activeElement !== element) return;
+      captureSelectionFromTextarea(element);
+    }
+    globalThis.document.addEventListener("selectionchange", onSelectionChange);
+    return () => globalThis.document.removeEventListener("selectionchange", onSelectionChange);
+  }, []);
 
   useEffect(() => {
     if (!menuOpen) return;

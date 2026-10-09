@@ -85,7 +85,14 @@ export function WorkbenchAskNibie({
   }
 
   return <div className="workbench-ask is-idle" role="region" aria-label="Selection actions">
-    <button type="button" className="workbench-ask-trigger" aria-label="Ask Nibie" title="Ask Nibie" onClick={onOpen}>
+    <button
+      type="button"
+      className="workbench-ask-trigger"
+      aria-label="Ask Nibie"
+      title="Ask Nibie"
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={onOpen}
+    >
       <WandSparkles size={14} aria-hidden="true" />
       <span>Ask Nibie</span>
     </button>

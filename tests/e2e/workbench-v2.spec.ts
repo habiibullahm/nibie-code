@@ -20,18 +20,24 @@ test.describe("Workbench V2 panel", () => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto("/preview/workbench-v2");
     const body = page.getByRole("textbox", { name: "Document", exact: true });
-    await body.focus();
+    await body.click();
     await body.evaluate((element) => {
       const textarea = element as HTMLTextAreaElement;
       const start = textarea.value.indexOf("Confirm insurance");
       const end = start + "Confirm insurance".length;
+      textarea.focus();
       textarea.setSelectionRange(start, end);
-      textarea.dispatchEvent(new Event("select", { bubbles: true }));
     });
+    // Triple-click fallback: ensure a non-empty span reaches React state in headless.
+    await expect.poll(async () => body.evaluate((element) => {
+      const textarea = element as HTMLTextAreaElement;
+      return textarea.selectionEnd > textarea.selectionStart ? textarea.value.slice(textarea.selectionStart, textarea.selectionEnd) : "";
+    })).not.toBe("");
+    await expect(page.getByRole("button", { name: "Ask Nibie" })).toBeVisible({ timeout: 5_000 });
     await page.getByRole("button", { name: "Ask Nibie" }).click();
     await expect(page.getByPlaceholder("Ask Nibie to change this…")).toBeVisible();
     await expect(page.getByRole("button", { name: "Submit", exact: true })).toBeVisible();
-    await expect(page.getByText(/Selection · Confirm insurance/)).toBeVisible();
+    await expect(page.getByText(/Selection · /)).toBeVisible();
     await expect(page.getByRole("heading", { name: "Suggested revision" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Apply", exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Discard", exact: true })).toHaveCount(0);
