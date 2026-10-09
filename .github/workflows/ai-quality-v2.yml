@@ -7,6 +7,9 @@ on:
       - 'lib/context/context-policy.ts'
       - 'lib/ai/**'
       - 'tests/quality/**'
+      - 'tests/e2e/response-quality.spec.ts'
+      - 'tests/e2e/chat-core.spec.ts'
+      - 'tests/e2e/high-stream.spec.ts'
       - 'tests/fixtures/response-quality-v2.json'
       - 'scripts/response-quality-eval.mjs'
       - 'package.json'
@@ -32,5 +35,5 @@ jobs:
         run: npm run build
       - name: Install browser
         run: npx playwright install --with-deps chromium
-      - name: Mocked streaming, Stop, recovery, and model picker E2E
-        run: npx playwright test tests/e2e/chat-core.spec.ts tests/e2e/high-stream.spec.ts --workers=2
+      - name: Mocked streaming, Stop, recovery, model picker, and response-quality UX E2E
+        run: npx playwright test tests/e2e/chat-core.spec.ts tests/e2e/high-stream.spec.ts tests/e2e/response-quality.spec.ts --workers=2
