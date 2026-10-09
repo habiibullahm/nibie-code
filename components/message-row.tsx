@@ -11,6 +11,7 @@ import { useChatFlag } from "@/components/use-chat-preferences";
 import type { PersistedMessage } from "@/lib/chat/read";
 import { formatMessageTimestamp } from "@/lib/chat/timestamps";
 import { RESEARCH_STAGE_LABELS } from "@/lib/research/stages";
+import { WORKBENCH_UI_ENABLED } from "@/lib/workbench/flags";
 import { canContinueInWorkbench } from "@/lib/workbench/offer";
 
 const placeholderResponses = new Set(["Response stopped.", "Response unavailable."]);
@@ -89,7 +90,7 @@ export const MessageRow = memo(function MessageRow({ message, initial, isLast, i
     const canCopy = message.status !== "streaming" && message.status !== "error" && Boolean(message.content) && !placeholderResponses.has(message.content);
     const canRegenerate = canMutate && isLast && message.status === "complete" && canCopy;
     const canRetry = canMutate && isLast && (message.status === "error" || message.status === "interrupted");
-    const canWorkbench = Boolean(onEditInWorkbench) && canContinueInWorkbench(message);
+    const canWorkbench = WORKBENCH_UI_ENABLED && Boolean(onEditInWorkbench) && canContinueInWorkbench(message);
     const responseStatus = message.actionLabel
       ? message.actionLabel
       : message.researchStage

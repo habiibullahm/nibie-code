@@ -30,10 +30,12 @@ What's new in Nibie.
 
 - Long chats reserve space for their existing summary, keep recent history continuous when a message cannot fit, and report older context omitted by the history limit.
 - Saving a conversation's model shows “Saving…” on the Research control instead of incorrectly claiming a response is running.
+- Replies that use saved Memory can finish streaming without a false connection-recovery error.
 - Workbench Ask Nibie shows a clear message when the feature is not ready on this environment yet, instead of a generic “couldn't improve that document” error.
 
 ### Changed
 
+- Workbench UI is hidden until product-ready: Edit in Workbench and `/workbench` routes are unavailable (backend and preview harness stay in place).
 - Workbench documents support Markdown Write and Preview (same rendering as chat replies).
 - Workbench side panel is a lighter editor: Write/Preview, Ask Nibie on selected text (inline apply, no suggestion review), Expand, and Close.
 - Manual whole-document AI Assist is removed; select text in Write mode and use Ask Nibie instead.

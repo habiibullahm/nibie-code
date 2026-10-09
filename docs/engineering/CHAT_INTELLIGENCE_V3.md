@@ -1,79 +1,120 @@
-# Chat Intelligence V3: context continuity
+# Chat Intelligence V3 audit and evaluation
 
-Audit date: 2026-10-09. Baseline: latest fetched `main`, `1d4abc7619496abcf2684907ed9233d7835e35c2`. Implementation branch: `fix/chat-intelligence-v3`. This is a focused context reliability candidate, not a claim of improved model intelligence.
+This preserves the earlier PR #97/#98 audit and measurements. The PR #99 follow-up below records its additional changes and the 2026-10-10 conflict resolution; earlier verification counts are historical, not checks of the merged candidate.
 
-The user selected offline evaluation only. Actual model-output quality, factual accuracy, explanation depth, live provider compatibility, TTFT, latency, source fidelity, and billed token cost are **BLOCKED / N/A** before and after. No paid model or search requests were run. [Issue #80](https://github.com/habiibullahm/nibie-code/issues/80) remains the live evaluation gate.
+Baseline: latest `main`, `1d4abc7619496abcf2684907ed9233d7835e35c2`, fetched on 2026-10-09. The working tree started clean. [Response Quality V2 #73](https://github.com/habiibullahm/nibie-code/issues/73) is completed; [live evaluation #80](https://github.com/habiibullahm/nibie-code/issues/80) remains open. [Structured Markdown #90](https://github.com/habiibullahm/nibie-code/issues/90) and [PR #91](https://github.com/habiibullahm/nibie-code/pull/91) are completed/merged. Workbench/PR #86 is outside this change.
 
-## Existing capabilities retained
+Delivery branches were refreshed onto `main` at `981f0c6f22b2f344edee2b86628443cc6d512ca7` after PR #94 landed during this audit. Its Workbench visibility change is preserved. [PR #97](https://github.com/habiibullahm/nibie-code/pull/97) contains the independent Memory stream fix; this context PR does not depend on it. Delivery uses the repository's `fix/` branch convention.
 
-- [Response Quality V2 (#73)](https://github.com/habiibullahm/nibie-code/issues/73) already delivers adaptive depth, task-specific explanations/debugging, explicit brevity/format overrides, follow-up guidance, and grounding. The shared policy is used by all three modes. Prompt assertions establish delivery, not output quality.
-- [Structured Markdown (#90 / PR #91)](https://github.com/habiibullahm/nibie-code/pull/91) is merged. GFM, safe links, citation rendering, and response layout remain unchanged.
-- Ordinary chat, automatic Web/GitHub Actions, and Deep Research call the same Context Engine. The core policy/current request are protected, recent messages are prioritized, and optional source caps remain bounded.
-- Thread-summary maintenance starts after 18 completed messages and refreshes after an eight-position gap. It uses Fast asynchronously after a completed persisted reply; Stop/error/replay do not advance coverage. Existing shape, coverage, owner-scoped reads, and guarded writes remain intact. Semantic summary accuracy still needs actual outputs.
-- Recall is explicit, bounded, active-only, and owner-scoped. Current instructions outrank stored memory. Room instructions, Pins, and retrieved/selected files are loaded only through the authorized Room; attachments remain conversation-scoped.
-- Web routing, evidence selection, fenced untrusted sources, citation-handle allowlists, missing-source warnings, bounded Deep Research, and public-only GitHub read actions already exist. Offline retrieval/routing/citation tests pass; no defect justified changing ranking or expanding search spend. Their effectiveness on live sources is not measured here.
-- SSE handles split UTF-8/chunks, error and non-stop finishes, aborts, persistence confirmation, Stop races, and recovery. Existing tests cover these paths; no new reproducible transport defect justified modifying them.
+## Architecture and findings
 
-## Confirmed failures and offline before/after
-
-All four regression cases were added and run against unchanged baseline production code before implementation: **4 failed, 24 existing/context preference tests passed**. After implementation those same cases pass.
-
-| Reproduction | Baseline | Candidate | Root cause |
-| --- | --- | --- | --- |
-| Oversized older message at position 3 of 9 | Raw turns 1, 2, 4–9 included | Raw turns 4–9 only | Greedy selection skipped a long correction but retained earlier facts |
-| Oversized protected message at position 7 of 9 | Raw turns 1–6, 8, 9 included | Raw turns 8, 9 only | The protected/older boundary allowed older history to reappear across a gap |
-| Valid summary with tight budget plus profile/Room text | Summary omitted | Summary included, within existing input budget | Optional sources consumed the summary allowance before it was allocated |
-| 34 input messages, selection cap 32, no summary | `truncated=false` | `truncated=true`; diagnostic reports omitted history | Selection-cap losses were not included in budget diagnostics |
-| Same 34-message case, valid summary covering positions 1–2 | `truncated=false` | `truncated=false` | Covered history should not be reported as lost |
-| Change a conversation model while the save is pending | Research control says a response is running | Research control says Saving… | Research reused the generation-disabled label during preference persistence |
-
-Run: `npm test -- tests/unit/context-engine.test.ts tests/unit/preferences-model.test.ts --maxWorkers=2`. These are provider-input and diagnostic measurements, not ratings of generated answers.
-
-The fix reserves at most the existing 800-token summary cap after current/protected recent messages and before optional source text. Raw history stays a continuous newest suffix. The current message is never trimmed. Selection remains chronological, capped at 32, and scoped to this thread. Summary text stays in the untrusted context envelope; allocation priority does not raise its authority above newer user instructions or Room facts.
-
-## Fast / Balanced / High comparison
-
-Configuration below was read locally without logging keys. Production overrides and live parameter support were not verified.
-
-| Mode | Local effective route | Reasoning parameter | Output ceiling sent by adapter | Quality / latency / cost |
-| --- | --- | --- | --- | --- |
-| Fast | Sumopod, `deepseek-v4.1-flash:netra` | Omitted | `max_tokens:8192`, includes reasoning headroom | BLOCKED / N/A |
-| Balanced | OpenAI, `gpt-6-luna` | `medium` in this local env; omitted when unconfigured | Provider default | BLOCKED / N/A |
-| High | OpenAI, `gpt-6.1-sol` | `high` in this local env and registry default | Provider default | BLOCKED / N/A |
-
-All modes still use the 16,384-token policy envelope with a 2,048-token output reserve. This reserve is context planning, not an OpenAI generation cap or a verified provider hardware window. No provider, reasoning, output parameter, pricing estimate, reservation ceiling, weekly charge, or automatic escalation changes.
-
-`modelForComposer` already chooses the saved account default for a fresh conversation and the saved conversation mode for an existing one. New Chat and Room New Thread reset draft selection to Auto. Conversation model writes update `conversations.selected_model`, not `user_preferences.default_model`. Added checks cover a Fast default with all three existing modes, Room New Thread inheritance, and changing the draft choice without changing the default. Browser coverage uses the preview harness; signed-in persistence with actual models is not inferred from it.
-
-## Evaluation and verification
-
-The existing 30-case bilingual corpus and actual-output scorer are reused. They cover factual/technical explanation, AI engineering, debugging, architecture, follow-ups, Room/file/web grounding, research, brevity, and detailed requests. Four new long-history/budget reproductions plus default-mode regressions cover this patch. The existing scorer's 11 self-tests pass; running it without real baseline/after outputs returns **BLOCKED**, as required.
-
-No actual output scores are available for any mode or dimension. Future live comparison must use the same provider/model/effort/depth and controlled sources, retain redacted outputs privately, and record context differences. These fixes intentionally change truncation, so the existing scorer excludes those pairs from fair quality comparisons; report them separately rather than weakening the scorer. An independent human must review correctness and source fidelity under an approved budget.
-
-Local verification results are recorded below before PR creation. Live quality and signed-in provider smoke remain blocked by the offline-only instruction. Integration/RLS requires an isolated test database; Docker is not running locally and `TEST_DATABASE_URL` is unset. No shared Supabase database was reset or migrated.
-
-| Check | Result |
+| Area | Existing behavior and assessment |
 | --- | --- |
-| Unit suite | PASS: 106 files, 1,271 tests with `node node_modules/vitest/vitest.mjs run --maxWorkers=2 --reporter=dot` |
-| Actual-output scorer self-tests | PASS: 11 tests; synthetic scoring validation only |
-| Playwright offline | PASS: 52 distinct tests in two final runs, 24 affected + 28 streaming/format tests; 320/390/768/1024/1440, dark/light, Stop, reload, all modes and Fast default |
-| Lint | PASS: zero errors, three existing warnings in Workbench and unused mode parameters |
-| Typecheck | PASS |
-| Production build | PASS with temporary `NEXT_PUBLIC_APP_URL=https://nibie.test`; the development HTTP origin is correctly rejected for production builds |
-| Release consistency | PASS |
-| `git diff --check` | PASS |
-| Local integration/RLS | BLOCKED: missing isolated `TEST_DATABASE_URL`, Docker engine inactive; command fails before running tests |
-| Live quality, supported provider parameters, provider TTFT/latency, actual token cost, signed-in provider smoke | BLOCKED: user selected offline evaluation only |
+| Response policy | `lib/ai/response-quality.ts` already requests task completeness, why/how, examples, debugging evidence, recommendations, trade-offs, explicit format/depth overrides, and no hidden reasoning. No speculative prompt rewrite is justified without real-output evidence. |
+| Provider transport | `lib/ai/provider.ts` uses the existing Chat Completions transport. No AI SDK, provider migration, new dependencies, or automatic escalation is introduced. Live deployment overrides and provider parameter support cannot be verified from repository defaults. |
+| Context | `buildContext` keeps the current request and protects five earlier messages, budgets profile/Room/pins/excerpts/memory/summary, and bounds raw history to 32 messages. The same builder serves normal chat, Web/GitHub Actions, and Deep Research. |
+| Confirmed continuity defect | Attachments/web/memory could consume the remainder before a valid thread summary was considered. A constrained fixture with a 24,000-character attachment dropped the summary in all three modes despite the summary fitting on its own. |
+| Confirmed diagnostic defect | The 32-message cap omitted supplied, uncovered history without setting `budget.truncated`. A lagging summary also failed to expose the uncovered gap. |
+| Summary lifecycle | Runs on Fast after a completed, persisted reply; begins after 18 complete messages and refreshes after an eight-position gap. Input is bounded to 120 rows/24,000 characters; individual messages are shortened to 4,000 characters. JSON shape and summary size are checked. Accuracy of actual generated summaries remains unmeasured. |
+| Recall | Explicit owner-scoped save/forget, lexical/exact ranking, active-memory filtering, and current-request precedence already exist. Retrieval uses the current question; terse follow-ups may lack lexical cues. No new embedding calls or speculative retrieval rewrite. Memory SSE compatibility is addressed in a separate focused PR containing `docs/engineering/CHAT_MEMORY_STREAM.md`. |
+| Default model | `modelForComposer` uses the account default for fresh chats and the saved conversation model for existing threads. New Chat and Room New Thread clear the per-thread override. Conversation model writes do not write account preferences. Add a browser regression rather than duplicate this working logic. |
+| Web Search | Deterministic intent routing, ranked/deduplicated results, domain diversity, bounded SSRF-safe page reads, snippet fallback, and verification-unavailable guidance already exist. No measurable relevance defect in the supplied offline suites justifies changing routing. Follow-up query rewriting is not validated. |
+| Deep Research | Explicit opt-in, bounded planning/gathering/synthesis, primary/freshness heuristics, contradiction/incomplete-evidence guidance, citation handles, and separate spend/credit guards already exist. |
+| GitHub read Actions | Fixed public read actions, schema validation, server authorization, cancellation, one check per reply, safe action context, and audit persistence. No write capability is added. |
+| Citations | Server-prepared handles are filtered to sources actually included in context. The model is instructed to cite near claims; output sanitization maps only supported handles. Source fidelity of real answers remains unmeasured. |
+| Reliability | Provider SSE rejects premature EOF and abnormal finish reasons; client SSE requires a persisted terminal status before done. Stop/retry/regenerate/recovery and output sanitization are retained. Actual TTFT/provider errors require live probes. |
+| Isolation and cost | Owner RLS and Room-scoped file reads remain the authority boundary. Current requests outrank saved memory. No schema, route configuration, output limit, credit price, or reservation policy changes. |
 
-## Impact, review, and remaining risks
+## Focused context change
 
-- Runtime changes are limited to context selection and the Research control's existing disabled label during model save. Auth, ownership queries, RLS, file isolation, tool authorization, untrusted-data boundaries, sanitizer, citation allowlists, Stop/persistence, and spend guards are unchanged. A separate static regression/security pass inspected all three production callers and the final diff; this is not an independent human security approval.
-- No extra model/search calls, dependencies, database migrations, or UI controls. Context assembly keeps the existing under-15ms unit guard. Provider latency is unmeasured. Input-token cost may increase or decrease as summary text replaces other optional context, within the same policy budget; actual dollar impact is unknown.
-- Under tight budgets, preserving summary can omit some profile/Room/file/web text. Preserving a continuous raw suffix can intentionally retain fewer older turns. A summary can still be stale or incomplete; current user instructions remain authoritative. Token estimates use the existing `ceil(length / 4)` heuristic, not a model tokenizer.
-- Initial baseline unit run outside the sandbox: 1,263 passed and one existing PDF extraction test timed out under default parallelism. With two workers, the full candidate suite passed, without changing that test or timeouts. The first sandbox run also failed on temporary Vitest transform-file access; it was an environment failure.
-- Browser baseline exposed an outdated menu locator in the existing Room layout test (`Model` instead of the actual `Select model` accessible name). Correcting that test selector preserves the UI. The existing model-save test independently reproduced the wrong Research status label and guards its one-line fix. The initial browser invocation also used an inactive port 3000 from local env; QA now targets the dedicated worktree server on port 3201.
-- The unchanged lockfile reports seven high-severity dependency entries in `npm audit` (including Next.js and the ESLint dependency tree). This is an existing dependency risk, not evidence that the chat patch introduces an exploitable path. Dependencies were not automatically upgraded; some audit suggestions require a major tooling change. Review separately before release.
-- Workbench and PR #86, model options, prompts, response rendering, routing, and research strategy were not changed. No merge or Production deployment. Rollback is a normal revert; there is no data migration.
+PR #98 reserved a valid summary after protected recent messages, profile, Room, and pins, before excerpts. PR #99 extends that reservation to **after protected recent messages, before optional profile/Room/pins/file/attachment/web/memory text**, so those sources cannot crowd out the summary either. This changes allocation priority only; provider message order and authority remain unchanged. A summary stays untrusted data, is capped at 800 estimated tokens, and is rejected when stale or too large. Uncovered raw history remains eligible only as a continuous newest suffix; it cannot cross an omitted oversized message.
 
-Merge recommendation: **DRAFT / NO-GO for a claim of intelligence improvement** until required CI/RLS checks, signed-in validation, and the live quality gate in #80 have evidence. Offline checks support the narrower context reliability fix only.
+The truncation flag and existing Recent conversation diagnostic now include messages discarded by the count cap when those supplied messages are not represented by a fitted summary. They do not report covered history as lost. No transcript text enters diagnostics.
+
+Scope reaches the shared builder's three chat callers, context/SSE contract tests, model-default browser regression, this architecture report, and CHANGELOG. Workbench code and response rendering are untouched.
+
+## Reproducible baseline and candidate evidence
+
+| Measurement | Baseline | Candidate |
+| --- | --- | --- |
+| Existing unit suite | 1,264 passed, 106 files | 1,272 passed, 108 files across both focused changes |
+| Context count-cap detection | `truncated=false` for 41 supplied messages, only 32 retained | `truncated=true` |
+| Lagging-summary gap detection | `truncated=false` when summary covers through 8 and raw history starts at 10 | `truncated=true` |
+| Summary under attachment pressure | 0/3 modes retain the summary | 3/3 retain it within the unchanged estimated input budget |
+| Complete summary coverage | Correctly not marked truncated | Retained behavior |
+| Memory start/context SSE | 0/2 valid Memory event paths accepted | 2/2 accepted in the separate Memory streaming change |
+| New reproduction cases | 7 failed / 1 passed | 8 passed |
+| V2 scoring harness | 11 synthetic arithmetic/validation tests passed | Does not establish model quality |
+| Real answer quality, factual accuracy, source fidelity | **BLOCKED / N/A** | **BLOCKED / N/A** |
+| Real latency, TTFT, input/output tokens, provider cost | **BLOCKED / N/A** | **BLOCKED / N/A** |
+
+These before/after measurements prove deterministic contract and allocation fixes only. They do not prove more intelligent or more accurate model answers. Test timing on this Windows host is not provider latency.
+
+Automated checks on the combined candidate:
+
+- After refreshing main, the independent PR heads passed their full unit suites: Memory 1,267 tests; context 1,271 tests. The combined-candidate measurements below were recorded before that refresh.
+- Unit: 1,272 passed. RLS/integration: 56 passed using `npm run test:integration:local`; its dedicated Docker test database was cleaned up afterward.
+- Typecheck, production build, release check, and lint passed. Lint reports three existing warnings (Workbench selection hook and two unused `_mode` parameters); they are outside this focused change.
+- Full Playwright: 162 passed, 13 failed, 11 skipped without authenticated credentials. All three new Memory/default-model browser cases passed. The first startup attempt timed out; the completed run is reported here.
+- Focused Playwright (Memory streaming, default-model inheritance, response-quality UX, Markdown): 17 passed. These are mocked application checks, not provider-output quality scores.
+- Five public Docs failures assert obsolete attachment-unavailable text; five Room layout failures and the weekly-usage failure use the obsolete menu name `Model` instead of `Select model`; a home clipboard test expects raw Markdown after the existing formatted-copy change. These affected source paths/assertions are unchanged from main. The final failure observes the Research control's existing response-running label during model preference saving. No baseline Playwright run was made, so these classifications are based on unchanged code and failure traces, not a measured full-suite before/after comparison.
+- Do not report the full E2E suite as PASS or these PRs as ready to merge. Authenticated generation/persistence and actual model-output evaluation remain BLOCKED.
+
+## Fast / Balanced / High
+
+Repository defaults below are not a live-deployment capability probe. Each model ID and OpenAI reasoning setting can be overridden on the server.
+
+| Mode | Repository route | Reasoning parameter | Output request | Chat credits |
+| --- | --- | --- | --- | ---: |
+| Fast | Sumopod, `deepseek-v4.1-flash:netra` | Omitted | `max_tokens=8192`, including provider reasoning headroom | 1 |
+| Balanced | OpenAI, `gpt-6-luna` | Omitted unless configured low/medium/high | No explicit output cap | 3 |
+| High | OpenAI, `gpt-6.1-sol` | Configured low/medium/high, default high | No explicit output cap | 6 |
+
+All modes retain the 16,384-token application context envelope and 2,048-token planning reserve. The latter is not an OpenAI output cap or a verified provider hardware window. The existing unavailable-mode fallback remains Balanced → Fast → High, only when the selected/default mode is unavailable; Settings already shows the fallback. No fallback is added to provider errors.
+
+No extra model calls are introduced. Reserving up to 800 summary tokens can reduce excerpts available in a crowded request and can change actual input use in either direction. The input envelope, output settings, and spend guard remain unchanged; actual monetary impact needs a measured live run.
+
+## Evaluation procedure and blockers
+
+Reuse the existing 30 Indonesian/English cases in `tests/fixtures/response-quality-v2.json` and the human scoring procedure in [RESPONSE_QUALITY_V2.md](RESPONSE_QUALITY_V2.md). They cover facts, explanation, debugging, AI architecture, follow-ups, Room/file/web/research grounding, and explicit brevity/detail. Add these continuity scenarios to matched real-application runs:
+
+1. Seed the `chat-context-continuity.test.ts` 41-message history, with no summary, then with coverage 8 and 9. Verify supplied context diagnostics and ask for the original constraints. Record inability to recover omitted facts rather than reward guesses.
+2. Use the same seeded summary and large attachment under a constrained context budget. Check constraint retention and citation fidelity, including honest partial-file disclosure. Record input-context differences: V2's fair-pair harness excludes changed truncation fingerprints, so report these changed-input cases separately rather than force a quality PASS.
+3. Retrieve an explicitly saved language preference and complete an ordinary reply and an Action reply. Verify the Memory start/context event paths and completion/persistence after refresh.
+4. Save default Fast, create General and Room threads, manually start another thread in High, revisit it, change its model, and verify the account default remains Fast. The new browser test covers the existing mock workspace; authenticated account persistence/reload needs a dedicated test account.
+
+Before any paid run, obtain a hard total budget and dedicated test access. Freeze baseline/candidate SHAs, effective model/provider/effort/depth, context and tool fingerprints; record complete finish reasons, TTFT, latency, input/output/reasoning counts, and actual cost without logging hidden reasoning or secrets. An independent human must score accuracy, completeness, public rationale, examples, continuity, trade-offs, grounding, and brevity. Never fabricate ratings or use mocked output as live evidence.
+
+No provider keys, authenticated Preview test account, or approved spend budget were available. `npm run eval:response-quality` returned BLOCKED for missing actual before/after output files. Issue #80 remains the live release gate. No merge or production deployment is authorized.
+
+## Remaining limits and review
+
+- Character/4 token estimates are heuristic; passing an estimated budget is not proof of a provider tokenizer limit.
+- The read window is bounded; data absent before the caller's fetched window cannot be diagnosed by inspecting supplied messages alone. This fix detects known count-cap omissions, not arbitrary missing database history.
+- Summary generation still shortens individual source messages; late constraints in a long message and generated-summary accuracy need live evaluation. No summary prompt rewrite or paid summarization experiment was attempted.
+- Summary priority can shorten source excerpts under pressure; existing partial-context diagnostics and included-source citation filtering must remain intact.
+- Separate code re-review by the implementing engineer: all three chat callers share the fixed builder; completion ordering and unknown/malformed SSE rejection remain covered; summary authority, stale-summary checks, current-request precedence, RLS query scopes, and cost guards are unchanged. No new dependencies, migrations, tools, Workbench changes, or model escalation. Independent human quality/security approval is still required at the live release gate.
+- Merge readiness depends on automated checks at each PR head and the outstanding live gate. Offline contract PASS is not a product-quality GO.
+
+## PR #99 follow-up and conflict resolution (2026-10-10)
+
+PR #99 was originally verified at `5e580fc2756224a5ba7b4188900e16c519d6f5e1`: 1,271 unit tests, 52 distinct offline Playwright tests, 11 scorer self-tests, lint, typecheck, production build, release consistency, and diff checks passed. PR Guard including Integration DB + RLS and the Vercel Preview build also passed at that head. These are historical counts; merged-candidate verification is recorded below.
+
+The merge incorporates main `2b6b667` and preserves its Memory stream compatibility, Workbench visibility flags, context-count diagnostics, and all regression tests. The overlapping summary reservation is kept once, at PR #99's earlier allocation step. Main's existing `historyCapped` / `historyTruncated` implementation is reused rather than duplicating diagnostics.
+
+Additional deterministic reproductions from PR #99:
+
+| Case | Original baseline | PR #99 behavior retained |
+| --- | --- | --- |
+| Oversized older message at position 3 of 9 | Raw turns 1, 2, 4–9 included | Raw turns 4–9 only |
+| Oversized protected message at position 7 of 9 | Raw turns 1–6, 8, 9 included | Raw turns 8, 9 only |
+| Summary with tight budget plus profile/Room text | Summary omitted | Existing bounded summary allowance reserved before optional text |
+| Pending conversation model save | Research control claims a response is running | Existing Saving… label shown |
+
+The original four new context regression cases failed before implementation and passed after it. Saved Fast defaults, existing conversation modes, Room New Thread inheritance, and changing a draft model without changing the account default are covered. An obsolete Room test selector is corrected to the actual `Select model` accessible name, preserving the UI.
+
+PR #99's local effective configuration was Fast on Sumopod with the existing 8,192-token output ceiling, Balanced on OpenAI with configured medium effort, and High on OpenAI with high effort. Production overrides and live parameter support were not probed. The user explicitly selected offline evaluation only; real output quality, latency, source fidelity, and billed cost remain **BLOCKED / N/A**. No provider/search spending, routing change, or automatic escalation is introduced.
+
+Preserving the summary earlier can omit more optional context under a tight budget; stopping at a raw-history gap can retain fewer older turns. The unchanged dependency tree reported seven high-severity npm audit entries in the earlier PR #99 run; no dependency upgrade was bundled. No Production deployment or PR merge to main is performed by conflict resolution.
+
+Conflict-resolution verification: 1,280 unit tests in 108 files and 27 focused offline Playwright tests passed, including both main's Memory diagnostic event paths and default-model inheritance. Typecheck, lint (zero errors; three existing warnings), production build (temporary `NEXT_PUBLIC_APP_URL=https://nibie.test`), release consistency, and diff/conflict-marker checks passed. These checks validate the combined candidate; the older full-browser failures above are not reclassified as a full-suite PASS.
