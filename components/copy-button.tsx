@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
-import { Check, ChevronDown, Copy } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Check, Copy } from "lucide-react";
 import {
   markdownToClipboard,
   writeFormattedClipboard,
@@ -48,32 +48,18 @@ type ResponseCopyProps = {
   markdown: string;
   sources?: readonly ClipboardCitationSource[];
   label?: string;
+  /** Icon + tooltip/aria only — used on assistant message action rows. */
+  iconOnly?: boolean;
 };
 
 /**
- * Response copy control: default action copies Word-safe formatted HTML + plain text;
- * a small adjacent menu offers clean plain-text copy. Code-block CopyButton stays unchanged.
+ * Single reply copy control: writes Word-safe formatted HTML + plain text.
+ * Code-block CopyButton stays unchanged.
  */
-export function ResponseCopyButton({ markdown, sources, label = "Copy response" }: ResponseCopyProps) {
+export function ResponseCopyButton({ markdown, sources, label = "Copy response", iconOnly = false }: ResponseCopyProps) {
   const { state, report } = useCopyFeedback();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const menuButtonRef = useRef<HTMLButtonElement>(null);
-  const plainItemRef = useRef<HTMLButtonElement>(null);
-  const menuId = useId();
 
-  useEffect(() => {
-    if (!menuOpen) return;
-    plainItemRef.current?.focus();
-    function closeOutside(event: PointerEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) setMenuOpen(false);
-    }
-    document.addEventListener("pointerdown", closeOutside);
-    return () => document.removeEventListener("pointerdown", closeOutside);
-  }, [menuOpen]);
-
-  async function copyFormatted() {
-    setMenuOpen(false);
+  async function copy() {
     try {
       const { html, plain } = markdownToClipboard(markdown, sources);
       await writeFormattedClipboard(html, plain);
@@ -83,59 +69,11 @@ export function ResponseCopyButton({ markdown, sources, label = "Copy response" 
     }
   }
 
-  async function copyPlain() {
-    setMenuOpen(false);
-    try {
-      const { plain } = markdownToClipboard(markdown, sources);
-      await writePlainClipboard(plain);
-      report("copied");
-    } catch {
-      report("failed");
-    }
-  }
-
-  function onMenuKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      setMenuOpen(false);
-      menuButtonRef.current?.focus();
-    } else if (event.key === "Tab") {
-      setMenuOpen(false);
-    }
-  }
-
   const status = state === "copied" ? "Copied" : state === "failed" ? "Copy failed" : "Copy";
-  const idleTitle = "Copy formatted";
+  const iconSize = iconOnly ? 14 : 13;
 
-  return <div className="response-copy" ref={rootRef}>
-    <button type="button" className="copy-button" aria-label={label} title={state === "idle" ? idleTitle : status} onClick={() => void copyFormatted()}>
-      {state === "copied" ? <Check size={13} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />}
-      <span aria-live="polite">{status}</span>
-    </button>
-    <button
-      ref={menuButtonRef}
-      type="button"
-      className="copy-button response-copy-menu-trigger"
-      aria-label="More copy options"
-      title="More copy options"
-      aria-haspopup="menu"
-      aria-expanded={menuOpen}
-      aria-controls={menuOpen ? menuId : undefined}
-      onClick={() => setMenuOpen((open) => !open)}
-      onKeyDown={(event) => {
-        if (event.key === "ArrowDown") {
-          event.preventDefault();
-          setMenuOpen(true);
-        }
-      }}
-    >
-      <ChevronDown size={12} aria-hidden="true" />
-    </button>
-    {menuOpen ? <div id={menuId} className="response-copy-menu" role="menu" aria-label="Copy options" onKeyDown={onMenuKeyDown}>
-      <button ref={plainItemRef} type="button" role="menuitem" className="response-copy-menu-item" tabIndex={-1} onClick={() => void copyPlain()}>
-        Copy plain text
-      </button>
-    </div> : null}
-  </div>;
+  return <button type="button" className={`copy-button${iconOnly ? " is-icon-only" : ""}`} aria-label={label} title={state === "idle" ? label : status} onClick={() => void copy()}>
+    {state === "copied" ? <Check size={iconSize} aria-hidden="true" /> : <Copy size={iconSize} aria-hidden="true" />}
+    <span className={iconOnly ? "visually-hidden" : undefined} aria-live="polite">{iconOnly && state === "idle" ? "" : status}</span>
+  </button>;
 }

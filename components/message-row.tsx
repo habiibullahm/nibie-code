@@ -117,9 +117,9 @@ export const MessageRow = memo(function MessageRow({ message, initial, isLast, i
           : <MessageMarkdown content={message.content} sources={message.sources} />}
         {message.sources?.length && !waiting ? <MessageSources sources={message.sources} /> : null}
         {(canCopy || canRegenerate || canRetry) && <div className="message-actions">
-          {canCopy && <ResponseCopyButton markdown={message.content} sources={message.sources} label="Copy response" />}
-          {canRegenerate && <button type="button" className="message-action" disabled={disabled} onClick={onRegenerate}><RefreshCw size={13} aria-hidden="true" /><span>Regenerate</span></button>}
-          {canRetry && <button type="button" className="message-action" disabled={disabled} onClick={onRegenerate}><RefreshCw size={13} aria-hidden="true" /><span>Retry</span></button>}
+          {canCopy && <ResponseCopyButton markdown={message.content} sources={message.sources} label="Copy response" iconOnly />}
+          {canRegenerate && <button type="button" className="message-action is-icon-only" disabled={disabled} aria-label="Regenerate" title="Regenerate" onClick={onRegenerate}><RefreshCw size={14} aria-hidden="true" /></button>}
+          {canRetry && <button type="button" className="message-action is-icon-only" disabled={disabled} aria-label="Retry" title="Retry" onClick={onRegenerate}><RefreshCw size={14} aria-hidden="true" /></button>}
         </div>}
       </div>
     </article>;
