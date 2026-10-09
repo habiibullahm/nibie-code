@@ -555,8 +555,35 @@ describe("Supabase row-level security", () => {
     expect(ownerDoc).toEqual({ title: "Secret", content: "private body" });
 
     await asUser(userA, (tx) => tx`update public.workbench_documents set title = 'Renamed', content = 'edited' where id = ${docGeneral}`);
-    const [edited] = await asUser(userA, (tx) => tx`select title, content from public.workbench_documents where id = ${docGeneral}`);
-    expect(edited).toEqual({ title: "Renamed", content: "edited" });
+    const [edited] = await asUser(userA, (tx) => tx`select title, content, revision from public.workbench_documents where id = ${docGeneral}`);
+    expect(edited).toEqual({ title: "Renamed", content: "edited", revision: 1 });
+    const cas = await asUser(userA, (tx) => tx`
+      update public.workbench_documents
+      set title = 'CAS', content = 'next', revision = revision + 1
+      where id = ${docGeneral} and revision = 1
+      returning revision
+    `);
+    expect(cas).toEqual([{ revision: 2 }]);
+    const stale = await asUser(userA, (tx) => tx`
+      update public.workbench_documents
+      set title = 'Stale', revision = revision + 1
+      where id = ${docGeneral} and revision = 1
+      returning id
+    `);
+    expect(stale).toHaveLength(0);
+    const runId = randomUUID();
+    await asUser(userA, (tx) => tx`
+      insert into public.workbench_revision_runs
+        (id, user_id, document_id, status, instruction, base_revision, base_title, base_content)
+      values (${runId}, ${userA}, ${docGeneral}, 'generating', 'Tighten', 2, 'CAS', 'next')
+    `);
+    const hiddenRun = await asUser(userB, (tx) => tx`select id from public.workbench_revision_runs where id = ${runId}`);
+    expect(hiddenRun).toHaveLength(0);
+    await expect(asUser(userB, (tx) => tx`
+      insert into public.workbench_revision_runs
+        (user_id, document_id, status, instruction, base_revision, base_title, base_content)
+      values (${userB}, ${docGeneral}, 'generating', 'Steal', 2, 'CAS', 'next')
+    `)).rejects.toThrow();
 
     await asUser(userA, (tx) => tx`delete from public.rooms where id = ${roomA}`);
     const [detached] = await asUser(userA, (tx) => tx`select room_id, title, content from public.workbench_documents where id = ${docRoom}`);

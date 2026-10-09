@@ -266,7 +266,7 @@ export const threadSummaries = pgTable(
 export const weeklyUsageReservations = pgTable(
   "weekly_usage_reservations",
   {
-    generationId: uuid("generation_id").primaryKey().references(() => messages.id, { onDelete: "cascade" }),
+    generationId: uuid("generation_id").primaryKey(),
     userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     weekStart: date("week_start", { mode: "date" }).notNull(),
     logicalMode: weeklyUsageMode("logical_mode").notNull(),
@@ -316,7 +316,7 @@ export const aiSpendGlobalHourly = pgTable(
 export const aiSpendReservations = pgTable(
   "ai_spend_reservations",
   {
-    generationId: uuid("generation_id").primaryKey().references(() => messages.id, { onDelete: "cascade" }),
+    generationId: uuid("generation_id").primaryKey(),
     userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     dayUtc: date("day_utc", { mode: "date" }).notNull(),
     hourUtc: timestamp("hour_utc", { withTimezone: true, mode: "date" }).notNull(),
@@ -427,10 +427,12 @@ export const workbenchDocuments = pgTable(
     roomId: uuid("room_id"),
     title: text("title").notNull().default("Untitled"),
     content: text("content").notNull().default(""),
+    revision: integer("revision").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
   },
   (table) => [
+    unique("workbench_documents_id_user_key").on(table.id, table.userId),
     index("workbench_documents_user_updated_idx").on(table.userId, table.updatedAt),
     index("workbench_documents_user_room_idx").on(table.userId, table.roomId),
     foreignKey({
@@ -443,6 +445,39 @@ export const workbenchDocuments = pgTable(
       sql`char_length(${table.title}) between 1 and 120 and ${table.title} = btrim(${table.title})`,
     ),
     check("workbench_documents_content_length", sql`char_length(${table.content}) <= 100000`),
+    check("workbench_documents_revision_positive", sql`${table.revision} >= 1`),
+  ],
+);
+
+// Owner-scoped AI revise runs. generation_id for usage/spend reservations equals this row's id.
+export const workbenchRevisionRuns = pgTable(
+  "workbench_revision_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id").notNull(),
+    status: text("status").notNull().default("generating"),
+    instruction: text("instruction").notNull(),
+    baseRevision: integer("base_revision").notNull(),
+    baseTitle: text("base_title").notNull(),
+    baseContent: text("base_content").notNull(),
+    proposedTitle: text("proposed_title"),
+    proposedContent: text("proposed_content"),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    foreignKey({
+      name: "workbench_revision_runs_document_owner_fk",
+      columns: [table.documentId, table.userId],
+      foreignColumns: [workbenchDocuments.id, workbenchDocuments.userId],
+    }).onDelete("cascade"),
+    index("workbench_revision_runs_user_created_idx").on(table.userId, table.createdAt),
+    index("workbench_revision_runs_document_idx").on(table.documentId),
+    check("workbench_revision_runs_status_check", sql`${table.status} IN ('generating', 'complete', 'failed', 'cancelled')`),
+    check("workbench_revision_runs_instruction_length", sql`char_length(${table.instruction}) between 1 and 4000`),
+    check("workbench_revision_runs_base_revision_positive", sql`${table.baseRevision} >= 1`),
   ],
 );
 
