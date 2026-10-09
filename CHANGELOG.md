@@ -32,6 +32,7 @@ What's new in Nibie.
 
 ### Changed
 
+- Workbench UI is hidden until product-ready: Edit in Workbench and `/workbench` routes are unavailable (backend and preview harness stay in place).
 - Workbench documents support Markdown Write and Preview (same rendering as chat replies).
 - Workbench side panel is a lighter editor: Write/Preview, Ask Nibie on selected text (inline apply, no suggestion review), Expand, and Close.
 - Manual whole-document AI Assist is removed; select text in Write mode and use Ask Nibie instead.
