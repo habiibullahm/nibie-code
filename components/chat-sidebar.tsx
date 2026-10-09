@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
-import { Archive, ChevronDown, ChevronRight, DoorOpen, LoaderCircle, MessageSquare, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Plus, RotateCcw, Search, Settings, SquarePen, Trash2, X } from "lucide-react";
+import { Archive, ChevronDown, ChevronRight, Copy, DoorOpen, LoaderCircle, MessageSquare, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Plus, RotateCcw, Search, Settings, SquarePen, Trash2, X } from "lucide-react";
 import { SIGN_OUT_LABEL } from "@/lib/privacy/sign-out";
 import { AccountMenu } from "@/components/account-menu";
 import type { WhatsNewPreview } from "@/lib/changelog";
@@ -61,6 +61,7 @@ type Props = {
   onArchive: (item: ConversationSummary) => void;
   onRestore: (item: ConversationSummary) => void;
   onMove: (item: ConversationSummary, roomId: string | null) => Promise<void>;
+  onCopyTranscript: (item: ConversationSummary) => void | Promise<void>;
 };
 
 function SearchHighlight({ text, query }: { text: string; query: string }) {
@@ -396,7 +397,7 @@ function ConversationSearchDialog({
 }
 
 // Memoized: streaming tokens and typing never re-render the history list.
-export const ChatSidebar = memo(function ChatSidebar({ conversations, archivedConversations, rooms, activeId, activeRoomId, busy, activity, preview, email, name, releasePreview = null, searchCorpus, renderedAt, mobile = false, drawerRef, closeMenuRef, desktopToggleRef, desktopExpandRef, collapsed = false, settingsActive = false, onCollapse, onExpand, onClose, onOpen, onOpenMessage, onOpenRoom, onNewThreadInRoom, onDeleteRoom, onCreateRoom, onNewChat, onOpenSettings, onRename, onArchive, onRestore, onMove }: Props) {
+export const ChatSidebar = memo(function ChatSidebar({ conversations, archivedConversations, rooms, activeId, activeRoomId, busy, activity, preview, email, name, releasePreview = null, searchCorpus, renderedAt, mobile = false, drawerRef, closeMenuRef, desktopToggleRef, desktopExpandRef, collapsed = false, settingsActive = false, onCollapse, onExpand, onClose, onOpen, onOpenMessage, onOpenRoom, onNewThreadInRoom, onDeleteRoom, onCreateRoom, onNewChat, onOpenSettings, onRename, onArchive, onRestore, onMove, onCopyTranscript }: Props) {
   // Server render and hydration group by the UTC calendar from the server's clock so both agree; once mounted, the viewer's own clock and
   // time zone are used (the grouping is recomputed whenever the list changes).
   const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false);
@@ -422,7 +423,7 @@ export const ChatSidebar = memo(function ChatSidebar({ conversations, archivedCo
   const [roomActionMenuId, setRoomActionMenuId] = useState<string | null>(null);
   const [roomActionMenuPosition, setRoomActionMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
-  const contextTriggerRef = useRef<HTMLDivElement>(null);
+  const contextTriggerRef = useRef<HTMLElement | null>(null);
   const roomActionMenuRef = useRef<HTMLDivElement>(null);
   const roomActionTriggerRef = useRef<HTMLButtonElement>(null);
   const historyNavRef = useRef<HTMLElement>(null);
@@ -440,7 +441,13 @@ export const ChatSidebar = memo(function ChatSidebar({ conversations, archivedCo
     if (!contextMenu) return;
     contextMenuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
     const dismissOutside = (event: PointerEvent) => { if (!contextMenuRef.current?.contains(event.target as Node)) setContextMenu(null); };
-    const dismissEscape = (event: KeyboardEvent) => { if (event.key === "Escape") { setContextMenu(null); contextTriggerRef.current?.focus(); } };
+    const dismissEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      setContextMenu(null);
+      contextTriggerRef.current?.focus();
+    };
     document.addEventListener("pointerdown", dismissOutside);
     document.addEventListener("keydown", dismissEscape);
     return () => { document.removeEventListener("pointerdown", dismissOutside); document.removeEventListener("keydown", dismissEscape); };
@@ -469,9 +476,10 @@ export const ChatSidebar = memo(function ChatSidebar({ conversations, archivedCo
     else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setRoomActionMenuId(null); setRoomActionMenuPosition(null); roomActionTriggerRef.current?.focus(); }
     else if (event.key === "Tab") { setRoomActionMenuId(null); setRoomActionMenuPosition(null); }
   }
-  function showActions(item: ConversationSummary, trigger: HTMLDivElement, x: number, y: number) {
+  function showActions(item: ConversationSummary, trigger: HTMLElement, x: number, y: number) {
     contextTriggerRef.current = trigger;
-    setContextMenu({ item, x: Math.max(8, Math.min(x, window.innerWidth - 192)), y: Math.max(8, Math.min(y, window.innerHeight - 140)) });
+    // Taller menu: Move, Copy transcript, plus Rename/Archive when signed in.
+    setContextMenu({ item, x: Math.max(8, Math.min(x, window.innerWidth - 192)), y: Math.max(8, Math.min(y, window.innerHeight - 200)) });
   }
   function drop(event: DragEvent<HTMLElement>, roomId: string | null) {
     event.preventDefault();
@@ -492,9 +500,9 @@ export const ChatSidebar = memo(function ChatSidebar({ conversations, archivedCo
   function renderThread(item: ConversationSummary) {
     return <div className="history-entry" key={item.id} data-conversation-id={item.id} tabIndex={-1} draggable={!mobile && !busy}
       onDragStart={(event) => { if (mobile || busy) { event.preventDefault(); return; } event.dataTransfer.setData("application/x-nibie-thread", item.id); event.dataTransfer.effectAllowed = "move"; setContextMenu(null); }} onDragEnd={() => setDropRoom(undefined)}
-      onContextMenu={(event) => { event.preventDefault(); showActions(item, event.currentTarget, event.clientX, event.clientY); }}>
+      onContextMenu={(event) => { event.preventDefault(); const actions = event.currentTarget.querySelector<HTMLButtonElement>(`button[aria-label="Actions for ${item.title}"]`); showActions(item, actions ?? event.currentTarget, event.clientX, event.clientY); }}>
       <button className={`history-item ${activeId === item.id ? "is-active" : ""}`} onClick={(event) => { if (event.detail === 2) onRename(item); else onOpen(item.id); }} title={`${item.title} · Double-click to rename`}><MessageSquare size={15} /><span>{item.title}</span></button>
-      <button type="button" className="history-action" aria-label={`Actions for ${item.title}`} title="Thread actions" aria-haspopup="menu" onClick={(event) => { const trigger = event.currentTarget.closest<HTMLDivElement>(".history-entry"); if (!trigger) return; const box = event.currentTarget.getBoundingClientRect(); showActions(item, trigger, box.left, box.bottom); }}><MoreHorizontal size={15} /></button>
+      <button type="button" className="history-action" aria-label={`Actions for ${item.title}`} title="Thread actions" aria-haspopup="menu" onClick={(event) => { const box = event.currentTarget.getBoundingClientRect(); showActions(item, event.currentTarget, box.left, box.bottom); }}><MoreHorizontal size={15} /></button>
       {!preview && <button className="history-action" aria-label={`Archive ${item.title}`} title="Archive" disabled={busy} onClick={() => onArchive(item)}><Archive size={13} /></button>}
     </div>;
   }
@@ -535,7 +543,7 @@ export const ChatSidebar = memo(function ChatSidebar({ conversations, archivedCo
         })}
       </section>
     </nav> : null}
-    {contextMenu && <div ref={contextMenuRef} className="history-context-menu" role="menu" aria-label={`Actions for ${contextMenu.item.title}`} tabIndex={-1} style={{ left: contextMenu.x, top: contextMenu.y }}><button type="button" role="menuitem" disabled={busy} onClick={() => { setMoveItem(contextMenu.item); setMoveRoomId(contextMenu.item.room_id ?? ""); setContextMenu(null); }}>Move to…</button>{!preview && <><button type="button" role="menuitem" onClick={() => { setContextMenu(null); onRename(contextMenu.item); }}><Pencil size={14} />Rename</button><button type="button" role="menuitem" disabled={busy} onClick={() => { setContextMenu(null); onArchive(contextMenu.item); }}><Archive size={14} />Archive</button></>}</div>}
+    {contextMenu && <div ref={contextMenuRef} className="history-context-menu" role="menu" aria-label={`Actions for ${contextMenu.item.title}`} tabIndex={-1} style={{ left: contextMenu.x, top: contextMenu.y }}><button type="button" role="menuitem" disabled={busy} onClick={() => { setMoveItem(contextMenu.item); setMoveRoomId(contextMenu.item.room_id ?? ""); setContextMenu(null); }}>Move to…</button><button type="button" role="menuitem" disabled={busy} onClick={() => { const item = contextMenu.item; setContextMenu(null); void onCopyTranscript(item); }}><Copy size={14} aria-hidden="true" />Copy transcript</button>{!preview && <><button type="button" role="menuitem" onClick={() => { setContextMenu(null); onRename(contextMenu.item); }}><Pencil size={14} />Rename</button><button type="button" role="menuitem" disabled={busy} onClick={() => { setContextMenu(null); onArchive(contextMenu.item); }}><Archive size={14} />Archive</button></>}</div>}
     {moveItem && <dialog ref={moveDialogRef} className="thread-move-dialog" aria-labelledby={moveTitleId} onKeyDown={(event) => event.stopPropagation()} onCancel={(event) => { event.preventDefault(); setMoveItem(null); }}>
       <form onSubmit={(event) => { event.preventDefault(); const item = moveItem; setMoveItem(null); if (moveRoomId) setExpandedRooms((ids) => ids.includes(moveRoomId) ? ids : [...ids, moveRoomId]); void onMove(item, moveRoomId || null); }}>
         <h2 id={moveTitleId}>Move thread</h2><p>{moveItem.title}</p><label>Move to<select aria-label="Move to" value={moveRoomId} onChange={(event) => setMoveRoomId(event.target.value)}><option value="">General</option>{rooms.map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}</select></label>

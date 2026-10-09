@@ -2,7 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 import { loadEnvConfig } from "@next/env";
 
 loadEnvConfig(process.cwd());
-const externalUrl = process.env.E2E_BASE_URL;
+const externalUrl = process.env.E2E_BASE_URL?.trim() || undefined;
 
 export default defineConfig({
   testDir: "./tests/e2e",

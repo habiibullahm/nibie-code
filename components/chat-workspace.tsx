@@ -31,6 +31,13 @@ import { modelForComposer } from "@/lib/preferences/model";
 import { accountDisplayName } from "@/lib/auth/display-name";
 import { defaultUserPreferences, type UserPreferences } from "@/lib/preferences/types";
 import { createPreviewArchivedConversations, createPreviewConversations } from "@/lib/chat/preview-data";
+import {
+  TRANSCRIPT_LOAD_ERROR,
+  TRANSCRIPT_NOT_FOUND_ERROR,
+  TRANSCRIPT_OVERSIZE_ERROR,
+  buildTranscriptText,
+} from "@/lib/chat/transcript";
+import { writePlainClipboard } from "@/lib/markdown/clipboard";
 import { previewContextDiagnostics } from "@/lib/context/profile-context";
 import type { ContextDiagnostics } from "@/lib/context/context-types";
 import { followAfterSending, followStreamedContent, isNearBottom, trackNearBottom } from "@/lib/chat/scroll";
@@ -767,6 +774,48 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     setLocallyArchivedIds((ids) => ids.filter((id) => id !== item.id));
     router.refresh();
   });
+  const transcriptBusy = useRef(false);
+  const previewMessagesFor = useStableCallback((item: ConversationSummary) => {
+    const conversation = previewConversations.find((entry) => entry.id === item.id);
+    if (!conversation) return null;
+    return conversation.messages.map((message, index) => ({
+      id: message.id,
+      role: message.role,
+      content: message.content,
+      status: message.status ?? "complete",
+      position: message.position ?? index + 1,
+      created_at: message.created_at ?? previewStamp,
+    }));
+  });
+  const copyTranscript = useStableCallback(async (item: ConversationSummary) => {
+    if (transcriptBusy.current) return;
+    transcriptBusy.current = true;
+    setNotice("");
+    try {
+      if (preview) {
+        const messages = previewMessagesFor(item);
+        if (!messages) { setNotice(TRANSCRIPT_NOT_FOUND_ERROR); return; }
+        const built = buildTranscriptText({ id: item.id, title: item.title }, messages, "plain");
+        if ("error" in built) { setNotice(built.error); return; }
+        await writePlainClipboard(built.text);
+        setNotice("Transcript copied.");
+        return;
+      }
+      const response = await fetch(`/api/conversations/${item.id}/transcript`, {
+        headers: { accept: "text/plain" },
+      });
+      if (response.status === 401) { setNotice("Your session has expired. Please sign in again."); return; }
+      if (response.status === 404) { setNotice(TRANSCRIPT_NOT_FOUND_ERROR); return; }
+      if (response.status === 413) { setNotice(TRANSCRIPT_OVERSIZE_ERROR); return; }
+      if (!response.ok) { setNotice(TRANSCRIPT_LOAD_ERROR); return; }
+      await writePlainClipboard(await response.text());
+      setNotice("Transcript copied.");
+    } catch {
+      setNotice(TRANSCRIPT_LOAD_ERROR);
+    } finally {
+      transcriptBusy.current = false;
+    }
+  });
   const moveThread = useStableCallback(async (item: ConversationSummary, roomId: string | null) => {
     if (busy.current || recovery || movePending.current) return;
     const previous = shownConversations.find((entry) => entry.id === item.id);
@@ -983,7 +1032,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
       ...localConversations,
     ];
   }, [preview, previewConversations, previewArchivedConversations, localConversations]);
-  const sidebarProps = { conversations: shownConversations, archivedConversations: preview ? previewArchivedConversations.filter((item) => !localConversations.some((entry) => entry.id === item.id)) : archivedConversations, rooms, activeId: history, activeRoomId: showRoom ? selectedRoomId : threadRoom?.id ?? null, busy: controlsDisabled || recovering, activity: assistantActivity, preview, email, name: accountName, releasePreview, renderedAt, settingsActive: settingsOpen, searchCorpus, onClose: closeDrawer, onOpen: openConversation, onOpenMessage: openConversationAtMessage, onOpenRoom: openRoom, onNewThreadInRoom: newThreadInRoom, onDeleteRoom: deleteRoomFromSidebar, onCreateRoom: openRoomSetup, onNewChat: newChat, onOpenSettings: openSettings, onRename: rename, onArchive: archive, onRestore: restore, onMove: moveThread };
+  const sidebarProps = { conversations: shownConversations, archivedConversations: preview ? previewArchivedConversations.filter((item) => !localConversations.some((entry) => entry.id === item.id)) : archivedConversations, rooms, activeId: history, activeRoomId: showRoom ? selectedRoomId : threadRoom?.id ?? null, busy: controlsDisabled || recovering, activity: assistantActivity, preview, email, name: accountName, releasePreview, renderedAt, settingsActive: settingsOpen, searchCorpus, onClose: closeDrawer, onOpen: openConversation, onOpenMessage: openConversationAtMessage, onOpenRoom: openRoom, onNewThreadInRoom: newThreadInRoom, onDeleteRoom: deleteRoomFromSidebar, onCreateRoom: openRoomSetup, onNewChat: newChat, onOpenSettings: openSettings, onRename: rename, onArchive: archive, onRestore: restore, onMove: moveThread, onCopyTranscript: copyTranscript };
   const composerProps = { ref: composerRef, dockRef: composerDockRef, sending: sending || recovering || movingThread !== null, streaming, mode, models, onModelChange: changeModel, researchMode, onResearchModeChange: setResearchMode, savingMode, caption, diagnostics: contextDiagnostics ?? contextPreview, onEditProfile: editProfile, onSubmit: submitMessage, onStop: stopStream, onAttach: attach, attachmentsEnabled: !preview, onRoomFiles: threadRoom && !preview ? toggleRoomFiles : undefined, roomItems, roomId: threadRoomId ?? "", roomLabel, roomSelectionNotice, roomsLoading, onRoomChange: activeId ? rooms.length ? changeComposerRoom : undefined : chooseDraftRoom, attachmentPanel: filePickerOpen && threadRoom ? <RoomFilePicker roomId={threadRoom.id} selectedIds={selectedFileIds} disabled={controlsDisabled || sending || streaming} onChange={setSelectedFileIds} /> : null };
 
   return <main className="chat-workspace">

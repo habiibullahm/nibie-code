@@ -8,6 +8,7 @@ What's new in Nibie.
 
 ### Added
 
+- Copy a single conversation’s transcript from the thread ··· menu as clean plain text.
 - Search chats now finds conversation titles and saved message content from the same dialog, with short snippets, archived Restore, and jump-to-message highlighting.
 - Download a file you attached to a chat from the message chip (your account only).
 - Ask about a public GitHub pull request or project and Nibie can check live GitHub data, show “Checking GitHub…” while it runs, and keep “Used GitHub” on the answer after reload — public projects only, one check per reply.

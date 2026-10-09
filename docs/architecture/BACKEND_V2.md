@@ -33,6 +33,7 @@ Nibie is one npm package, `nibie-code`. Next.js 16 App Router and React 19 are b
 Browser
   ├─ Server Actions (auth, chat CRUD, preferences, delete-all)
   ├─ GET  /api/account/export
+  ├─ GET  /api/conversations/:id/transcript
   ├─ POST /api/chat          SSE, maxDuration 180, nodejs runtime
   └─ GET  /auth/callback
          │
@@ -59,6 +60,7 @@ Writes set `user_id` from `claims.sub`. Export rejects query keys `user_id`, `us
 | --- | --- | --- |
 | `POST /api/chat` | [`app/api/chat/route.ts`](../../app/api/chat/route.ts) | Authenticated SSE generation |
 | `GET /api/account/export` | [`app/api/account/export/route.ts`](../../app/api/account/export/route.ts) | Owner JSON export |
+| `GET /api/conversations/:id/transcript` | [`app/api/conversations/[id]/transcript/route.ts`](../../app/api/conversations/[id]/transcript/route.ts) | Owner plain-text transcript (copy) |
 | `GET /auth/callback` | [`app/auth/callback/route.ts`](../../app/auth/callback/route.ts) | Code exchange, then redirect |
 | Auth actions | [`app/actions/auth.ts`](../../app/actions/auth.ts) | Sign in, sign up, global sign out |
 | Chat actions | [`app/actions/chat.ts`](../../app/actions/chat.ts) | Conversation CRUD and message RPCs |
@@ -67,7 +69,7 @@ Writes set `user_id` from `claims.sub`. Export rejects query keys `user_id`, `us
 
 JSON errors are `{ error: string }`. Status codes in use include 400, 401, 403, 404, 409, 415, 502, and 503. SSE errors use `event: error` with `data: {"error":"<safe message>"}`. There is no CORS header and no request ID. Logging is `console.error` on the chat route.
 
-Origin checks on `/api/chat` and `/api/account/export` reject an `Origin` that differs from the request URL. A missing `Origin` is allowed. Cookies are `httpOnly`, `sameSite: "lax"`, and `secure` in production.
+Origin checks on `/api/chat`, `/api/account/export`, and `/api/conversations/:id/transcript` reject an `Origin` that differs from the request URL. A missing `Origin` is allowed. Cookies are `httpOnly`, `sameSite: "lax"`, and `secure` in production.
 
 ### Data and models
 
