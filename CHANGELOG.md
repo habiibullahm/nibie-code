@@ -27,6 +27,7 @@ What's new in Nibie.
 
 ### Changed
 
+- Response Format V1: answers keep Natural Structured Markdown — short facts stay concise paragraphs; developed replies use headings, steps, small tables, or code only when they help; explicit requests like plain text, code only, or table only are followed literally.
 - Assistant reply actions (Copy, Regenerate, Retry) are icon-only with tooltips, and Copy is a single control (no plain-text submenu).
 - Typography V1: Bricolage Grotesque for brand and display headings, Onest for UI, chat, and Workbench; code stays on system monospace.
 - Account export now includes chat attachment file names and extracted text for your own conversations (download filename `nibie-export-v2.json`).

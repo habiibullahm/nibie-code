@@ -16,6 +16,14 @@ const examples = {
   coding: "```ts\nexport function groupBy<T>(items: T[], key: keyof T) {\n  return items.reduce<Record<string, T[]>>((groups, item) => {\n    (groups[String(item[key])] ??= []).push(item);\n    return groups;\n  }, {});\n}\n```\n\n`groupBy` keys each item by `item[key]`.",
   longStructured: "Welcome to the team.\n\n## First week\n\n### Day one\n\n1. Get repository access.\n2. Run the app locally.\n\n### Day two\n\n- Read the architecture notes.\n- Pair on a small fix.\n\n## First month\n\nOwn one feature end to end.",
   veryShort: "You're welcome!",
+  // Indonesian Natural Structured Markdown shapes (Issue #90).
+  idSimpleFact: "Ibu kota Jepang adalah Tokyo. Kota itu menjadi pusat pemerintahan sejak 1869.",
+  idHowto: "1. Pasang Python 3 dengan `brew install python`.\n2. Buat environment dengan `python3 -m venv .venv`.\n3. Aktifkan dengan `source .venv/bin/activate`.",
+  idRagDesign: "RAG untuk FAQ klinik memisahkan indexing, retrieval, dan grounding.\n\n## Indexing\n\nChunk dokumen FAQ dan simpan embedding per chunk.\n\n## Retrieval\n\nAmbil top-k chunk relevan ke pertanyaan user.\n\n### Grounding\n\nJawab hanya dari chunk yang diambil; sebutkan ketidakpastian bila sumber tidak cukup.",
+  idComparison: "PostgreSQL lebih cocok untuk concurrency; SQLite cukup untuk prototipe.\n\n| | Concurrency | Operasi |\n| --- | --- | --- |\n| PostgreSQL | Tinggi | Sedang |\n| SQLite | Single writer | Minimal |",
+  plainTextOnly: "A Room in Nibie is shared project context that threads can reuse.",
+  codeOnly: "```ts\nexport const add = (a: number, b: number) => a + b;\n```",
+  citationsNearClaim: "HTTP caching reduces repeat downloads [1].\n\nStale copies can revalidate with an `ETag` [2].",
 };
 
 describe("assistant formatting examples", () => {
@@ -76,6 +84,60 @@ describe("assistant formatting examples", () => {
 
   it("G. a very short answer has no Markdown structure", () => {
     expect(render(examples.veryShort)).toBe('<div class="markdown"><p>You&#x27;re welcome!</p></div>');
+  });
+
+  it("H. Indonesian simple facts stay short paragraphs without structure", () => {
+    const html = render(examples.idSimpleFact);
+    expect(count(html, "p")).toBe(1);
+    for (const tag of ["h1", "h2", "h3", "ul", "ol", "table"]) expect(count(html, tag)).toBe(0);
+    expect(html).toContain("Tokyo");
+  });
+
+  it("I. Indonesian how-tos use numbered steps and inline commands", () => {
+    const html = render(examples.idHowto);
+    expect(count(html, "ol")).toBe(1);
+    expect(count(html, "li")).toBe(3);
+    expect(html).toContain("<code>python3 -m venv .venv</code>");
+  });
+
+  it("J. Indonesian multi-section explanations use ##/### without H1", () => {
+    const html = render(examples.idRagDesign);
+    expect(html.indexOf("<p>")).toBeLessThan(html.indexOf("<h2>"));
+    expect(count(html, "h2")).toBe(2);
+    expect(count(html, "h3")).toBe(1);
+    expect(count(html, "h1")).toBe(0);
+  });
+
+  it("K. Indonesian comparisons render scrollable tables", () => {
+    const html = render(examples.idComparison);
+    expect(html).toContain('<div class="markdown-table"><table>');
+    expect(html).toContain("PostgreSQL");
+  });
+
+  it("L. plain-text-only replies stay a single paragraph", () => {
+    const html = render(examples.plainTextOnly);
+    expect(count(html, "p")).toBe(1);
+    for (const tag of ["h1", "h2", "h3", "ul", "ol", "table", "pre"]) expect(count(html, tag)).toBe(0);
+  });
+
+  it("M. code-only replies are a labelled fence without prose wrappers", () => {
+    const html = render(examples.codeOnly);
+    expect(html).toContain('<div class="code-block-header"><span>ts</span>');
+    expect(count(html, "p")).toBe(0);
+  });
+
+  it("N. citation markers near claims stay linkable and safe", () => {
+    const html = renderToStaticMarkup(createElement(MessageMarkdown, {
+      content: examples.citationsNearClaim,
+      sources: [
+        { ordinal: 1, kind: "web", title: "MDN Caching", url: "https://developer.mozilla.org/en-US/docs/Web/HTTP/Caching", domain: "developer.mozilla.org" },
+        { ordinal: 2, kind: "web", title: "ETag", url: "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/ETag", domain: "developer.mozilla.org" },
+      ],
+    }));
+    expect(html).toContain('href="#citation-source-1"');
+    expect(html).toContain('href="#citation-source-2"');
+    expect(html).not.toContain("<script");
+    expect(html).not.toContain("javascript:");
   });
 });
 

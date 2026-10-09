@@ -26,7 +26,7 @@ const depthSemantics: Record<ResponseLength, string> = {
 };
 
 export function responseDepthInstruction(depth: ResponseLength = "balanced") {
-  return `Response depth: ${depthSemantics[depth]} Explicit requests in the current message override this and are followed literally (briefly, one sentence, just the command or code, in detail, a table).`;
+  return `Response depth: ${depthSemantics[depth]} Explicit requests in the current message override this and are followed literally (briefly, one sentence, plain text, code only, table only, in detail).`;
 }
 
 // All configured models obey the same adaptive detail contract.

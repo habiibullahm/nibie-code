@@ -250,6 +250,6 @@ describe("response depth preference", () => {
     const messages = compose(responseLength, "Balanced", request);
     // The request reaches the provider last and untouched, and the depth line itself yields to it.
     expect(messages.at(-1)).toEqual({ role: "user", content: request });
-    expect(messages[0].content).toMatch(/Explicit requests in the current message override this and are followed literally \(briefly, one sentence, just the command or code, in detail, a table\)\.$/);
+    expect(messages[0].content).toMatch(/Explicit requests in the current message override this and are followed literally \(briefly, one sentence, plain text, code only, table only, in detail\)\.$/);
   });
 });
