@@ -42,6 +42,17 @@ test.describe("settings shell", () => {
     await page.getByRole("button", { name: "New chat", exact: true }).first().click();
     await expect(page.getByTestId("welcome-greeting")).toBeVisible();
     await expect(page.getByRole("button", { name: "Model: Fast", exact: true })).toBeVisible();
+    await page.locator(".desktop-sidebar").getByRole("button", { name: "Nibie Development", exact: true }).click();
+    await page.getByRole("button", { name: "New thread", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Model: Fast", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Model: Fast", exact: true }).click();
+    await page.getByRole("menuitemradio", { name: /^High/ }).click();
+    await openSettings(page);
+    await dialog(page).getByRole("tab", { name: "Nibie", exact: true }).click();
+    await expect(dialog(page).getByRole("radiogroup", { name: "Default model" }).getByRole("radio", { name: "Fast", exact: true })).toBeChecked();
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "New chat", exact: true }).first().click();
+    await expect(page.getByRole("button", { name: "Model: Fast", exact: true })).toBeVisible();
   });
 
   test("offers Concise, Default, and Detailed response depth, with Default selected", async ({ page }) => {

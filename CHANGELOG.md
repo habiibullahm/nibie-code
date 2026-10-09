@@ -28,6 +28,8 @@ What's new in Nibie.
 
 ### Fixed
 
+- Long chats reserve space for their existing summary, keep recent history continuous when a message cannot fit, and report older context omitted by the history limit.
+- Saving a conversation's model shows “Saving…” on the Research control instead of incorrectly claiming a response is running.
 - Workbench Ask Nibie shows a clear message when the feature is not ready on this environment yet, instead of a generic “couldn't improve that document” error.
 
 ### Changed

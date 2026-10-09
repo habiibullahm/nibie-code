@@ -566,3 +566,11 @@ These stay Next.js responsibilities:
 - End-to-end specs under `tests/e2e/`, including existing chat behavior and Settings
 
 `lib/auth/get-user.ts` stays with Next.js while Next.js still verifies sessions. The Fastify auth plugin follows the same `getClaims` rules. The file is removed only when Next.js no longer verifies tokens itself.
+
+### Chat context allocation (Chat Intelligence V3 candidate)
+
+The shared `lib/context/build-context.ts` serves ordinary chat, automatic Web/GitHub Actions, and Deep Research. Allocation keeps the core policy and current request, then the protected recent suffix, then a valid existing thread summary (at most 800 estimated tokens), then optional profile/Room/pins/files/attachments/web/Recall and remaining older history. This allocation order does not change source authority: the current request still overrides stale memories and summaries, and all supplied context remains untrusted.
+
+Raw history stops at the first message that cannot fit, including across the protected/older boundary. Older turns are never reintroduced across that gap. The 32-message selection limit is unchanged; messages discarded at that limit count as truncation unless an included summary covers them. No query, summary generation, provider route, reasoning setting, output ceiling, or spend guard is added or changed.
+
+See [Chat Intelligence V3 evaluation](../engineering/CHAT_INTELLIGENCE_V3.md) for reproduced failures, offline measurements, trade-offs, and blocked live validation.
