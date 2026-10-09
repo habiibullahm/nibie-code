@@ -1,0 +1,39 @@
+name: AI Response Quality V2 Gates
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'lib/context/context-policy.ts'
+      - 'lib/ai/**'
+      - 'tests/quality/**'
+      - 'tests/e2e/response-quality.spec.ts'
+      - 'tests/e2e/chat-core.spec.ts'
+      - 'tests/e2e/high-stream.spec.ts'
+      - 'tests/fixtures/response-quality-v2.json'
+      - 'scripts/response-quality-eval.mjs'
+      - 'package.json'
+      - '.github/workflows/ai-quality-v2.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Test human-rated actual-output scoring harness (synthetic arithmetic only)
+        run: npm run test:quality:v2
+      - name: Production build (no provider credentials)
+        run: npm run build
+      - name: Install browser
+        run: npx playwright install --with-deps chromium
+      - name: Mocked streaming, Stop, recovery, model picker, and response-quality UX E2E
+        run: npx playwright test tests/e2e/chat-core.spec.ts tests/e2e/high-stream.spec.ts tests/e2e/response-quality.spec.ts --workers=2

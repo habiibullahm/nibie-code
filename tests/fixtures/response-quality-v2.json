@@ -1,0 +1,395 @@
+{
+  "version": 1,
+  "description": "Sanitized reproducible prompts; no real user transcripts or provider outputs.",
+  "cases": [
+    {
+      "id": "simple-fact-en",
+      "language": "en",
+      "category": "simple",
+      "prompt": "What is the capital of Japan?",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "brevity"
+      ]
+    },
+    {
+      "id": "room-definition-id",
+      "language": "id",
+      "category": "simple",
+      "prompt": "Apa beda Room dan Thread di Nibie?",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "brevity"
+      ]
+    },
+    {
+      "id": "rest-explanation-en",
+      "language": "en",
+      "category": "explanation",
+      "prompt": "Explain REST APIs with a concrete endpoint example and why statelessness matters.",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "whyHow",
+        "example"
+      ]
+    },
+    {
+      "id": "jwt-explanation-id",
+      "language": "id",
+      "category": "explanation",
+      "prompt": "Jelaskan cara kerja JWT pada proses login, termasuk validasi dan risikonya.",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "whyHow",
+        "example"
+      ]
+    },
+    {
+      "id": "database-index-en",
+      "language": "en",
+      "category": "explanation",
+      "prompt": "How do PostgreSQL B-tree indexes speed up queries, and what do they cost?",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "whyHow",
+        "example",
+        "tradeoffs"
+      ]
+    },
+    {
+      "id": "react-render-id",
+      "language": "id",
+      "category": "explanation",
+      "prompt": "Kenapa React component bisa re-render dan gimana cara mengurangi render yang nggak perlu?",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "whyHow",
+        "example"
+      ]
+    },
+    {
+      "id": "debug-api-en",
+      "language": "en",
+      "category": "debugging",
+      "prompt": "My API returns 500 after a database migration but I have no stack trace. Diagnose safely.",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "whyHow",
+        "tradeoffs"
+      ]
+    },
+    {
+      "id": "debug-stream-id",
+      "language": "id",
+      "category": "debugging",
+      "prompt": "Context build 2ms, tapi token pertama keluar 4 detik. Apa penyebabnya dan bagaimana memverifikasi?",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "whyHow"
+      ]
+    },
+    {
+      "id": "debug-rls-en",
+      "language": "en",
+      "category": "debugging",
+      "prompt": "My Supabase query returns zero rows for one signed-in user. Explain a useful debugging sequence.",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "whyHow",
+        "example"
+      ]
+    },
+    {
+      "id": "compare-orm-id",
+      "language": "id",
+      "category": "comparison",
+      "prompt": "Bandingkan Prisma dan Drizzle untuk Next.js + Supabase, pilih salah satu beserta trade-off.",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "tradeoffs"
+      ]
+    },
+    {
+      "id": "compare-storage-en",
+      "language": "en",
+      "category": "comparison",
+      "prompt": "Choose PostgreSQL versus SQLite for an early SaaS product with concurrent users.",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "tradeoffs"
+      ]
+    },
+    {
+      "id": "architecture-rag-id",
+      "language": "id",
+      "category": "architecture",
+      "prompt": "Rancang RAG assistant untuk dokumen klinik, jelaskan retrieval, evaluasi, keamanan, dan biaya.",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "whyHow",
+        "tradeoffs",
+        "grounding"
+      ]
+    },
+    {
+      "id": "architecture-caching-en",
+      "language": "en",
+      "category": "architecture",
+      "prompt": "Design caching for a high-traffic product catalog API, including invalidation and trade-offs.",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "whyHow",
+        "tradeoffs",
+        "example"
+      ]
+    },
+    {
+      "id": "architecture-ai-routing-id",
+      "language": "id",
+      "category": "architecture",
+      "prompt": "Bagaimana merancang router Fast, Balanced, High dengan fallback yang aman untuk streaming?",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "whyHow",
+        "tradeoffs"
+      ]
+    },
+    {
+      "id": "coding-debounce-en",
+      "language": "en",
+      "category": "coding",
+      "prompt": "Implement a typed TypeScript debounce function and show one usage example.",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "example"
+      ]
+    },
+    {
+      "id": "spring-transaction-id",
+      "language": "id",
+      "category": "coding",
+      "prompt": "Contoh penggunaan @Transactional di Spring Boot, kapan rollback terjadi dan jebakannya.",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "whyHow",
+        "example"
+      ]
+    },
+    {
+      "id": "howto-env-en",
+      "language": "en",
+      "category": "how-to",
+      "prompt": "How should I configure private environment variables in a Next.js Vercel deployment and verify them?",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "whyHow",
+        "example"
+      ]
+    },
+    {
+      "id": "planning-migration-id",
+      "language": "id",
+      "category": "planning",
+      "prompt": "Susun langkah migrasi PostgreSQL zero-downtime untuk tabel besar dengan rollback plan.",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "tradeoffs"
+      ]
+    },
+    {
+      "id": "followup-interview-id",
+      "language": "id",
+      "category": "follow-up",
+      "prompt": "Oke, apa yang harus aku pelajari dulu?",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "continuity",
+        "tradeoffs"
+      ],
+      "context": {
+        "history": [
+          {
+            "role": "user",
+            "content": "Persiapan interview backend engineer di PT DANS Multi Pro"
+          },
+          {
+            "role": "assistant",
+            "content": "Siapkan Java, Spring Boot, SQL, API design dan testing."
+          },
+          {
+            "role": "user",
+            "content": "Stack utama Java Spring Boot"
+          }
+        ]
+      }
+    },
+    {
+      "id": "followup-stack-en",
+      "language": "en",
+      "category": "follow-up",
+      "prompt": "And what changes if I use Java instead?",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "continuity"
+      ],
+      "context": {
+        "history": [
+          {
+            "role": "user",
+            "content": "Design an API backend with Node.js and PostgreSQL."
+          },
+          {
+            "role": "assistant",
+            "content": "A Node.js REST API can use TypeScript and PostgreSQL with a transaction boundary."
+          }
+        ]
+      }
+    },
+    {
+      "id": "room-facts-id",
+      "language": "id",
+      "category": "room",
+      "prompt": "Dari catatan Room ini, apa scope yang sudah disepakati dan apa yang masih usulan?",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "grounding"
+      ],
+      "context": {
+        "room": "Project clinic assistant: confirmed scope is informational clinic FAQ grounded in official pages; appointment booking and WhatsApp are only proposals."
+      }
+    },
+    {
+      "id": "file-noanswer-en",
+      "language": "en",
+      "category": "file",
+      "prompt": "Using only the supplied clinic-hours file, what is the exact consultation price?",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "grounding"
+      ],
+      "context": {
+        "file": "Clinic is open Monday-Friday 09:00-17:00. No consultation prices listed."
+      }
+    },
+    {
+      "id": "web-sources-id",
+      "language": "id",
+      "category": "web",
+      "prompt": "Rangkum perbedaan dua sumber web yang tidak sepakat, tanpa menebak mana yang benar.",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "grounding",
+        "tradeoffs"
+      ],
+      "context": {
+        "web": "Two simulated source excerpts for evaluation: Source A states 12% growth, Source B states 8%; neither independently verified."
+      }
+    },
+    {
+      "id": "research-citations-en",
+      "language": "en",
+      "category": "research",
+      "prompt": "Assess a current market claim using supplied cited evidence. Separate facts from inference.",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "grounding",
+        "tradeoffs"
+      ],
+      "context": {
+        "web": "Two simulated, explicitly attributed market reports with different methodologies; do not treat as live market data."
+      }
+    },
+    {
+      "id": "brevity-sentence-id",
+      "language": "id",
+      "category": "brevity",
+      "prompt": "Dalam satu kalimat, apa itu database index?",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "brevity"
+      ]
+    },
+    {
+      "id": "brevity-command-en",
+      "language": "en",
+      "category": "brevity",
+      "prompt": "Only the command to undo my last git commit and keep staged changes.",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "brevity"
+      ]
+    },
+    {
+      "id": "concise-setting-id",
+      "language": "id",
+      "category": "brevity",
+      "prompt": "Jelaskan secara ringkas kenapa perlu index SQL.",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "brevity"
+      ]
+    },
+    {
+      "id": "detailed-setting-en",
+      "language": "en",
+      "category": "detailed",
+      "prompt": "Explain database indexes in depth with examples, EXPLAIN, write costs and index trade-offs.",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "whyHow",
+        "example",
+        "tradeoffs"
+      ]
+    },
+    {
+      "id": "no-fabrication-id",
+      "language": "id",
+      "category": "grounding",
+      "prompt": "Berapa tarif dokter tepatnya di Klinik Fiktif Melati hari ini? Jangan mengarang.",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "grounding"
+      ]
+    },
+    {
+      "id": "ideation-three-en",
+      "language": "en",
+      "category": "ideation",
+      "prompt": "Suggest exactly three useful, different AI assistant concepts for small businesses with pros and cons.",
+      "dimensions": [
+        "accuracy",
+        "completeness",
+        "tradeoffs"
+      ]
+    }
+  ]
+}

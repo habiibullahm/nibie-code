@@ -37,7 +37,8 @@ test("one capability picker: Fast, Balanced, High with product copy, default Bal
   await expect(page.getByRole("button", { name: "Model: Balanced", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /^Reasoning:/ })).toHaveCount(0);
   await page.getByRole("button", { name: "Model: Balanced", exact: true }).click();
-  await expect(page.getByRole("menu", { name: "Model", exact: true }).getByRole("menuitemradio")).toHaveText([/^Fast\s*Quick answers/, /^Balanced\s*Best for everyday work/, /^High\s*Deeper reasoning/]);
+  // Menu aria-label is "Select model" when the control has a description (same as chat-composer-layout).
+  await expect(page.getByRole("menu", { name: "Select model", exact: true }).getByRole("menuitemradio")).toHaveText([/^Fast\s*Quick answers/, /^Balanced\s*Best for everyday work/, /^High\s*Deeper reasoning/]);
   await page.getByRole("menuitemradio", { name: /^High/ }).click();
   await expect(page.getByRole("button", { name: "Model: High", exact: true })).toBeVisible();
   await expect(page.locator(".composer")).not.toContainText(/Reasoning|Low|Medium|Auto|GPT|DeepSeek|MiniMax|OpenAI/);
@@ -56,7 +57,7 @@ for (const width of [320, 390, 768, 1024, 1440]) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
     for (const choice of [/^Fast/, /^Balanced/, /^High/]) {
       await page.getByRole("button", { name: /^Model:/ }).click();
-      const menu = await page.getByRole("menu", { name: "Model", exact: true }).boundingBox();
+      const menu = await page.getByRole("menu", { name: "Select model", exact: true }).boundingBox();
       expect(menu!.x).toBeGreaterThanOrEqual(0);
       expect(menu!.x + menu!.width).toBeLessThanOrEqual(width);
       await page.getByRole("menuitemradio", { name: choice }).click();

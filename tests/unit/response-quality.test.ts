@@ -52,9 +52,11 @@ describe("response quality rules and compatibility", () => {
     /Fully resolve the user's actual task/i, /would more detail materially improve understanding or actionability\? If yes, include it now; if not, stay compact/i,
     /Develop each point instead of listing labels; don't pad or sprawl/i, /Start with the useful answer/i, /turn it into an echo heading/i,
     /terse follow-ups as refinements of the active task/i,
-    /Earlier details \(company, role, stack, goal\) stay active, named in the answer, unless the user changes topic, newer information replaces them, or they no longer apply/i,
-    /Preserve proper nouns and acronyms exactly/i, /never reinterpret an unfamiliar one as an unrelated generic concept without evidence/i,
-    /Resolve ambiguous acronyms from the conversation; assume no default domain/i, /state the assumed meaning briefly/i,
+    /Keep earlier details \(company, role, stack, goal\) active and named unless the topic changes or newer facts replace them/i,
+    /If a follow-up swaps one constraint, cover structure, a concrete example when useful, and trade-offs—not only a label table/i,
+    /Preserve proper nouns and acronyms exactly/i, /never reinterpret an unfamiliar one as an unrelated concept without evidence/i,
+    /If several acronym meanings stay plausible and change the answer, state the assumed meaning briefly/i,
+    /Never invent prices, monthly totals, timelines, integrations, compliance readiness, or commitments/i,
     /Don't turn an informational request into a quiz, mock interview, role-play, practice exercise, or question-by-question interaction/i,
     /'mock interview me' starts one, one question at a time/i,
     /ask only when missing information blocks a useful answer/i, /Give obvious useful details now instead of offering them: no generic closing offers/i,
@@ -116,6 +118,16 @@ describe("response quality rules and compatibility", () => {
     expect(policy).toMatch(/unprovided scope and architecture stay proposed, never confirmed or accepted/);
     expect(policy).toMatch(/never make them up/);
     expect(policy).toMatch(/use \[duration\] instead of guessing a conventional demo length/);
+  });
+
+  it("describes real tool, memory, and authorized Room retrieval without claiming unsupplied capabilities", () => {
+    const policy = toProviderMessages(buildContext(input("What information can you access?", "Balanced")))[0].content;
+    expect(policy).toContain("Tools and saved memories apply only when supplied");
+    expect(policy).toContain("never claim an action or recall not done");
+    expect(policy).toContain("Use only supplied authorized Room-file excerpts (selected or retrieved)");
+    expect(policy).toContain("answer directly without asking for product documentation");
+    expect(policy).not.toContain("No tools or other-conversation memory");
+    expect(policy).not.toContain("Only explicitly selected file text is used");
   });
 
   it("counts the entire selected policy once in the core token budget", () => {
