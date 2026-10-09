@@ -3,6 +3,7 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getAuthenticatedUser } from "@/lib/auth/get-user";
 import { sanitizeModelOutput } from "@/lib/ai/sanitize-model-output";
+import { schemaUnavailable } from "@/lib/chat/schema-error";
 import { canContinueInWorkbench } from "@/lib/workbench/offer";
 import { workbenchTitleFromContent } from "@/lib/workbench/title";
 import { asWorkbenchDraft, parseWorkbenchCreate, parseWorkbenchWrite, validateWorkbenchId, workbenchCreateDefaults } from "@/lib/workbench/validation";
@@ -19,6 +20,8 @@ type SavedDocument = {
   updated_at: string;
 };
 
+type SavedDocumentRow = Omit<SavedDocument, "revision"> & { revision?: number | null };
+
 const saveFailed = "We couldn't save that document. Please try again.";
 const unavailable = "That document is no longer available.";
 const conflictMessage = "This document changed elsewhere. Reload the latest version before saving.";
@@ -26,6 +29,9 @@ const responseUnavailable = "That response is no longer available.";
 const responseNotReady = "Only a finished response can be opened in Workbench.";
 const roomUnavailable = "That room is no longer available.";
 const sessionFailed = "Your session has expired or the service is unavailable. Please try again.";
+
+const documentSelectWithRevision = "id,title,content,revision,room_id,created_at,updated_at";
+const documentSelectWithoutRevision = "id,title,content,room_id,created_at,updated_at";
 
 async function authenticatedClient() {
   const supabase = await createSupabaseServerClient();
@@ -41,7 +47,7 @@ function failedWrite(error: { code?: string } | null): WorkbenchActionResult<nev
   return { error: saveFailed };
 }
 
-function withRevision(row: SavedDocument): SavedDocument {
+function withRevision(row: SavedDocumentRow): SavedDocument {
   return {
     ...row,
     revision: typeof row.revision === "number" && row.revision >= 1 ? row.revision : 1,
@@ -54,16 +60,21 @@ export async function createWorkbenchDocumentAction(input: unknown): Promise<Wor
   const draft = workbenchCreateDefaults(parsed.data);
   try {
     const { supabase, user } = await authenticatedClient();
-    const { data, error } = await supabase.from("workbench_documents").insert({
+    const row = {
       user_id: user.id,
       title: draft.title,
       content: draft.content,
       room_id: draft.roomId,
-    }).select("id,title,content,revision,room_id,created_at,updated_at").single();
-    const failure = failedWrite(error);
+    };
+    const primary = await supabase.from("workbench_documents").insert(row).select(documentSelectWithRevision).single();
+    // Migration 0027 may be undeployed on Preview; create without returning revision.
+    const result = schemaUnavailable(primary.error)
+      ? await supabase.from("workbench_documents").insert(row).select(documentSelectWithoutRevision).single()
+      : primary;
+    const failure = failedWrite(result.error);
     if (failure) return failure;
-    if (!data) return { error: saveFailed };
-    return { data: withRevision(data as SavedDocument) };
+    if (!result.data) return { error: saveFailed };
+    return { data: withRevision(result.data as SavedDocumentRow) };
   } catch {
     return { error: sessionFailed };
   }
@@ -77,15 +88,23 @@ export async function updateWorkbenchDocumentAction(id: unknown, input: unknown)
   const draft = asWorkbenchDraft(parsed.data);
   try {
     const { supabase, user } = await authenticatedClient();
-    const { data, error } = await supabase.from("workbench_documents").update({
+    const primary = await supabase.from("workbench_documents").update({
       title: draft.title,
       content: draft.content,
       revision: parsed.data.expectedRevision + 1,
     }).eq("id", parsedId.data).eq("user_id", user.id).eq("revision", parsed.data.expectedRevision)
-      .select("id,title,content,revision,room_id,created_at,updated_at").maybeSingle();
-    const failure = failedWrite(error);
+      .select(documentSelectWithRevision).maybeSingle();
+    // Without revision CAS, last-write-wins keeps basic open/edit usable before migrate.
+    const result = schemaUnavailable(primary.error)
+      ? await supabase.from("workbench_documents").update({
+        title: draft.title,
+        content: draft.content,
+      }).eq("id", parsedId.data).eq("user_id", user.id)
+        .select(documentSelectWithoutRevision).maybeSingle()
+      : primary;
+    const failure = failedWrite(result.error);
     if (failure) return failure;
-    if (!data) {
+    if (!result.data) {
       const { data: existing } = await supabase.from("workbench_documents")
         .select("id")
         .eq("id", parsedId.data)
@@ -94,7 +113,7 @@ export async function updateWorkbenchDocumentAction(id: unknown, input: unknown)
       if (!existing) return { error: unavailable };
       return { error: conflictMessage, conflict: true };
     }
-    return { data: withRevision(data as SavedDocument) };
+    return { data: withRevision(result.data as SavedDocumentRow) };
   } catch {
     return { error: sessionFailed };
   }
