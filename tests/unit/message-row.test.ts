@@ -46,10 +46,12 @@ describe("assistant MessageRow", () => {
 
   it("keeps assistant message actions icon-only with accessible names", () => {
     const html = render({ status: "complete", content: "Done." });
-    expect(html).toContain('class="response-copy is-icon-only"');
     expect(html).toContain('aria-label="Copy response"');
     expect(html).toContain('aria-label="Regenerate"');
+    expect(html).toContain("copy-button is-icon-only");
     expect(html).toContain('class="message-action is-icon-only"');
+    expect(html).not.toContain("response-copy-menu");
+    expect(html).not.toContain("Copy plain text");
     expect(html).not.toMatch(/<span>Regenerate<\/span>/);
     expect(html).not.toMatch(/aria-live="polite">Copy<\/span>/);
   });
