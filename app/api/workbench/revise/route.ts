@@ -125,7 +125,7 @@ export async function POST(request: Request) {
         let responseStream: ReadableStream<Uint8Array>;
         try {
           responseStream = await chatProvider.stream(mode, prompt, aborter.signal);
-        } catch (error) {
+        } catch {
           if (aborter.signal.aborted || request.signal.aborted) {
             await failRun("Suggestion cancelled.", "cancelled");
             await release();
@@ -152,7 +152,7 @@ export async function POST(request: Request) {
         try {
           for await (const part of readOpenAiSse(responseStream, aborter.signal)) {
             if (part.type === "delta") {
-              const visible = reasoningFilter(part.text);
+              const visible = reasoningFilter.push(part.text);
               if (!visible) continue;
               raw += visible;
               if (raw.length > workbenchContentLimit + 2_000) throw new Error("Suggestion too large.");
@@ -160,7 +160,14 @@ export async function POST(request: Request) {
               controller.enqueue(encoder.encode(event("delta", { text: visible })));
               continue;
             }
-            if (part.type === "done") providerUsage = part.usage ?? null;
+            if (part.type === "done") {
+              const trailing = reasoningFilter.finish();
+              if (trailing) {
+                raw += trailing;
+                controller.enqueue(encoder.encode(event("delta", { text: trailing })));
+              }
+              providerUsage = part.usage ?? null;
+            }
           }
         } catch (error) {
           if (aborter.signal.aborted || request.signal.aborted) {
@@ -213,7 +220,7 @@ export async function POST(request: Request) {
           expectedRevision,
           suggestion,
         })));
-      } catch (error) {
+      } catch {
         logError("workbench.revise.failed", { requestId, code: operationalCodes.requestFailed });
         try {
           await supabase.from("workbench_revision_runs").update({

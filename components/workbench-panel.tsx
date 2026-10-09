@@ -9,13 +9,16 @@ type Props = {
   onClose: () => void;
 };
 
+type LoadState =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "ready"; document: WorkbenchDocument };
+
 export function WorkbenchPanel({ documentId, onClose }: Props) {
   const titleId = useId();
   const panelRef = useRef<HTMLElement>(null);
   const previousFocus = useRef<HTMLElement | null>(null);
-  const [doc, setDoc] = useState<WorkbenchDocument | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [load, setLoad] = useState<LoadState>({ status: "loading" });
 
   useEffect(() => {
     previousFocus.current = globalThis.document.activeElement instanceof HTMLElement ? globalThis.document.activeElement : null;
@@ -25,26 +28,19 @@ export function WorkbenchPanel({ documentId, onClose }: Props) {
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
     void (async () => {
       try {
         const response = await fetch(`/api/workbench/documents/${documentId}`, { method: "GET" });
         const payload = await response.json().catch(() => null) as { document?: WorkbenchDocument; error?: string } | null;
         if (cancelled) return;
         if (!response.ok || !payload?.document) {
-          setError(payload?.error ?? "That document is no longer available.");
-          setDoc(null);
-          setLoading(false);
+          setLoad({ status: "error", message: payload?.error ?? "That document is no longer available." });
           return;
         }
-        setDoc(payload.document);
-        setLoading(false);
+        setLoad({ status: "ready", document: payload.document });
       } catch {
         if (cancelled) return;
-        setError("Documents couldn't be loaded. Refresh to try again.");
-        setDoc(null);
-        setLoading(false);
+        setLoad({ status: "error", message: "Documents couldn't be loaded. Refresh to try again." });
       }
     })();
     return () => { cancelled = true; };
@@ -72,9 +68,9 @@ export function WorkbenchPanel({ documentId, onClose }: Props) {
       tabIndex={-1}
     >
       <h2 id={titleId} className="visually-hidden">Workbench editor</h2>
-      {loading ? <p className="workbench-panel-loading" role="status">Opening document…</p> : null}
-      {error ? <div className="workbench-panel-error"><p role="alert">{error}</p><button type="button" className="icon-button" aria-label="Close editor" title="Close editor" onClick={onClose}>Close</button></div> : null}
-      {doc ? <WorkbenchEditor document={doc} roomName={doc.room_name} variant="panel" onClose={onClose} /> : null}
+      {load.status === "loading" ? <p className="workbench-panel-loading" role="status">Opening document…</p> : null}
+      {load.status === "error" ? <div className="workbench-panel-error"><p role="alert">{load.message}</p><button type="button" className="icon-button" aria-label="Close editor" title="Close editor" onClick={onClose}>Close</button></div> : null}
+      {load.status === "ready" ? <WorkbenchEditor document={load.document} roomName={load.document.room_name} variant="panel" onClose={onClose} /> : null}
     </aside>
   </>;
 }

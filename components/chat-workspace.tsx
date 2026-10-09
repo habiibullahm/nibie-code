@@ -1091,6 +1091,6 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     </dialog>}
     {creatingRoom ? <RoomCreateDialog preview={preview} onClose={closeRoomSetup} onCreate={createRoom} /> : null}
     {settingsOpen ? <SettingsDialog initialSection={settingsSection} email={email} preview={preview} busy={controlsDisabled} models={models} initialPreferences={savedPreferences} initialError={preferencesError} onClose={closeSettings} onSaved={setSavedPreferences} onConversationsDeleted={conversationsDeleted} /> : null}
-    {workbenchDocumentId ? <WorkbenchPanel documentId={workbenchDocumentId} onClose={closeWorkbenchPanel} /> : null}
+    {workbenchDocumentId ? <WorkbenchPanel key={workbenchDocumentId} documentId={workbenchDocumentId} onClose={closeWorkbenchPanel} /> : null}
   </main>;
 }

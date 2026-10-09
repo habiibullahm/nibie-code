@@ -929,6 +929,7 @@ a.message-source-title:hover { text-decoration: underline; text-decoration-thick
   white-space: nowrap;
 }
 .workbench-panel .workbench-status { margin-left: auto; }
+.workbench-panel .workbench-panel-actions { margin-left: 0; }
 .workbench-panel .workbench-stage {
   flex: 1;
   width: 100%;
