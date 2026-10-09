@@ -12,7 +12,8 @@ declare global {
       release: () => void;
       requests: { model: string; conversationId?: string; userMessageId?: string }[];
     };
-    chatRequests?: { model: string; content: string }[];
+    // Must match chat-core.spec.ts augmentation (unknown[]), not a narrower shape.
+    chatRequests?: unknown[];
   }
 }
 
@@ -130,7 +131,7 @@ for (const mode of modes) {
 test("chat-core fixture: picker switches Fast → Balanced → High with non-empty completed text", async ({ page }) => {
   await page.addInitScript(() => {
     const original = window.fetch;
-    const records: { model: string; content: string }[] = [];
+    const records: unknown[] = [];
     window.chatRequests = records;
     window.fetch = async (input, options) => {
       if (input !== "/api/chat") return original(input, options);
@@ -163,5 +164,8 @@ test("chat-core fixture: picker switches Fast → Balanced → High with non-emp
     await expect(page.getByLabel("Assistant text", { exact: true })).toHaveText(`Completed ${mode} answer.`);
     await expect(page.getByLabel("Assistant text", { exact: true })).not.toHaveText("");
   }
-  expect(await page.evaluate(() => window.chatRequests!.map((row) => row.model))).toEqual([...modes]);
+  expect(await page.evaluate(() => window.chatRequests!.map((row) => {
+    if (!row || typeof row !== "object" || !("model" in row)) return null;
+    return (row as { model: unknown }).model;
+  }))).toEqual([...modes]);
 });
