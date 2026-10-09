@@ -10,12 +10,13 @@ type DocumentRow = {
   id: string;
   title: string;
   content: string;
+  revision: number;
   room_id: string | null;
   created_at: string;
   updated_at: string;
 };
 
-type SummaryRow = Omit<DocumentRow, "content">;
+type SummaryRow = Omit<DocumentRow, "content" | "revision">;
 type SupabaseClient = Awaited<ReturnType<typeof createSupabaseServerClient>>;
 
 async function roomNames(supabase: SupabaseClient, roomIds: string[]) {
@@ -50,7 +51,7 @@ export async function getWorkbenchDocument(id: unknown): Promise<{ document: Wor
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from("workbench_documents")
-    .select("id,title,content,room_id,created_at,updated_at")
+    .select("id,title,content,revision,room_id,created_at,updated_at")
     .eq("id", parsed.data)
     .maybeSingle();
   if (error) return { document: null, error: loadFailed };
@@ -58,7 +59,11 @@ export async function getWorkbenchDocument(id: unknown): Promise<{ document: Wor
   const row = data as DocumentRow;
   const names = await roomNames(supabase, row.room_id ? [row.room_id] : []);
   return {
-    document: { ...row, room_name: row.room_id ? names.get(row.room_id) ?? null : null },
+    document: {
+      ...row,
+      revision: typeof row.revision === "number" && row.revision >= 1 ? row.revision : 1,
+      room_name: row.room_id ? names.get(row.room_id) ?? null : null,
+    },
     error: null,
   };
 }

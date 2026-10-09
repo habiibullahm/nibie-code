@@ -6,6 +6,7 @@ import { PanelLeftClose, PanelLeftOpen, SquarePen, X } from "lucide-react";
 import { addUserMessageAction, archiveConversationAction, editLastUserMessageAction, moveConversationAction, renameConversationAction, restoreConversationAction, startConversationAction, updateConversationModelAction } from "@/app/actions/chat";
 import { createPinAction, deletePinAction, updatePinAction } from "@/app/actions/pins";
 import { createRoomAction, deleteRoomAction, updateRoomAction, updateRoomBriefAction } from "@/app/actions/rooms";
+import { createWorkbenchFromAssistantAction } from "@/app/actions/workbench";
 import type { BrandActivity } from "@/components/brand";
 import { ChatComposer, type ComposerHandle } from "@/components/chat-composer";
 import { ChatSidebar } from "@/components/chat-sidebar";
@@ -15,6 +16,7 @@ import { RoomFilePicker } from "@/components/room-file-picker";
 import { SettingsDialog } from "@/components/settings/settings-dialog";
 import type { SettingsSectionId } from "@/components/settings/registry";
 import { MessageRow } from "@/components/message-row";
+import { WorkbenchPanel } from "@/components/workbench-panel";
 import { forgetLastConversationId, readChatFlag, readLastConversationId, subscribeChatPreferences, writeLastConversationId } from "@/components/use-chat-preferences";
 import { useStableCallback } from "@/components/use-stable-callback";
 import type { WhatsNewPreview } from "@/lib/changelog";
@@ -142,6 +144,10 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   }) ?? "Balanced";
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false);
+  const [workbenchDocumentId, setWorkbenchDocumentId] = useState<string | null>(null);
+  const [workbenchPending, setWorkbenchPending] = useState(false);
+  const workbenchOpeningRef = useRef(false);
+  const sidebarCollapsedBeforeWorkbench = useRef<boolean | null>(null);
   const desktopCollapseButtonRef = useRef<HTMLButtonElement>(null);
   const desktopExpandButtonRef = useRef<HTMLButtonElement>(null);
   const [sending, setSending] = useState(false);
@@ -954,6 +960,33 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   });
   const closeDrawer = useStableCallback(() => { setDrawerOpen(false); menuButtonRef.current?.focus(); });
   const collapseDesktopSidebar = useStableCallback(() => { setDesktopSidebarCollapsed(true); requestAnimationFrame(() => desktopExpandButtonRef.current?.focus()); });
+  const closeWorkbenchPanel = useStableCallback(() => {
+    setWorkbenchDocumentId(null);
+    if (sidebarCollapsedBeforeWorkbench.current !== null) {
+      setDesktopSidebarCollapsed(sidebarCollapsedBeforeWorkbench.current);
+      sidebarCollapsedBeforeWorkbench.current = null;
+    }
+  });
+  const editInWorkbench = useStableCallback(async (messageId: string) => {
+    if (preview || workbenchOpeningRef.current) return;
+    workbenchOpeningRef.current = true;
+    setWorkbenchPending(true);
+    try {
+      const result = await createWorkbenchFromAssistantAction(messageId);
+      if (result.error || !result.data) {
+        setNotice(result.error ?? failureNotice);
+        return;
+      }
+      if (typeof window !== "undefined" && window.matchMedia("(max-width: 1100px)").matches && !desktopSidebarCollapsed) {
+        sidebarCollapsedBeforeWorkbench.current = desktopSidebarCollapsed;
+        setDesktopSidebarCollapsed(true);
+      }
+      setWorkbenchDocumentId(result.data.id);
+    } finally {
+      workbenchOpeningRef.current = false;
+      setWorkbenchPending(false);
+    }
+  });
   const expandDesktopSidebar = useStableCallback(() => { setDesktopSidebarCollapsed(false); requestAnimationFrame(() => desktopCollapseButtonRef.current?.focus()); });
   const openRoomSetup = useStableCallback(() => { setDrawerOpen(false); setCreatingRoom(true); });
   const closeRoomSetup = useStableCallback(() => setCreatingRoom(false));
@@ -1035,7 +1068,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const sidebarProps = { conversations: shownConversations, archivedConversations: preview ? previewArchivedConversations.filter((item) => !localConversations.some((entry) => entry.id === item.id)) : archivedConversations, rooms, activeId: history, activeRoomId: showRoom ? selectedRoomId : threadRoom?.id ?? null, busy: controlsDisabled || recovering, activity: assistantActivity, preview, email, name: accountName, releasePreview, renderedAt, settingsActive: settingsOpen, searchCorpus, onClose: closeDrawer, onOpen: openConversation, onOpenMessage: openConversationAtMessage, onOpenRoom: openRoom, onNewThreadInRoom: newThreadInRoom, onDeleteRoom: deleteRoomFromSidebar, onCreateRoom: openRoomSetup, onNewChat: newChat, onOpenSettings: openSettings, onRename: rename, onArchive: archive, onRestore: restore, onMove: moveThread, onCopyTranscript: copyTranscript };
   const composerProps = { ref: composerRef, dockRef: composerDockRef, sending: sending || recovering || movingThread !== null, streaming, mode, models, onModelChange: changeModel, researchMode, onResearchModeChange: setResearchMode, savingMode, caption, diagnostics: contextDiagnostics ?? contextPreview, onEditProfile: editProfile, onSubmit: submitMessage, onStop: stopStream, onAttach: attach, attachmentsEnabled: !preview, onRoomFiles: threadRoom && !preview ? toggleRoomFiles : undefined, roomItems, roomId: threadRoomId ?? "", roomLabel, roomSelectionNotice, roomsLoading, onRoomChange: activeId ? rooms.length ? changeComposerRoom : undefined : chooseDraftRoom, attachmentPanel: filePickerOpen && threadRoom ? <RoomFilePicker roomId={threadRoom.id} selectedIds={selectedFileIds} disabled={controlsDisabled || sending || streaming} onChange={setSelectedFileIds} /> : null };
 
-  return <main className="chat-workspace">
+  return <main className={`chat-workspace${workbenchDocumentId ? " has-workbench" : ""}`}>
     <ChatSidebar {...sidebarProps} collapsed={desktopSidebarCollapsed} desktopToggleRef={desktopCollapseButtonRef} desktopExpandRef={desktopExpandButtonRef} onCollapse={collapseDesktopSidebar} onExpand={expandDesktopSidebar} />
     {drawerOpen && <div className="mobile-drawer"><button className="drawer-scrim" aria-label="Dismiss menu backdrop" onClick={closeDrawer} /><ChatSidebar {...sidebarProps} mobile drawerRef={drawerRef} closeMenuRef={closeMenuRef} /></div>}
     <section className="chat-main" aria-label="Chat workspace">
@@ -1045,7 +1078,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
         <button type="button" className="header-new-chat" aria-label="New chat" title="New chat" disabled={controlsDisabled} onClick={newChat}><SquarePen size={17} /></button>
       </header>
       <div ref={scrollRef} onScroll={handleScroll} className={`conversation-scroll ${showRoom ? "is-room" : messages.length || loadingConversation ? "has-messages" : "is-empty"}`}>
-        {showRoom && activeRoom ? <RoomDetail key={activeRoom.id} room={activeRoom} threads={roomThreads} busy={controlsDisabled} preview={preview} onOpenThread={openConversation} onNewThread={() => newThreadInRoom(activeRoom.id)} onSaveRoom={saveRoom} onSaveBrief={saveBrief} onCreatePin={createPin} onUpdatePin={updatePin} onDeletePin={removePin} onDelete={removeRoom} /> : loadingConversation ? <div className="message-list conversation-skeleton" role="status" aria-busy="true" aria-label="Loading conversation"><div className="skeleton-line is-short" /><div className="skeleton-line" /><div className="skeleton-line" /><div className="skeleton-line is-medium" /></div> : messages.length ? <div className="message-list" aria-live="polite">{messages.map((message) => <MessageRow key={message.id} message={message} initial={initial} isLast={message.id === lastMessage?.id} isLastUser={message.id === lastUser?.id} waitLabel={message.id === lastMessage?.id ? waitLabel : undefined} canMutate={!preview} disabled={messageActionsLocked} editing={editingId === message.id} responseFailed={notice === failureNotice} highlighted={focusMessageId === message.id} onRegenerate={regenerate} onStartEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} />)}{notice && <p className="local-notice" role="status">{notice}</p>}</div> : <div className="welcome-state"><div className="welcome-panel">{notice && <p className="local-notice" role="status">{notice}</p>}<div className="welcome-copy-group"><h1 data-testid={drafting ? undefined : "welcome-greeting"}>{drafting && activeRoom ? activeRoom.name : welcomeGreeting}</h1>{drafting && activeRoom ? <><p className="welcome-eyebrow">NEW THREAD</p><p className="welcome-copy">This thread starts inside the room. Nibie will use its instructions, brief, and pins.</p></> : null}</div></div>{centeredComposer ? <ChatComposer {...composerProps} centered /> : null}</div>}
+        {showRoom && activeRoom ? <RoomDetail key={activeRoom.id} room={activeRoom} threads={roomThreads} busy={controlsDisabled} preview={preview} onOpenThread={openConversation} onNewThread={() => newThreadInRoom(activeRoom.id)} onSaveRoom={saveRoom} onSaveBrief={saveBrief} onCreatePin={createPin} onUpdatePin={updatePin} onDeletePin={removePin} onDelete={removeRoom} /> : loadingConversation ? <div className="message-list conversation-skeleton" role="status" aria-busy="true" aria-label="Loading conversation"><div className="skeleton-line is-short" /><div className="skeleton-line" /><div className="skeleton-line" /><div className="skeleton-line is-medium" /></div> : messages.length ? <div className="message-list" aria-live="polite">{messages.map((message) => <MessageRow key={message.id} message={message} initial={initial} isLast={message.id === lastMessage?.id} isLastUser={message.id === lastUser?.id} waitLabel={message.id === lastMessage?.id ? waitLabel : undefined} canMutate={!preview} disabled={messageActionsLocked} editing={editingId === message.id} responseFailed={notice === failureNotice} highlighted={focusMessageId === message.id} onRegenerate={regenerate} onStartEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} onEditInWorkbench={preview ? undefined : editInWorkbench} workbenchPending={workbenchPending} />)}{notice && <p className="local-notice" role="status">{notice}</p>}</div> : <div className="welcome-state"><div className="welcome-panel">{notice && <p className="local-notice" role="status">{notice}</p>}<div className="welcome-copy-group"><h1 data-testid={drafting ? undefined : "welcome-greeting"}>{drafting && activeRoom ? activeRoom.name : welcomeGreeting}</h1>{drafting && activeRoom ? <><p className="welcome-eyebrow">NEW THREAD</p><p className="welcome-copy">This thread starts inside the room. Nibie will use its instructions, brief, and pins.</p></> : null}</div></div>{centeredComposer ? <ChatComposer {...composerProps} centered /> : null}</div>}
       </div>
       {!showRoom && !centeredComposer ? <ChatComposer {...composerProps} /> : null}    </section>
     {renaming && <dialog ref={renameDialogRef} className="room-setup-dialog" aria-labelledby={renameTitleId} aria-busy={renameSaving} onCancel={(event) => { event.preventDefault(); if (!renameSaving) setRenaming(null); }}>
@@ -1058,5 +1091,6 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     </dialog>}
     {creatingRoom ? <RoomCreateDialog preview={preview} onClose={closeRoomSetup} onCreate={createRoom} /> : null}
     {settingsOpen ? <SettingsDialog initialSection={settingsSection} email={email} preview={preview} busy={controlsDisabled} models={models} initialPreferences={savedPreferences} initialError={preferencesError} onClose={closeSettings} onSaved={setSavedPreferences} onConversationsDeleted={conversationsDeleted} /> : null}
+    {workbenchDocumentId ? <WorkbenchPanel documentId={workbenchDocumentId} onClose={closeWorkbenchPanel} /> : null}
   </main>;
 }

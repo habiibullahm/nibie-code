@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useState, type KeyboardEvent } from "react";
-import { Download, FileText, Pencil, RefreshCw } from "lucide-react";
+import { Download, FilePenLine, FileText, Pencil, RefreshCw } from "lucide-react";
 import { attachmentTypeLabel, formatBytes } from "@/lib/attachments/limits";
 import type { AttachmentSummary } from "@/lib/attachments/types";
 import { ResponseCopyButton } from "@/components/copy-button";
@@ -11,6 +11,7 @@ import { useChatFlag } from "@/components/use-chat-preferences";
 import type { PersistedMessage } from "@/lib/chat/read";
 import { formatMessageTimestamp } from "@/lib/chat/timestamps";
 import { RESEARCH_STAGE_LABELS } from "@/lib/research/stages";
+import { canContinueInWorkbench } from "@/lib/workbench/offer";
 
 const placeholderResponses = new Set(["Response stopped.", "Response unavailable."]);
 // Content of a saved reply the server has claimed but not written yet.
@@ -33,6 +34,8 @@ type Props = {
   onStartEdit: (id: string) => void;
   onCancelEdit: () => void;
   onSaveEdit: (id: string, content: string) => void;
+  onEditInWorkbench?: (messageId: string) => void;
+  workbenchPending?: boolean;
 };
 
 function MessageEditor({ message, disabled, onCancel, onSave }: { message: PersistedMessage; disabled: boolean; onCancel: () => void; onSave: (content: string) => void }) {
@@ -79,13 +82,14 @@ function MessageTime({ value }: { value: string | undefined }) {
 }
 
 // Memoized per message: while a reply streams, only the row whose message object changed re-renders.
-export const MessageRow = memo(function MessageRow({ message, initial, isLast, isLastUser, canMutate, disabled, editing, responseFailed = false, highlighted = false, waitLabel, onRegenerate, onStartEdit, onCancelEdit, onSaveEdit }: Props) {
+export const MessageRow = memo(function MessageRow({ message, initial, isLast, isLastUser, canMutate, disabled, editing, responseFailed = false, highlighted = false, waitLabel, onRegenerate, onStartEdit, onCancelEdit, onSaveEdit, onEditInWorkbench, workbenchPending = false }: Props) {
   const highlightClass = highlighted ? " is-search-highlight" : "";
   if (message.role === "assistant") {
     const waiting = message.status === "streaming" && (!message.content || message.content === claimPlaceholder);
     const canCopy = message.status !== "streaming" && message.status !== "error" && Boolean(message.content) && !placeholderResponses.has(message.content);
     const canRegenerate = canMutate && isLast && message.status === "complete" && canCopy;
     const canRetry = canMutate && isLast && (message.status === "error" || message.status === "interrupted");
+    const canWorkbench = Boolean(onEditInWorkbench) && canContinueInWorkbench(message);
     const responseStatus = message.actionLabel
       ? message.actionLabel
       : message.researchStage
@@ -116,8 +120,9 @@ export const MessageRow = memo(function MessageRow({ message, initial, isLast, i
           ? <div className="response-waiting"><span className="response-thinking" aria-hidden="true">{waitingLabel}</span>{message.researchStage && !message.actionLabel ? <span className="research-stage">{RESEARCH_STAGE_LABELS[message.researchStage]}</span> : null}</div>
           : <MessageMarkdown content={message.content} sources={message.sources} />}
         {message.sources?.length && !waiting ? <MessageSources sources={message.sources} /> : null}
-        {(canCopy || canRegenerate || canRetry) && <div className="message-actions">
+        {(canCopy || canRegenerate || canRetry || canWorkbench) && <div className="message-actions">
           {canCopy && <ResponseCopyButton markdown={message.content} sources={message.sources} label="Copy response" />}
+          {canWorkbench && <button type="button" className="message-action is-icon" disabled={disabled || workbenchPending} aria-label="Edit in Workbench" title="Edit in Workbench" onClick={() => onEditInWorkbench?.(message.id)}><FilePenLine size={13} aria-hidden="true" /></button>}
           {canRegenerate && <button type="button" className="message-action" disabled={disabled} onClick={onRegenerate}><RefreshCw size={13} aria-hidden="true" /><span>Regenerate</span></button>}
           {canRetry && <button type="button" className="message-action" disabled={disabled} onClick={onRegenerate}><RefreshCw size={13} aria-hidden="true" /><span>Retry</span></button>}
         </div>}

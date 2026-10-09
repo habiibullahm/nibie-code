@@ -1,7 +1,29 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createWorkbenchDocumentAction, createWorkbenchFromAssistantAction, deleteWorkbenchDocumentAction, updateWorkbenchDocumentAction } from "../../app/actions/workbench";
+import { workbenchLineDiff } from "../../lib/workbench/diff";
 import { canContinueInWorkbench } from "../../lib/workbench/offer";
-import { beginWorkbenchSave, editWorkbenchDraft, failWorkbenchSave, initialWorkbenchEditorState, saveStatusLabel, succeedWorkbenchSave } from "../../lib/workbench/save-state";
+import { parseWorkbenchSuggestion } from "../../lib/workbench/prompt";
+import {
+  applyWorkbenchAiProposal,
+  beginWorkbenchAiGenerate,
+  cancelWorkbenchAi,
+  canApplyWorkbenchAiProposal,
+  completeWorkbenchAiProposal,
+  discardWorkbenchAiProposal,
+  failWorkbenchAi,
+  initialWorkbenchAiState,
+  openWorkbenchAiPrompt,
+  setWorkbenchAiInstruction,
+} from "../../lib/workbench/revision";
+import {
+  beginWorkbenchSave,
+  conflictWorkbenchSave,
+  editWorkbenchDraft,
+  failWorkbenchSave,
+  initialWorkbenchEditorState,
+  saveStatusLabel,
+  succeedWorkbenchSave,
+} from "../../lib/workbench/save-state";
 import { workbenchTitleFromContent } from "../../lib/workbench/title";
 import { parseWorkbenchCreate, parseWorkbenchWrite } from "../../lib/workbench/validation";
 
@@ -32,7 +54,13 @@ function memoryClient(options: { fail?: boolean; message?: Row | null; conversat
         },
         insert(row: Row) {
           inserts.push(row);
-          const saved = { id: documentId, created_at: "2026-10-03T00:00:00.000Z", updated_at: "2026-10-03T00:00:00.000Z", ...row };
+          const saved = {
+            id: documentId,
+            revision: 1,
+            created_at: "2026-10-03T00:00:00.000Z",
+            updated_at: "2026-10-03T00:00:00.000Z",
+            ...row,
+          };
           return {
             select: () => ({
               single: async () => {
@@ -56,8 +84,10 @@ function memoryClient(options: { fail?: boolean; message?: Row | null; conversat
                 if (options.fail) return { data: null, error: { code: "XX000" } };
                 const id = filters.find(([key]) => key === "id")?.[1];
                 const userId = filters.find(([key]) => key === "user_id")?.[1];
+                const expectedRevision = filters.find(([key]) => key === "revision")?.[1];
                 const existing = documents.find((doc) => doc.id === id && doc.user_id === userId);
                 if (!existing) return { data: null, error: null };
+                if (expectedRevision !== undefined && existing.revision !== expectedRevision) return { data: null, error: null };
                 Object.assign(existing, patch, { updated_at: "2026-10-03T00:00:01.000Z" });
                 return { data: { ...existing }, error: null };
               },
@@ -88,6 +118,10 @@ function memoryClient(options: { fail?: boolean; message?: Row | null; conversat
         async maybeSingle() {
           const id = filters.find(([key]) => key === "id")?.[1];
           const userId = filters.find(([key]) => key === "user_id")?.[1];
+          if (table === "workbench_documents") {
+            const existing = documents.find((doc) => doc.id === id && doc.user_id === userId);
+            return { data: existing ? { ...existing } : null, error: null };
+          }
           const source = table === "messages" ? options.message : table === "conversations" ? options.conversation : null;
           if (!source || source.id !== id || source.user_id !== userId) return { data: null, error: null };
           return { data: source, error: null };
@@ -106,7 +140,7 @@ describe("workbench documents", () => {
     const memory = memoryClient();
     createClient.mockResolvedValue(memory.client);
     const created = await createWorkbenchDocumentAction({});
-    expect(created.data).toMatchObject({ title: "Untitled", content: "", room_id: null, user_id: owner });
+    expect(created.data).toMatchObject({ title: "Untitled", content: "", room_id: null, user_id: owner, revision: 1 });
     expect(memory.inserts[0]).toEqual({ user_id: owner, title: "Untitled", content: "", room_id: null });
     const room = await createWorkbenchDocumentAction({ roomId });
     expect(room.data).toMatchObject({ room_id: roomId, user_id: owner });
@@ -114,19 +148,21 @@ describe("workbench documents", () => {
 
   it("rejects a client-supplied owner before writing", async () => {
     await expect(createWorkbenchDocumentAction({ user_id: "someone-else", title: "Notes" })).resolves.toMatchObject({ error: "Choose a valid document." });
-    await expect(updateWorkbenchDocumentAction(documentId, { title: "Notes", content: "body", user_id: "someone-else" })).resolves.toMatchObject({ error: "Choose a valid document." });
+    await expect(updateWorkbenchDocumentAction(documentId, { title: "Notes", content: "body", expectedRevision: 1, user_id: "someone-else" })).resolves.toMatchObject({ error: "Choose a valid document." });
     await expect(parseWorkbenchCreate({ roomId: "not-a-room" })).toEqual({ error: "Choose a valid room." });
     expect(createClient).not.toHaveBeenCalled();
   });
 
-  it("updates the title and content without changing the owner", async () => {
+  it("updates with expected revision and rejects stale writes", async () => {
     const memory = memoryClient();
     createClient.mockResolvedValue(memory.client);
     await createWorkbenchDocumentAction({ title: "Notes", content: "first" });
-    const updated = await updateWorkbenchDocumentAction(documentId, { title: "Renamed", content: "second" });
-    expect(updated.data).toMatchObject({ title: "Renamed", content: "second", user_id: owner });
-    expect(memory.updates[0]).toEqual({ title: "Renamed", content: "second" });
-    expect(memory.documents[0]).toMatchObject({ title: "Renamed", content: "second", user_id: owner });
+    const updated = await updateWorkbenchDocumentAction(documentId, { title: "Renamed", content: "second", expectedRevision: 1 });
+    expect(updated.data).toMatchObject({ title: "Renamed", content: "second", user_id: owner, revision: 2 });
+    expect(memory.updates[0]).toEqual({ title: "Renamed", content: "second", revision: 2 });
+    const stale = await updateWorkbenchDocumentAction(documentId, { title: "Stale", content: "nope", expectedRevision: 1 });
+    expect(stale).toMatchObject({ conflict: true });
+    expect(memory.documents[0]).toMatchObject({ title: "Renamed", content: "second", revision: 2 });
   });
 
   it("deletes only the owner's document", async () => {
@@ -144,29 +180,31 @@ describe("workbench documents", () => {
     createClient.mockResolvedValue(memory.client);
     await createWorkbenchDocumentAction({ title: "Notes", content: "saved" });
     const draft = { title: "Notes", content: "Keep this sentence." };
-    let state = editWorkbenchDraft(initialWorkbenchEditorState({ title: "Notes", content: "saved" }), draft);
+    let state = editWorkbenchDraft(initialWorkbenchEditorState({ title: "Notes", content: "saved" }, 1), draft);
     state = beginWorkbenchSave(state);
     expect(saveStatusLabel(state)).toBe("Saving…");
-    const result = await updateWorkbenchDocumentAction(documentId, draft);
+    const result = await updateWorkbenchDocumentAction(documentId, { ...draft, expectedRevision: 1 });
     expect(result.error).toBeTruthy();
     state = failWorkbenchSave(state, result.error ?? "");
     expect(state.draft).toEqual(draft);
     expect(saveStatusLabel(state)).toBe("Save failed");
     expect(state.persisted).toEqual({ title: "Notes", content: "saved" });
-    state = succeedWorkbenchSave(editWorkbenchDraft(state, draft), draft);
+    state = succeedWorkbenchSave(editWorkbenchDraft(state, draft), draft, 2);
     expect(saveStatusLabel(state)).toBe("Saved");
     state = editWorkbenchDraft(state, { title: "Notes", content: "Keep this sentence. And more." });
-    state = succeedWorkbenchSave(state, draft);
+    state = succeedWorkbenchSave(state, draft, 2);
     expect(state.draft.content).toBe("Keep this sentence. And more.");
     expect(saveStatusLabel(state)).toBeNull();
+    state = conflictWorkbenchSave(state);
+    expect(saveStatusLabel(state)).toBe("Newer version saved elsewhere");
   });
 
   it("names a document from the response without calling a model", () => {
     expect(workbenchTitleFromContent("# A calm plan\n\nMore text")).toBe("A calm plan");
     expect(workbenchTitleFromContent("\n\n   ")).toBe("Untitled");
     expect(workbenchTitleFromContent(`x${"y".repeat(200)}`)).toHaveLength(120);
-    const empty = parseWorkbenchWrite({ title: "Notes", content: "" });
-    expect(empty).toEqual({ data: { title: "Notes", content: "" } });
+    const empty = parseWorkbenchWrite({ title: "Notes", content: "", expectedRevision: 1 });
+    expect(empty).toEqual({ data: { title: "Notes", content: "", expectedRevision: 1 } });
   });
 
   it("offers Workbench only for a finished assistant response", () => {
@@ -229,5 +267,63 @@ describe("workbench documents", () => {
     expect(content.startsWith("# AI Assistant Proposal for Clinic")).toBe(true);
     expect(content).not.toContain("<think");
     expect(content).not.toContain("secret reasoning");
+  });
+});
+
+describe("workbench AI revision state", () => {
+  it("moves through prompt, generate, review, apply, discard, cancel, and fail", () => {
+    let state = initialWorkbenchAiState();
+    state = openWorkbenchAiPrompt(state);
+    state = setWorkbenchAiInstruction(state, "Tighten the intro");
+    state = beginWorkbenchAiGenerate(state, {
+      original: { title: "Notes", content: "One\nTwo" },
+      expectedRevision: 3,
+      runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    });
+    expect(state.phase).toBe("generating");
+    expect(canApplyWorkbenchAiProposal(state)).toBe(false);
+    state = completeWorkbenchAiProposal(state, { title: "Notes", content: "One\nTwo\nThree" });
+    expect(state.phase).toBe("review");
+    expect(canApplyWorkbenchAiProposal(state)).toBe(true);
+    state = applyWorkbenchAiProposal(state);
+    expect(state.phase).toBe("idle");
+
+    state = beginWorkbenchAiGenerate(openWorkbenchAiPrompt(setWorkbenchAiInstruction(initialWorkbenchAiState(), "Again")), {
+      original: { title: "Notes", content: "A" },
+      expectedRevision: 1,
+      runId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    });
+    state = cancelWorkbenchAi(state);
+    expect(state.phase).toBe("cancelled");
+    expect(canApplyWorkbenchAiProposal(state)).toBe(false);
+
+    state = failWorkbenchAi(beginWorkbenchAiGenerate(openWorkbenchAiPrompt(setWorkbenchAiInstruction(initialWorkbenchAiState(), "Retry")), {
+      original: { title: "Notes", content: "A" },
+      expectedRevision: 1,
+      runId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    }), "Provider failed");
+    expect(state.phase).toBe("failed");
+    expect(discardWorkbenchAiProposal().phase).toBe("idle");
+  });
+
+  it("rejects incomplete proposals and empty suggestions", () => {
+    expect(parseWorkbenchSuggestion("", "Title")).toBeNull();
+    expect(parseWorkbenchSuggestion("  ", "Title")).toBeNull();
+    expect(parseWorkbenchSuggestion("Improved body", "Title")).toEqual({ title: "Title", content: "Improved body" });
+    const incomplete = beginWorkbenchAiGenerate(setWorkbenchAiInstruction(openWorkbenchAiPrompt(initialWorkbenchAiState()), "Go"), {
+      original: { title: "T", content: "A" },
+      expectedRevision: 1,
+      runId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    });
+    expect(canApplyWorkbenchAiProposal(incomplete)).toBe(false);
+  });
+
+  it("builds a simple line diff for review", () => {
+    expect(workbenchLineDiff("a\nb\nc", "a\nx\nc")).toEqual([
+      { kind: "same", text: "a" },
+      { kind: "removed", text: "b" },
+      { kind: "added", text: "x" },
+      { kind: "same", text: "c" },
+    ]);
   });
 });

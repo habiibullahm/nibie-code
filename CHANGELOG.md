@@ -8,6 +8,7 @@ What's new in Nibie.
 
 ### Added
 
+- Open a finished reply in Workbench beside chat, edit with autosave, and improve the document with AI (review before apply; credits apply).
 - Copy a single conversation’s transcript from the thread ··· menu as clean plain text.
 - Search chats now finds conversation titles and saved message content from the same dialog, with short snippets, archived Restore, and jump-to-message highlighting.
 - Download a file you attached to a chat from the message chip (your account only).
@@ -27,6 +28,7 @@ What's new in Nibie.
 
 ### Changed
 
+- Workbench document saves now use revision checks so a stale tab cannot overwrite newer edits.
 - Typography V1: Bricolage Grotesque for brand and display headings, Onest for UI, chat, and Workbench; code stays on system monospace.
 - Account export now includes chat attachment file names and extracted text for your own conversations (download filename `nibie-export-v2.json`).
 - Nibie’s response guidance now accurately describes when saved memory, web tools, and Room-file excerpts can be used, instead of incorrectly saying they are unavailable.
