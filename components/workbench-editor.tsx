@@ -3,14 +3,14 @@
 import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Expand, MoreHorizontal, Trash2, WandSparkles, X } from "lucide-react";
+import { ArrowLeft, Expand, MoreHorizontal, Trash2, X } from "lucide-react";
 import {
   applyWorkbenchSuggestionAction,
   deleteWorkbenchDocumentAction,
   updateWorkbenchDocumentAction,
 } from "@/app/actions/workbench";
 import { MessageMarkdown } from "@/components/message-markdown";
-import { WorkbenchAiRevision } from "@/components/workbench-ai-revision";
+import { WorkbenchAskNibie } from "@/components/workbench-ask-nibie";
 import { useStableCallback } from "@/components/use-stable-callback";
 import { workbenchDocumentPath, workbenchPath } from "@/lib/routes";
 import {
@@ -47,6 +47,7 @@ const saveFailed = "We couldn't save that document. Please try again.";
 
 type Variant = "page" | "panel";
 type EditorMode = "write" | "preview";
+type SelectionSpan = { start: number; end: number; text: string };
 
 type Props = {
   document: WorkbenchDocument;
@@ -92,18 +93,21 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
   );
   const [ai, setAi] = useState<WorkbenchAiState>(() => initialWorkbenchAiState());
   const [mode, setMode] = useState<EditorMode>(initialMode);
+  const [selection, setSelection] = useState<SelectionSpan | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const stateRef = useRef(state);
   const aiRef = useRef(ai);
+  const selectionRef = useRef<SelectionSpan | null>(null);
   const savingRef = useRef(false);
   const deletingRef = useRef(false);
   const mountedRef = useRef(true);
   const reviseAbortRef = useRef<AbortController | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const menuId = useId();
 
   function update(reducer: (latest: WorkbenchEditorState) => WorkbenchEditorState) {
@@ -118,6 +122,30 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
     aiRef.current = next;
     if (mountedRef.current) setAi(next);
     return next;
+  }
+
+  function rememberSelection(next: SelectionSpan | null) {
+    selectionRef.current = next;
+    if (mountedRef.current) setSelection(next);
+  }
+
+  function captureSelectionFromTextarea(element: HTMLTextAreaElement) {
+    const start = element.selectionStart;
+    const end = element.selectionEnd;
+    if (!Number.isInteger(start) || !Number.isInteger(end) || end <= start) {
+      // Keep the last non-empty span while Ask Nibie is open so the click does not clear it.
+      if (aiRef.current.phase === "idle") rememberSelection(null);
+      return;
+    }
+    rememberSelection({ start, end, text: element.value.slice(start, end) });
+  }
+
+  function syncSelectionToContent(content: string) {
+    const current = selectionRef.current;
+    if (!current) return;
+    if (current.end > content.length || content.slice(current.start, current.end) !== current.text) {
+      rememberSelection(null);
+    }
   }
 
   const persist = useStableCallback(async () => {
@@ -229,6 +257,7 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
       if (next.phase === "failed") return { ...next, phase: "saved", detail: null };
       return next;
     });
+    if (patch.content != null) syncSelectionToContent(patch.content);
   }
 
   function handleBlur() {
@@ -266,23 +295,33 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
       { title: result.data!.title, content: result.data!.content },
       result.data!.revision,
     ));
+    rememberSelection(null);
     updateAi((latest) => finishWorkbenchAiInlineEdit(latest));
   });
 
-  const runInlineEdit = useStableCallback(async () => {
+  const runSelectionEdit = useStableCallback(async () => {
     if (reviseAbortRef.current) reviseAbortRef.current.abort();
     const instruction = aiRef.current.instruction.trim();
+    const span = selectionRef.current;
     if (!instruction) {
-      updateAi((latest) => failWorkbenchAi(latest, "Describe how Nibie should edit this document."));
+      updateAi((latest) => failWorkbenchAi(latest, "Describe how Nibie should change the selection."));
+      return;
+    }
+    if (!span || !span.text) {
+      updateAi((latest) => failWorkbenchAi(latest, "Select text in the document to Ask Nibie."));
       return;
     }
     updateAi((latest) => setWorkbenchAiInstruction(latest, instruction));
     const ready = await ensureSaved();
     if (!ready) {
-      updateAi((latest) => failWorkbenchAi(latest, stateRef.current.detail ?? "Save the document before asking AI to edit."));
+      updateAi((latest) => failWorkbenchAi(latest, stateRef.current.detail ?? "Save the document before asking Nibie."));
       return;
     }
     const current = stateRef.current;
+    if (current.draft.content.slice(span.start, span.end) !== span.text) {
+      updateAi((latest) => failWorkbenchAi(latest, "That selection is out of date. Select the text again."));
+      return;
+    }
     const aborter = new AbortController();
     reviseAbortRef.current = aborter;
     updateAi((latest) => beginWorkbenchAiGenerate(latest, {
@@ -299,6 +338,7 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
           documentId,
           expectedRevision: current.revision,
           instruction,
+          selection: span,
         }),
       });
       if (!response.ok) {
@@ -375,13 +415,7 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
     <button type="button" className={mode === "preview" ? "is-active" : undefined} aria-pressed={mode === "preview"} onClick={() => setMode("preview")}>Preview</button>
   </div>;
 
-  function openAiAssistFromMenu() {
-    setMenuOpen(false);
-    setMenuPos(null);
-    updateAi((latest) => openWorkbenchAiPrompt(latest));
-  }
-
-  const actionsMenu = <div className="workbench-menu">
+  const actionsMenu = variant === "page" ? <div className="workbench-menu">
     <button
       ref={menuTriggerRef}
       type="button"
@@ -404,14 +438,11 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
       aria-label="Document actions"
       style={menuPos ? { top: menuPos.top, right: menuPos.right } : undefined}
     >
-      <button type="button" role="menuitem" disabled={editingLocked || state.phase === "conflict"} onClick={openAiAssistFromMenu}>
-        <WandSparkles size={14} aria-hidden="true" />AI Assist
-      </button>
-      {variant === "page" ? <button type="button" role="menuitem" className="is-danger" disabled={deleting} onClick={() => { setMenuOpen(false); setMenuPos(null); void remove(); }}>
+      <button type="button" role="menuitem" className="is-danger" disabled={deleting} onClick={() => { setMenuOpen(false); setMenuPos(null); void remove(); }}>
         <Trash2 size={14} aria-hidden="true" />Delete document
-      </button> : null}
+      </button>
     </div> : null}
-  </div>;
+  </div> : null;
 
   const headerActions = <>
     {actionsMenu}
@@ -420,19 +451,26 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
   </>;
 
   const body = <>
-    <WorkbenchAiRevision
+    <WorkbenchAskNibie
+      selection={selection}
       state={ai}
       busy={editingLocked}
+      onOpen={() => updateAi((latest) => openWorkbenchAiPrompt(latest))}
       onInstructionChange={(value) => updateAi((latest) => setWorkbenchAiInstruction(latest, value))}
-      onGenerate={() => void runInlineEdit()}
+      onGenerate={() => void runSelectionEdit()}
       onStop={() => reviseAbortRef.current?.abort()}
-      onClosePrompt={() => updateAi((latest) => closeWorkbenchAiPrompt(latest))}
+      onClose={() => {
+        updateAi((latest) => closeWorkbenchAiPrompt(latest));
+        if (textareaRef.current) captureSelectionFromTextarea(textareaRef.current);
+        else if (!selectionRef.current?.text) rememberSelection(null);
+      }}
     />
     <form className="workbench-stage" onSubmit={(event) => event.preventDefault()} onBlur={handleBlur}>
       {roomName && variant === "page" ? <p className="workbench-room">Room · {roomName}</p> : null}
       <input className="workbench-title" aria-label="Document title" autoComplete="off" value={state.draft.title} maxLength={workbenchTitleLimit} disabled={editingLocked} onChange={(event) => changeDraft({ title: event.target.value })} />
       {mode === "write" ? (
         <textarea
+          ref={textareaRef}
           className="workbench-body"
           aria-label="Document"
           placeholder="Write in Markdown…"
@@ -440,6 +478,9 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
           maxLength={workbenchContentLimit}
           disabled={editingLocked}
           onChange={(event) => changeDraft({ content: event.target.value })}
+          onSelect={(event) => captureSelectionFromTextarea(event.currentTarget)}
+          onKeyUp={(event) => captureSelectionFromTextarea(event.currentTarget)}
+          onMouseUp={(event) => captureSelectionFromTextarea(event.currentTarget)}
         />
       ) : (
         <div className="workbench-preview" role="region" aria-label="Document preview" tabIndex={0}>

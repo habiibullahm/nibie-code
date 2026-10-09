@@ -11,7 +11,12 @@ import { logError, logInfo, logWarn } from "@/lib/observability/logger";
 import { requestIdFrom } from "@/lib/observability/request-id";
 import { finalizeGenerationSpend, releaseUsageHold, reserveUsageBeforeGeneration, startWeeklyUsage } from "@/lib/usage/guards";
 import { estimateUsageFromText, withCostEstimate, type ProviderTokenUsage } from "@/lib/usage/provider-usage";
-import { parseWorkbenchSuggestion, workbenchReviseMessages } from "@/lib/workbench/prompt";
+import {
+  applySelectionReplacement,
+  parseWorkbenchSuggestion,
+  workbenchReviseMessages,
+  type WorkbenchSelectionSpan,
+} from "@/lib/workbench/prompt";
 import { workbenchContentLimit } from "@/lib/workbench/types";
 import { parseWorkbenchInstruction, validateWorkbenchId } from "@/lib/workbench/validation";
 
@@ -65,6 +70,27 @@ export async function POST(request: Request) {
   if (!document) return NextResponse.json({ error: "That document is no longer available." }, { status: 404 });
   if (document.revision !== expectedRevision) {
     return NextResponse.json({ error: "This document changed elsewhere. Reload before generating.", conflict: true }, { status: 409 });
+  }
+
+  const selectionRaw = (body as { selection?: { start?: unknown; end?: unknown; text?: unknown } } | null)?.selection;
+  let selection: WorkbenchSelectionSpan | null = null;
+  if (selectionRaw && typeof selectionRaw.start === "number" && typeof selectionRaw.end === "number" && typeof selectionRaw.text === "string") {
+    const start = selectionRaw.start;
+    const end = selectionRaw.end;
+    const text = selectionRaw.text;
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start || end > document.content.length || text.length === 0) {
+      return NextResponse.json({ error: "Select text in the document to Ask Nibie." }, { status: 400 });
+    }
+    if (document.content.slice(start, end) !== text) {
+      return NextResponse.json({ error: "That selection is out of date. Select the text again." }, { status: 409 });
+    }
+    if (text.length > workbenchContentLimit) {
+      return NextResponse.json({ error: "That selection is too large." }, { status: 400 });
+    }
+    selection = { start, end, text };
+  }
+  if (!selection) {
+    return NextResponse.json({ error: "Select text in the document to Ask Nibie." }, { status: 400 });
   }
 
   const runId = randomUUID();
@@ -128,11 +154,12 @@ export async function POST(request: Request) {
       };
       try {
         controller.enqueue(encoder.encode(event("start", { runId, expectedRevision, model: configuredModelLabel(mode) })));
-        controller.enqueue(encoder.encode(event("status", { status: "Generating suggestion…" })));
+        controller.enqueue(encoder.encode(event("status", { status: "Asking Nibie…" })));
 
         const prompt = workbenchReviseMessages({
           instruction: instruction.data,
           document: { title: document.title, content: document.content },
+          selection,
         });
         const promptChars = prompt.reduce((sum, message) => sum + message.content.length, 0);
         let responseStream: ReadableStream<Uint8Array>;
@@ -197,12 +224,19 @@ export async function POST(request: Request) {
         }
 
         const sanitized = sanitizeModelOutput(raw).text;
-        const suggestion = parseWorkbenchSuggestion(sanitized, document.title);
-        if (!suggestion) {
+        const replacement = parseWorkbenchSuggestion(sanitized, document.title);
+        if (!replacement) {
           await failRun("The suggestion was empty or too large.");
           controller.enqueue(encoder.encode(event("error", { error: "The suggestion was empty or too large." })));
           return;
         }
+        const nextContent = applySelectionReplacement(document.content, selection, replacement.content);
+        if (nextContent == null) {
+          await failRun("That selection is out of date. Select the text again.");
+          controller.enqueue(encoder.encode(event("error", { error: "That selection is out of date. Select the text again." })));
+          return;
+        }
+        const suggestion = { title: document.title, content: nextContent };
 
         const { error: completeError } = await supabase.from("workbench_revision_runs").update({
           status: "complete",
@@ -218,7 +252,7 @@ export async function POST(request: Request) {
 
         const usage = withCostEstimate(mode, providerUsage ?? estimateUsageFromText({
           promptChars,
-          outputChars: suggestion.content.length,
+          outputChars: replacement.content.length,
         }));
         await finalizeGenerationSpend({
           supabase,

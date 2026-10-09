@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createWorkbenchDocumentAction, createWorkbenchFromAssistantAction, deleteWorkbenchDocumentAction, updateWorkbenchDocumentAction } from "../../app/actions/workbench";
 import { workbenchLineDiff } from "../../lib/workbench/diff";
 import { canContinueInWorkbench } from "../../lib/workbench/offer";
-import { parseWorkbenchSuggestion } from "../../lib/workbench/prompt";
+import { applySelectionReplacement, parseWorkbenchSuggestion, workbenchReviseMessages } from "../../lib/workbench/prompt";
 import { getWorkbenchDocument } from "../../lib/workbench/read";
 import {
   applyWorkbenchAiProposal,
@@ -399,5 +399,22 @@ describe("workbench AI revision state", () => {
       { kind: "added", text: "x" },
       { kind: "same", text: "c" },
     ]);
+  });
+
+  it("splices a revised selection into the document and builds a selection prompt", () => {
+    const content = "Hello world — keep this.";
+    const selection = { start: 6, end: 11, text: "world" };
+    expect(applySelectionReplacement(content, selection, "planet")).toBe("Hello planet — keep this.");
+    expect(applySelectionReplacement(content, { ...selection, text: "wrong" }, "planet")).toBeNull();
+    expect(applySelectionReplacement(content, { start: 0, end: 999, text: content }, "x")).toBeNull();
+
+    const messages = workbenchReviseMessages({
+      instruction: "Make it stronger",
+      document: { title: "Notes", content },
+      selection,
+    });
+    expect(messages[0]?.content).toContain("replacement text for that selection");
+    expect(messages[1]?.content).toContain("Selected text:\nworld");
+    expect(messages[1]?.content).toContain("Full document (context only");
   });
 });

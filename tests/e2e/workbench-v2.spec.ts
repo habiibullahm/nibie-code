@@ -6,7 +6,7 @@ test.describe("Workbench V2 panel", () => {
     await page.goto("/preview/workbench-v2");
     await expect(page.getByTestId("workbench-v2-preview")).toBeVisible();
     await expect(page.getByRole("button", { name: "Edit in Workbench" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Document actions" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Document actions" })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Expand" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Close" })).toBeVisible();
     await expect(page.getByRole("textbox", { name: "Document title" })).toBeVisible();
@@ -16,16 +16,26 @@ test.describe("Workbench V2 panel", () => {
     expect(chatBox && panelBox && chatBox.width > 360 && panelBox.width >= 440 && panelBox.width <= 560).toBeTruthy();
   });
 
-  test("opens AI Assist from the actions menu for inline edit", async ({ page }) => {
+  test("shows Ask Nibie on selected text for inline edit", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto("/preview/workbench-v2");
-    await page.getByRole("button", { name: "Document actions" }).click();
-    await page.getByRole("menuitem", { name: "AI Assist" }).click();
-    await expect(page.getByPlaceholder("Ask AI to edit…")).toBeVisible();
+    const body = page.getByRole("textbox", { name: "Document", exact: true });
+    await body.focus();
+    await body.evaluate((element) => {
+      const textarea = element as HTMLTextAreaElement;
+      const start = textarea.value.indexOf("Confirm insurance");
+      const end = start + "Confirm insurance".length;
+      textarea.setSelectionRange(start, end);
+      textarea.dispatchEvent(new Event("select", { bubbles: true }));
+    });
+    await page.getByRole("button", { name: "Ask Nibie" }).click();
+    await expect(page.getByPlaceholder("Ask Nibie to change this…")).toBeVisible();
     await expect(page.getByRole("button", { name: "Submit", exact: true })).toBeVisible();
+    await expect(page.getByText(/Selection · Confirm insurance/)).toBeVisible();
     await expect(page.getByRole("heading", { name: "Suggested revision" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Apply", exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Discard", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("menuitem", { name: "AI Assist" })).toHaveCount(0);
   });
 
   test("toggles Markdown Write and Preview", async ({ page }) => {
