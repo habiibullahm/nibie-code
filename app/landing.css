@@ -95,8 +95,8 @@
 .landing-hero h1, .landing-quote h2, .landing-final h2, .landing-block h2, .landing-use h3 {
   margin: 0;
   color: var(--text);
-  font-family: Georgia, "Times New Roman", serif;
-  font-weight: 400;
+  font-family: var(--font-brand);
+  font-weight: 550;
   letter-spacing: -.04em;
   overflow-wrap: break-word;
 }
@@ -239,9 +239,9 @@
 .landing-statements p {
   margin: 0;
   color: var(--text);
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: var(--font-brand);
   font-size: clamp(28px, 3.6vw, 44px);
-  font-weight: 400;
+  font-weight: 550;
   letter-spacing: -.03em;
   line-height: 1.15;
 }
@@ -334,8 +334,8 @@
 .landing-document h1, .landing-document h2 {
   margin: 0;
   color: var(--text);
-  font-family: Georgia, "Times New Roman", serif;
-  font-weight: 400;
+  font-family: var(--font-brand);
+  font-weight: 550;
   letter-spacing: -.04em;
 }
 .landing-document h1 { max-width: 10em; font-size: clamp(42px, 5.4vw, 72px); line-height: 1.04; }
@@ -346,7 +346,7 @@
 .landing-document a { color: var(--link); }
 
 .landing-notes { padding-top: 72px; }
-.landing-notes h2 { max-width: none; margin: 0; color: var(--text-3); font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 650; letter-spacing: .08em; line-height: 1.4; text-transform: uppercase; }
+.landing-notes h2 { max-width: none; margin: 0; color: var(--text-3); font-family: var(--font-ui); font-size: 13px; font-weight: 650; letter-spacing: .08em; line-height: 1.4; text-transform: uppercase; }
 .landing-notes ul { max-width: 36rem; margin: 8px 0 0; padding: 0; list-style: none; }
 .landing-notes li { padding: 14px 0; border-top: 1px solid var(--border-soft); color: var(--text); font-size: 16px; line-height: 1.45; }
 .landing-notes p { margin: 16px 0 0; }
