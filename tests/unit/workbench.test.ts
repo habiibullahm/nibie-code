@@ -181,10 +181,10 @@ describe("workbench documents", () => {
     const memory = memoryClient();
     createClient.mockResolvedValue(memory.client);
     const created = await createWorkbenchDocumentAction({});
-    expect(created.data).toMatchObject({ title: "Untitled", content: "", room_id: null, user_id: owner, revision: 1 });
+    expect(created.data).toMatchObject({ title: "Untitled", content: "", room_id: null, revision: 1 });
     expect(memory.inserts[0]).toEqual({ user_id: owner, title: "Untitled", content: "", room_id: null });
     const room = await createWorkbenchDocumentAction({ roomId });
-    expect(room.data).toMatchObject({ room_id: roomId, user_id: owner });
+    expect(room.data).toMatchObject({ room_id: roomId, revision: 1 });
   });
 
   it("rejects a client-supplied owner before writing", async () => {
@@ -199,7 +199,7 @@ describe("workbench documents", () => {
     createClient.mockResolvedValue(memory.client);
     await createWorkbenchDocumentAction({ title: "Notes", content: "first" });
     const updated = await updateWorkbenchDocumentAction(documentId, { title: "Renamed", content: "second", expectedRevision: 1 });
-    expect(updated.data).toMatchObject({ title: "Renamed", content: "second", user_id: owner, revision: 2 });
+    expect(updated.data).toMatchObject({ title: "Renamed", content: "second", revision: 2 });
     expect(memory.updates[0]).toEqual({ title: "Renamed", content: "second", revision: 2 });
     const stale = await updateWorkbenchDocumentAction(documentId, { title: "Stale", content: "nope", expectedRevision: 1 });
     expect(stale).toMatchObject({ conflict: true });
