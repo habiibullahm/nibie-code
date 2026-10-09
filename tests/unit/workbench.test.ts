@@ -345,7 +345,7 @@ describe("workbench documents", () => {
 });
 
 describe("workbench AI revision state", () => {
-  it("moves through prompt, generate, review, apply, discard, cancel, and fail", () => {
+  it("moves through prompt, generate, inline apply, cancel, and fail", () => {
     let state = initialWorkbenchAiState();
     state = openWorkbenchAiPrompt(state);
     state = setWorkbenchAiInstruction(state, "Tighten the intro");
@@ -357,7 +357,7 @@ describe("workbench AI revision state", () => {
     expect(state.phase).toBe("generating");
     expect(canApplyWorkbenchAiProposal(state)).toBe(false);
     state = completeWorkbenchAiProposal(state, { title: "Notes", content: "One\nTwo\nThree" });
-    expect(state.phase).toBe("review");
+    expect(state.phase).toBe("applying");
     expect(canApplyWorkbenchAiProposal(state)).toBe(true);
     state = applyWorkbenchAiProposal(state);
     expect(state.phase).toBe("idle");
@@ -392,7 +392,7 @@ describe("workbench AI revision state", () => {
     expect(canApplyWorkbenchAiProposal(incomplete)).toBe(false);
   });
 
-  it("builds a simple line diff for review", () => {
+  it("builds a simple line diff for edit comparison", () => {
     expect(workbenchLineDiff("a\nb\nc", "a\nx\nc")).toEqual([
       { kind: "same", text: "a" },
       { kind: "removed", text: "b" },

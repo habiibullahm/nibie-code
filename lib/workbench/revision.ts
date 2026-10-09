@@ -1,6 +1,6 @@
 import type { WorkbenchDraft } from "@/lib/workbench/types";
 
-export type WorkbenchAiPhase = "idle" | "prompt" | "generating" | "review" | "failed" | "cancelled";
+export type WorkbenchAiPhase = "idle" | "prompt" | "generating" | "applying" | "failed" | "cancelled";
 
 export type WorkbenchAiState = {
   phase: WorkbenchAiPhase;
@@ -25,12 +25,12 @@ export function initialWorkbenchAiState(): WorkbenchAiState {
 }
 
 export function openWorkbenchAiPrompt(state: WorkbenchAiState): WorkbenchAiState {
-  if (state.phase === "generating" || state.phase === "review") return state;
+  if (state.phase === "generating" || state.phase === "applying") return state;
   return { ...initialWorkbenchAiState(), phase: "prompt", instruction: state.instruction };
 }
 
 export function closeWorkbenchAiPrompt(state: WorkbenchAiState): WorkbenchAiState {
-  if (state.phase === "generating") return state;
+  if (state.phase === "generating" || state.phase === "applying") return state;
   return initialWorkbenchAiState();
 }
 
@@ -54,17 +54,26 @@ export function beginWorkbenchAiGenerate(
   };
 }
 
-export function completeWorkbenchAiProposal(
+/** AI returned a complete edit; UI applies it inline (no suggestion review). */
+export function completeWorkbenchAiEdit(
   state: WorkbenchAiState,
   suggestion: WorkbenchDraft,
 ): WorkbenchAiState {
   if (state.phase !== "generating") return state;
   return {
     ...state,
-    phase: "review",
+    phase: "applying",
     suggestion: { ...suggestion },
     error: null,
   };
+}
+
+/** @deprecated Prefer completeWorkbenchAiEdit — kept as alias for older call sites. */
+export function completeWorkbenchAiProposal(
+  state: WorkbenchAiState,
+  suggestion: WorkbenchDraft,
+): WorkbenchAiState {
+  return completeWorkbenchAiEdit(state, suggestion);
 }
 
 export function failWorkbenchAi(state: WorkbenchAiState, error: string): WorkbenchAiState {
@@ -81,7 +90,7 @@ export function cancelWorkbenchAi(state: WorkbenchAiState): WorkbenchAiState {
     ...state,
     phase: "cancelled",
     suggestion: null,
-    error: "Suggestion cancelled.",
+    error: "Edit cancelled.",
   };
 }
 
@@ -89,15 +98,25 @@ export function discardWorkbenchAiProposal(): WorkbenchAiState {
   return initialWorkbenchAiState();
 }
 
-export function applyWorkbenchAiProposal(state: WorkbenchAiState): WorkbenchAiState {
-  if (state.phase !== "review" || !state.suggestion) return state;
+export function finishWorkbenchAiInlineEdit(state: WorkbenchAiState): WorkbenchAiState {
+  if (state.phase !== "applying") return state;
   return initialWorkbenchAiState();
 }
 
+export function isWorkbenchAiEditReady(state: WorkbenchAiState): boolean {
+  return state.phase === "applying" && Boolean(state.suggestion?.content != null && state.runId && state.expectedRevision != null);
+}
+
+/** @deprecated Use isWorkbenchAiEditReady */
 export function isWorkbenchAiProposalComplete(state: WorkbenchAiState): boolean {
-  return state.phase === "review" && Boolean(state.suggestion?.content != null && state.original);
+  return isWorkbenchAiEditReady(state);
 }
 
 export function canApplyWorkbenchAiProposal(state: WorkbenchAiState): boolean {
-  return isWorkbenchAiProposalComplete(state);
+  return isWorkbenchAiEditReady(state);
+}
+
+export function applyWorkbenchAiProposal(state: WorkbenchAiState): WorkbenchAiState {
+  if (!isWorkbenchAiEditReady(state)) return state;
+  return initialWorkbenchAiState();
 }

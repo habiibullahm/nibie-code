@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Expand, Trash2, WandSparkles, X } from "lucide-react";
+import { ArrowLeft, Expand, MoreHorizontal, Trash2, WandSparkles, X } from "lucide-react";
 import {
   applyWorkbenchSuggestionAction,
   deleteWorkbenchDocumentAction,
@@ -17,10 +17,12 @@ import {
   beginWorkbenchAiGenerate,
   cancelWorkbenchAi,
   closeWorkbenchAiPrompt,
-  completeWorkbenchAiProposal,
+  completeWorkbenchAiEdit,
   discardWorkbenchAiProposal,
   failWorkbenchAi,
+  finishWorkbenchAiInlineEdit,
   initialWorkbenchAiState,
+  isWorkbenchAiEditReady,
   openWorkbenchAiPrompt,
   setWorkbenchAiInstruction,
   type WorkbenchAiState,
@@ -90,15 +92,19 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
   );
   const [ai, setAi] = useState<WorkbenchAiState>(() => initialWorkbenchAiState());
   const [mode, setMode] = useState<EditorMode>(initialMode);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
-  const [applying, setApplying] = useState(false);
   const stateRef = useRef(state);
   const aiRef = useRef(ai);
   const savingRef = useRef(false);
   const deletingRef = useRef(false);
   const mountedRef = useRef(true);
   const reviseAbortRef = useRef<AbortController | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const menuId = useId();
 
   function update(reducer: (latest: WorkbenchEditorState) => WorkbenchEditorState) {
     const next = reducer(stateRef.current);
@@ -116,7 +122,7 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
 
   const persist = useStableCallback(async () => {
     if (savingRef.current || deletingRef.current) return;
-    if (aiRef.current.phase === "generating" || aiRef.current.phase === "review") return;
+    if (aiRef.current.phase === "generating" || aiRef.current.phase === "applying") return;
     const current = stateRef.current;
     if (!isWorkbenchDirty(current) || current.phase === "conflict") return;
     const parsed = parseWorkbenchWrite({ ...current.draft, expectedRevision: current.revision });
@@ -160,7 +166,7 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
   useEffect(() => {
     mountedRef.current = true;
     if (state.phase === "saving" || state.phase === "failed" || state.phase === "conflict" || !isWorkbenchDirty(state)) return;
-    if (ai.phase === "generating" || ai.phase === "review") return;
+    if (ai.phase === "generating" || ai.phase === "applying") return;
     const handle = window.setTimeout(() => { void persist(); }, workbenchAutosaveMs);
     return () => window.clearTimeout(handle);
   }, [persist, state, ai.phase]);
@@ -176,8 +182,48 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
     };
   }, [persist]);
 
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onPointerDown(event: PointerEvent) {
+      if (!menuRef.current?.contains(event.target as Node) && !menuTriggerRef.current?.contains(event.target as Node)) {
+        setMenuOpen(false);
+        setMenuPos(null);
+      }
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setMenuOpen(false);
+        setMenuPos(null);
+        menuTriggerRef.current?.focus();
+      }
+    }
+    const handle = window.setTimeout(() => {
+      globalThis.document.addEventListener("pointerdown", onPointerDown);
+      globalThis.document.addEventListener("keydown", onKeyDown);
+    }, 0);
+    return () => {
+      window.clearTimeout(handle);
+      globalThis.document.removeEventListener("pointerdown", onPointerDown);
+      globalThis.document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [menuOpen]);
+
+  function toggleActionsMenu() {
+    if (menuOpen) {
+      setMenuOpen(false);
+      setMenuPos(null);
+      return;
+    }
+    const box = menuTriggerRef.current?.getBoundingClientRect();
+    if (box) {
+      setMenuPos({ top: box.bottom + 4, right: Math.max(8, window.innerWidth - box.right) });
+    }
+    setMenuOpen(true);
+  }
+
   function changeDraft(patch: Partial<WorkbenchEditorState["draft"]>) {
-    if (aiRef.current.phase === "generating" || aiRef.current.phase === "review") return;
+    if (aiRef.current.phase === "generating" || aiRef.current.phase === "applying") return;
     update((latest) => {
       const next = editWorkbenchDraft(latest, { ...latest.draft, ...patch });
       if (next.phase === "failed") return { ...next, phase: "saved", detail: null };
@@ -196,27 +242,53 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
     return !isWorkbenchDirty(stateRef.current) && stateRef.current.phase === "saved";
   }
 
-  const generateSuggestion = useStableCallback(async (instructionOverride?: string) => {
+  const applyInlineEdit = useStableCallback(async () => {
+    const currentAi = aiRef.current;
+    if (!isWorkbenchAiEditReady(currentAi) || !currentAi.suggestion || !currentAi.runId || currentAi.expectedRevision == null) return;
+    const result = await applyWorkbenchSuggestionAction({
+      documentId,
+      runId: currentAi.runId,
+      title: currentAi.suggestion.title,
+      content: currentAi.suggestion.content,
+      expectedRevision: currentAi.expectedRevision,
+    });
+    if (result.conflict) {
+      update((latest) => conflictWorkbenchSave(latest, result.error));
+      updateAi(() => discardWorkbenchAiProposal());
+      return;
+    }
+    if (result.error || !result.data) {
+      updateAi((latest) => failWorkbenchAi(latest, result.error ?? saveFailed));
+      return;
+    }
+    update(() => replaceWorkbenchFromServer(
+      stateRef.current,
+      { title: result.data!.title, content: result.data!.content },
+      result.data!.revision,
+    ));
+    updateAi((latest) => finishWorkbenchAiInlineEdit(latest));
+  });
+
+  const runInlineEdit = useStableCallback(async () => {
     if (reviseAbortRef.current) reviseAbortRef.current.abort();
-    const instruction = (instructionOverride ?? aiRef.current.instruction).trim();
+    const instruction = aiRef.current.instruction.trim();
     if (!instruction) {
-      updateAi((latest) => failWorkbenchAi(latest, "Describe how Nibie should improve this document."));
+      updateAi((latest) => failWorkbenchAi(latest, "Describe how Nibie should edit this document."));
       return;
     }
     updateAi((latest) => setWorkbenchAiInstruction(latest, instruction));
     const ready = await ensureSaved();
     if (!ready) {
-      updateAi((latest) => failWorkbenchAi(latest, stateRef.current.detail ?? "Save the document before generating a suggestion."));
+      updateAi((latest) => failWorkbenchAi(latest, stateRef.current.detail ?? "Save the document before asking AI to edit."));
       return;
     }
     const current = stateRef.current;
     const aborter = new AbortController();
     reviseAbortRef.current = aborter;
-    const placeholderRunId = "pending";
     updateAi((latest) => beginWorkbenchAiGenerate(latest, {
       original: { ...current.persisted },
       expectedRevision: current.revision,
-      runId: placeholderRunId,
+      runId: "pending",
     }));
     try {
       const response = await fetch("/api/workbench/revise", {
@@ -234,6 +306,7 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
         updateAi((latest) => failWorkbenchAi(latest, payload?.error ?? saveFailed));
         return;
       }
+      let completed = false;
       await readSse(response, aborter.signal, (type, data) => {
         const payload = data as {
           runId?: string;
@@ -244,7 +317,8 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
           updateAi((latest) => ({ ...latest, runId: payload.runId! }));
         }
         if (type === "complete" && payload.suggestion) {
-          updateAi((latest) => completeWorkbenchAiProposal(latest, payload.suggestion!));
+          completed = true;
+          updateAi((latest) => completeWorkbenchAiEdit(latest, payload.suggestion!));
         }
         if (type === "error") {
           updateAi((latest) => failWorkbenchAi(latest, payload.error ?? saveFailed));
@@ -253,6 +327,9 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
           updateAi((latest) => cancelWorkbenchAi(latest));
         }
       });
+      if (completed && isWorkbenchAiEditReady(aiRef.current)) {
+        await applyInlineEdit();
+      }
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         updateAi((latest) => cancelWorkbenchAi(latest));
@@ -263,38 +340,6 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
       if (reviseAbortRef.current === aborter) reviseAbortRef.current = null;
     }
   });
-
-  async function applySuggestion() {
-    const currentAi = aiRef.current;
-    if (currentAi.phase !== "review" || !currentAi.suggestion || !currentAi.runId || currentAi.expectedRevision == null) return;
-    setApplying(true);
-    try {
-      const result = await applyWorkbenchSuggestionAction({
-        documentId,
-        runId: currentAi.runId,
-        title: currentAi.suggestion.title,
-        content: currentAi.suggestion.content,
-        expectedRevision: currentAi.expectedRevision,
-      });
-      if (result.conflict) {
-        update((latest) => conflictWorkbenchSave(latest, result.error));
-        updateAi(() => discardWorkbenchAiProposal());
-        return;
-      }
-      if (result.error || !result.data) {
-        updateAi((latest) => failWorkbenchAi(latest, result.error ?? saveFailed));
-        return;
-      }
-      update(() => replaceWorkbenchFromServer(
-        stateRef.current,
-        { title: result.data!.title, content: result.data!.content },
-        result.data!.revision,
-      ));
-      updateAi(() => discardWorkbenchAiProposal());
-    } finally {
-      setApplying(false);
-    }
-  }
 
   async function remove() {
     if (deletingRef.current) return;
@@ -317,7 +362,7 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
   }
 
   const label = saveStatusLabel(state);
-  const editingLocked = ai.phase === "generating" || ai.phase === "review";
+  const editingLocked = ai.phase === "generating" || ai.phase === "applying";
   const statusClass = `workbench-status${state.phase === "failed" || state.phase === "conflict" || deleteError ? " is-failed" : ""}`;
   const statusDetail = <>
     {deleteError || label}
@@ -330,24 +375,57 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
     <button type="button" className={mode === "preview" ? "is-active" : undefined} aria-pressed={mode === "preview"} onClick={() => setMode("preview")}>Preview</button>
   </div>;
 
-  const headerActions = <>
-    <button type="button" className="icon-button" aria-label="AI Assist" title="AI Assist" disabled={editingLocked || state.phase === "conflict"} onClick={() => updateAi((latest) => openWorkbenchAiPrompt(latest))}>
-      <WandSparkles size={16} aria-hidden="true" />
+  function openAiAssistFromMenu() {
+    setMenuOpen(false);
+    setMenuPos(null);
+    updateAi((latest) => openWorkbenchAiPrompt(latest));
+  }
+
+  const actionsMenu = <div className="workbench-menu">
+    <button
+      ref={menuTriggerRef}
+      type="button"
+      className="icon-button"
+      aria-label="Document actions"
+      title="Document actions"
+      aria-haspopup="menu"
+      aria-expanded={menuOpen}
+      aria-controls={menuOpen ? menuId : undefined}
+      disabled={editingLocked || state.phase === "conflict"}
+      onClick={toggleActionsMenu}
+    >
+      <MoreHorizontal size={16} aria-hidden="true" />
     </button>
+    {menuOpen ? <div
+      ref={menuRef}
+      id={menuId}
+      className="workbench-actions-menu"
+      role="menu"
+      aria-label="Document actions"
+      style={menuPos ? { top: menuPos.top, right: menuPos.right } : undefined}
+    >
+      <button type="button" role="menuitem" disabled={editingLocked || state.phase === "conflict"} onClick={openAiAssistFromMenu}>
+        <WandSparkles size={14} aria-hidden="true" />AI Assist
+      </button>
+      {variant === "page" ? <button type="button" role="menuitem" className="is-danger" disabled={deleting} onClick={() => { setMenuOpen(false); setMenuPos(null); void remove(); }}>
+        <Trash2 size={14} aria-hidden="true" />Delete document
+      </button> : null}
+    </div> : null}
+  </div>;
+
+  const headerActions = <>
+    {actionsMenu}
     {variant === "panel" ? <a className="icon-button" href={workbenchDocumentPath(documentId)} aria-label="Expand" title="Expand"><Expand size={16} aria-hidden="true" /></a> : null}
     {variant === "panel" ? <button type="button" className="icon-button" aria-label="Close" title="Close" onClick={onClose}><X size={16} aria-hidden="true" /></button> : null}
-    {variant === "page" ? <button type="button" className="workbench-delete" aria-label={deleting ? "Deleting document" : "Delete document"} title={deleting ? "Deleting document" : "Delete document"} disabled={deleting} onClick={() => void remove()}><Trash2 size={16} aria-hidden="true" /></button> : null}
   </>;
 
   const body = <>
     <WorkbenchAiRevision
       state={ai}
-      busy={applying}
+      busy={editingLocked}
       onInstructionChange={(value) => updateAi((latest) => setWorkbenchAiInstruction(latest, value))}
-      onGenerate={() => void generateSuggestion()}
+      onGenerate={() => void runInlineEdit()}
       onStop={() => reviseAbortRef.current?.abort()}
-      onApply={() => void applySuggestion()}
-      onDiscard={() => updateAi(() => discardWorkbenchAiProposal())}
       onClosePrompt={() => updateAi((latest) => closeWorkbenchAiPrompt(latest))}
     />
     <form className="workbench-stage" onSubmit={(event) => event.preventDefault()} onBlur={handleBlur}>
@@ -364,7 +442,7 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
           onChange={(event) => changeDraft({ content: event.target.value })}
         />
       ) : (
-        <div className="workbench-preview" aria-label="Document preview" tabIndex={0}>
+        <div className="workbench-preview" role="region" aria-label="Document preview" tabIndex={0}>
           {state.draft.content.trim()
             ? <MessageMarkdown content={state.draft.content} />
             : <p className="workbench-preview-empty">Nothing to preview yet. Switch to Write and add Markdown.</p>}

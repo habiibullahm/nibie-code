@@ -934,7 +934,41 @@ a.message-source-title:hover { text-decoration: underline; text-decoration-thick
 }
 
 .workbench-top-actions, .workbench-panel-actions { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; }
-.workbench-top-actions .workbench-delete { margin-left: 4px; }
+.workbench-menu { position: relative; display: inline-flex; }
+.workbench-actions-menu {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  width: 180px;
+  padding: 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-menu);
+}
+.workbench-actions-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-2);
+  text-align: left;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.workbench-actions-menu button svg { flex: none; color: var(--text-4); }
+.workbench-actions-menu button:hover:not(:disabled),
+.workbench-actions-menu button:focus-visible { background: var(--hover); color: var(--text); }
+.workbench-actions-menu button:disabled { opacity: .5; cursor: not-allowed; }
+.workbench-actions-menu button.is-danger { color: var(--danger); }
+.workbench-actions-menu button.is-danger svg { color: inherit; }
 .workbench-panel-scrim { display: none; }
 .workbench-panel {
   position: relative;

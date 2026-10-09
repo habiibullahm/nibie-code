@@ -8,7 +8,7 @@ What's new in Nibie.
 
 ### Added
 
-- Open a finished reply in Workbench beside chat, edit with autosave, and improve the document with AI (review before apply; credits apply).
+- Open a finished reply in Workbench beside chat, edit Markdown with autosave, and use ··· → AI Assist to edit the document inline (credits apply).
 - Copy a single conversation’s transcript from the thread ··· menu as clean plain text.
 - Search chats now finds conversation titles and saved message content from the same dialog, with short snippets, archived Restore, and jump-to-message highlighting.
 - Download a file you attached to a chat from the message chip (your account only).
@@ -28,8 +28,8 @@ What's new in Nibie.
 
 ### Changed
 
-- Workbench documents support Markdown Write and Preview (same rendering as chat replies) beside the compact AI Assist controls.
-- Workbench side panel is a lighter editor: compact header (AI Assist, Expand, Close), borderless writing, and a single Ask AI to edit field with Apply or Discard.
+- Workbench documents support Markdown Write and Preview (same rendering as chat replies).
+- Workbench side panel is a lighter editor: Write/Preview, ··· menu **AI Assist** that edits the document inline (no suggestion review), Expand, and Close.
 - Workbench document saves now use revision checks so a stale tab cannot overwrite newer edits.
 - Response Format V1: answers keep Natural Structured Markdown — short facts stay concise paragraphs; developed replies use headings, steps, small tables, or code only when they help; explicit requests like plain text, code only, or table only are followed literally.
 - Assistant reply actions (Copy, Regenerate, Retry) are icon-only with tooltips, and Copy is a single control (no plain-text submenu).
