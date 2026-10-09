@@ -37,9 +37,9 @@ export function WorkbenchPreviewFixture({ state }: { state: State }) {
         </div>
       </div>
     </section>
+    <button type="button" className="workbench-panel-scrim" aria-label="Close editor backdrop" />
     <aside className="workbench-panel" role="dialog" aria-label="Workbench editor">
-      {state === "editor" ? <WorkbenchEditor document={document} variant="panel" onClose={() => undefined} /> : null}
-      {state === "prompt" ? <WorkbenchEditor document={document} variant="panel" onClose={() => undefined} /> : null}
+      {state === "editor" || state === "prompt" ? <WorkbenchEditor document={document} variant="panel" onClose={() => undefined} /> : null}
       {state === "review" ? <WorkbenchReviewChrome /> : null}
     </aside>
   </main>;
@@ -48,16 +48,19 @@ export function WorkbenchPreviewFixture({ state }: { state: State }) {
 function WorkbenchReviewChrome() {
   return <div className="workbench-panel-editor">
     <header className="workbench-panel-top">
-      <p className="workbench-panel-label">Clinic onboarding notes</p>
       <p className="workbench-status" role="status">Saved</p>
+      <div className="workbench-panel-actions">
+        <button type="button" className="icon-button" aria-label="AI Assist" title="AI Assist" disabled>✧</button>
+        <button type="button" className="icon-button" aria-label="Expand" title="Expand">⛶</button>
+        <button type="button" className="icon-button" aria-label="Close" title="Close">✕</button>
+      </div>
     </header>
-    <div className="workbench-ai is-review" role="region" aria-label="Review suggestion">
+    <div className="workbench-ai is-review" role="region" aria-label="Suggested revision">
       <div className="workbench-ai-review-header">
-        <h2>Review suggestion</h2>
+        <h2>Suggested revision</h2>
         <div className="workbench-ai-actions">
-          <button type="button" className="icon-button workbench-ai-action" aria-label="Apply changes" title="Apply changes">✓</button>
-          <button type="button" className="icon-button workbench-ai-action" aria-label="Discard suggestion" title="Discard suggestion">✕</button>
-          <button type="button" className="icon-button workbench-ai-action" aria-label="Regenerate suggestion" title="Regenerate suggestion">↻</button>
+          <button type="button" className="icon-button workbench-ai-action" aria-label="Apply" title="Apply">✓</button>
+          <button type="button" className="icon-button workbench-ai-action" aria-label="Discard" title="Discard">✕</button>
         </div>
       </div>
       <div className="workbench-ai-diff">
@@ -67,7 +70,7 @@ function WorkbenchReviewChrome() {
         <div className="workbench-ai-line is-added"><span>+</span><pre>New closing checklist for the care team.</pre></div>
       </div>
       <div className="workbench-ai-mobile-actions">
-        <button type="button" className="workbench-ai-text-action is-primary">Apply changes</button>
+        <button type="button" className="workbench-ai-text-action is-primary">Apply</button>
         <button type="button" className="workbench-ai-text-action">Discard</button>
       </div>
     </div>
