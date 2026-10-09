@@ -28,6 +28,7 @@ What's new in Nibie.
 
 ### Fixed
 
+- Replies that use saved Memory can finish streaming without a false connection-recovery error.
 - Workbench Ask Nibie shows a clear message when the feature is not ready on this environment yet, instead of a generic “couldn't improve that document” error.
 
 ### Changed
