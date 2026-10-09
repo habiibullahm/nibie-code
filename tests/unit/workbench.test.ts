@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createWorkbenchDocumentAction, createWorkbenchFromAssistantAction, deleteWorkbenchDocumentAction, updateWorkbenchDocumentAction } from "../../app/actions/workbench";
 import { workbenchLineDiff } from "../../lib/workbench/diff";
+import { WORKBENCH_UI_ENABLED } from "../../lib/workbench/flags";
 import { canContinueInWorkbench } from "../../lib/workbench/offer";
 import { applySelectionReplacement, parseWorkbenchSuggestion, workbenchReviseMessages } from "../../lib/workbench/prompt";
 import { getWorkbenchDocument } from "../../lib/workbench/read";
@@ -256,6 +257,10 @@ describe("workbench documents", () => {
     expect(canContinueInWorkbench({ role: "assistant", status: "complete", content: "Response unavailable." })).toBe(false);
     expect(canContinueInWorkbench({ role: "user", status: "complete", content: "Hello" })).toBe(false);
     expect(canContinueInWorkbench({ role: "assistant", content: "No status yet" })).toBe(false);
+  });
+
+  it("keeps Workbench UI disabled until product-ready", () => {
+    expect(WORKBENCH_UI_ENABLED).toBe(false);
   });
 
   it("loads a document when migration 0027 revision is undeployed", async () => {

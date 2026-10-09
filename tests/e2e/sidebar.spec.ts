@@ -246,10 +246,10 @@ test("sidebar scroll is thin and does not move fixed controls on mobile or deskt
   }
 });
 
-test("Workbench remains directly routable behind sign-in", async ({ page }) => {
-  await page.goto("/workbench");
-  await expect(page).toHaveURL((url) => url.pathname === "/login");
-  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+test("Workbench routes are not discoverable while UI is disabled", async ({ page }) => {
+  const response = await page.goto("/workbench");
+  expect(response?.status()).toBe(404);
+  await expect(page.getByRole("heading", { name: "Sign in" })).toHaveCount(0);
 });
 
 test("room rows provide an accessible quick action to start a thread", async ({ page }) => {
