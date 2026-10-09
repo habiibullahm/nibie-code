@@ -28,7 +28,8 @@ What's new in Nibie.
 
 ### Fixed
 
-- Long threads keep their summary before large source excerpts use the remaining context budget, and report when older messages are omitted.
+- Long chats reserve space for their existing summary, keep recent history continuous when a message cannot fit, and report older context omitted by the history limit.
+- Saving a conversation's model shows “Saving…” on the Research control instead of incorrectly claiming a response is running.
 - Replies that use saved Memory can finish streaming without a false connection-recovery error.
 - Workbench Ask Nibie shows a clear message when the feature is not ready on this environment yet, instead of a generic “couldn't improve that document” error.
 

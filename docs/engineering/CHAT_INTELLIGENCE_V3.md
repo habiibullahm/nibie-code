@@ -1,5 +1,7 @@
 # Chat Intelligence V3 audit and evaluation
 
+This preserves the earlier PR #97/#98 audit and measurements. The PR #99 follow-up below records its additional changes and the 2026-10-10 conflict resolution; earlier verification counts are historical, not checks of the merged candidate.
+
 Baseline: latest `main`, `1d4abc7619496abcf2684907ed9233d7835e35c2`, fetched on 2026-10-09. The working tree started clean. [Response Quality V2 #73](https://github.com/habiibullahm/nibie-code/issues/73) is completed; [live evaluation #80](https://github.com/habiibullahm/nibie-code/issues/80) remains open. [Structured Markdown #90](https://github.com/habiibullahm/nibie-code/issues/90) and [PR #91](https://github.com/habiibullahm/nibie-code/pull/91) are completed/merged. Workbench/PR #86 is outside this change.
 
 Delivery branches were refreshed onto `main` at `981f0c6f22b2f344edee2b86628443cc6d512ca7` after PR #94 landed during this audit. Its Workbench visibility change is preserved. [PR #97](https://github.com/habiibullahm/nibie-code/pull/97) contains the independent Memory stream fix; this context PR does not depend on it. Delivery uses the repository's `fix/` branch convention.
@@ -25,7 +27,7 @@ Delivery branches were refreshed onto `main` at `981f0c6f22b2f344edee2b86628443c
 
 ## Focused context change
 
-Budget allocation now reserves a valid summary **after protected recent messages, profile, Room, and pins, before file/attachment/web/memory excerpts**. This changes allocation priority only; provider message order and authority remain unchanged. A summary stays untrusted data, is capped at 800 estimated tokens, and is rejected when stale or too large. Raw history after its coverage remains eligible.
+PR #98 reserved a valid summary after protected recent messages, profile, Room, and pins, before excerpts. PR #99 extends that reservation to **after protected recent messages, before optional profile/Room/pins/file/attachment/web/memory text**, so those sources cannot crowd out the summary either. This changes allocation priority only; provider message order and authority remain unchanged. A summary stays untrusted data, is capped at 800 estimated tokens, and is rejected when stale or too large. Uncovered raw history remains eligible only as a continuous newest suffix; it cannot cross an omitted oversized message.
 
 The truncation flag and existing Recent conversation diagnostic now include messages discarded by the count cap when those supplied messages are not represented by a fitted summary. They do not report covered history as lost. No transcript text enters diagnostics.
 
@@ -93,3 +95,26 @@ No provider keys, authenticated Preview test account, or approved spend budget w
 - Summary priority can shorten source excerpts under pressure; existing partial-context diagnostics and included-source citation filtering must remain intact.
 - Separate code re-review by the implementing engineer: all three chat callers share the fixed builder; completion ordering and unknown/malformed SSE rejection remain covered; summary authority, stale-summary checks, current-request precedence, RLS query scopes, and cost guards are unchanged. No new dependencies, migrations, tools, Workbench changes, or model escalation. Independent human quality/security approval is still required at the live release gate.
 - Merge readiness depends on automated checks at each PR head and the outstanding live gate. Offline contract PASS is not a product-quality GO.
+
+## PR #99 follow-up and conflict resolution (2026-10-10)
+
+PR #99 was originally verified at `5e580fc2756224a5ba7b4188900e16c519d6f5e1`: 1,271 unit tests, 52 distinct offline Playwright tests, 11 scorer self-tests, lint, typecheck, production build, release consistency, and diff checks passed. PR Guard including Integration DB + RLS and the Vercel Preview build also passed at that head. These are historical counts; merged-candidate verification is recorded below.
+
+The merge incorporates main `2b6b667` and preserves its Memory stream compatibility, Workbench visibility flags, context-count diagnostics, and all regression tests. The overlapping summary reservation is kept once, at PR #99's earlier allocation step. Main's existing `historyCapped` / `historyTruncated` implementation is reused rather than duplicating diagnostics.
+
+Additional deterministic reproductions from PR #99:
+
+| Case | Original baseline | PR #99 behavior retained |
+| --- | --- | --- |
+| Oversized older message at position 3 of 9 | Raw turns 1, 2, 4–9 included | Raw turns 4–9 only |
+| Oversized protected message at position 7 of 9 | Raw turns 1–6, 8, 9 included | Raw turns 8, 9 only |
+| Summary with tight budget plus profile/Room text | Summary omitted | Existing bounded summary allowance reserved before optional text |
+| Pending conversation model save | Research control claims a response is running | Existing Saving… label shown |
+
+The original four new context regression cases failed before implementation and passed after it. Saved Fast defaults, existing conversation modes, Room New Thread inheritance, and changing a draft model without changing the account default are covered. An obsolete Room test selector is corrected to the actual `Select model` accessible name, preserving the UI.
+
+PR #99's local effective configuration was Fast on Sumopod with the existing 8,192-token output ceiling, Balanced on OpenAI with configured medium effort, and High on OpenAI with high effort. Production overrides and live parameter support were not probed. The user explicitly selected offline evaluation only; real output quality, latency, source fidelity, and billed cost remain **BLOCKED / N/A**. No provider/search spending, routing change, or automatic escalation is introduced.
+
+Preserving the summary earlier can omit more optional context under a tight budget; stopping at a raw-history gap can retain fewer older turns. The unchanged dependency tree reported seven high-severity npm audit entries in the earlier PR #99 run; no dependency upgrade was bundled. No Production deployment or PR merge to main is performed by conflict resolution.
+
+Conflict-resolution verification: 1,280 unit tests in 108 files and 27 focused offline Playwright tests passed, including both main's Memory diagnostic event paths and default-model inheritance. Typecheck, lint (zero errors; three existing warnings), production build (temporary `NEXT_PUBLIC_APP_URL=https://nibie.test`), release consistency, and diff/conflict-marker checks passed. These checks validate the combined candidate; the older full-browser failures above are not reclassified as a full-suite PASS.

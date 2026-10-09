@@ -23,7 +23,8 @@ function takeNewest(messages: ThreadMessage[], remaining: { value: number }) {
   const dropped: ThreadMessage[] = [];
   for (const message of [...messages].reverse()) {
     const tokens = estimateTokens(message.content);
-    if (tokens <= remaining.value) {
+    // Keep a continuous suffix: skipping a correction can make older facts look current.
+    if (!dropped.length && tokens <= remaining.value) {
       included.push(message);
       remaining.value -= tokens;
     } else dropped.push(message);
@@ -63,6 +64,20 @@ export function buildContext(input: BuildContextInput): ContextPlan {
 
   const remaining = { value: inputBudgetTokens - coreTokens - currentTokens };
   const protectedFit = takeNewest(protectedMessages, remaining);
+  // Preserve compressed history before optional source text can consume its small allowance.
+  let summaryText = "";
+  let summaryIncluded = false;
+  let summaryDroppedForBudget = false;
+  const summary = resolved.summary;
+  if (summary) {
+    const text = renderThreadSummary(summary);
+    const tokens = estimateTokens(text);
+    if (tokens <= SUMMARY_TOKEN_CAP && tokens <= remaining.value) {
+      summaryText = text;
+      summaryIncluded = true;
+      remaining.value -= tokens;
+    } else summaryDroppedForBudget = true;
+  }
   const includedPieces: ProfilePiece[] = [];
   const droppedPieces: ProfilePiece[] = [];
   for (const piece of pieces) {
@@ -101,32 +116,17 @@ export function buildContext(input: BuildContextInput): ContextPlan {
     } else droppedPins.push(piece);
   }
 
-  // Reserve continuity before excerpts can consume the remaining budget. The summary stays untrusted data.
-  let summaryText = "";
-  let summaryIncluded = false;
-  let summaryDroppedForBudget = false;
-  const summary = resolved.summary;
-  if (summary) {
-    const text = renderThreadSummary(summary);
-    const tokens = estimateTokens(text);
-    if (tokens <= SUMMARY_TOKEN_CAP && tokens <= remaining.value) {
-      summaryText = text;
-      summaryIncluded = true;
-      remaining.value -= tokens;
-    } else summaryDroppedForBudget = true;
-  }
-
   // Explicitly selected files only. They never become a search over the room.
   const requestedFiles = input.files?.length ? input.files : null;
   const renderedFiles = requestedFiles ? renderFileContext(requestedFiles, Math.min(FILE_TOKEN_CAP, remaining.value)) : null;
   if (renderedFiles?.text) remaining.value -= estimateTokens(renderedFiles.text);
 
-  // Chat attachments of this conversation: after room context and room files, before web and the summary.
+  // Chat attachments of this conversation: after room context and room files, before web.
   const requestedAttachments = input.attachments?.length ? input.attachments : null;
   const renderedAttachments = requestedAttachments ? renderAttachmentContext(requestedAttachments, Math.min(ATTACHMENT_TOKEN_CAP, remaining.value)) : null;
   if (renderedAttachments?.text) remaining.value -= estimateTokens(renderedAttachments.text);
 
-  // Public web sources: after files/attachments, before summary and older history. Never invented here.
+  // Public web sources: after files/attachments, before older history. Never invented here.
   const requestedWeb = input.web?.length ? input.web : null;
   const webCap = Number.isFinite(input.webTokenCap) && (input.webTokenCap as number) > 0
     ? Math.trunc(input.webTokenCap as number)
@@ -139,10 +139,12 @@ export function buildContext(input: BuildContextInput): ContextPlan {
   const renderedMemories = requestedMemories ? renderRecallContext(requestedMemories, Math.min(MEMORY_TOKEN_CAP, remaining.value)) : null;
   if (renderedMemories?.text) remaining.value -= estimateTokens(renderedMemories.text);
 
-  // The summary stands in only for positions it covers. Older messages after its coverage (the bridge between the summary and
-  // the protected recent window) stay eligible as raw history, so an older summary never leaves a gap.
+  // The summary replaces only positions it covers. Uncovered older history can bridge to recent turns, but never cross a budget gap.
   const coveredThrough = summaryIncluded && summary ? summary.coversThroughPosition : 0;
-  const olderFit = takeNewest(olderMessages.filter((message) => message.position > coveredThrough), remaining);
+  const uncoveredOlder = olderMessages.filter((message) => message.position > coveredThrough);
+  const olderFit = protectedFit.dropped.length
+    ? { included: [], dropped: uncoveredOlder }
+    : takeNewest(uncoveredOlder, remaining);
   const dialogue = [...olderFit.included, ...protectedFit.included, current];
   const droppedMessages = [...olderFit.dropped, ...protectedFit.dropped];
   const selectedMessages = new Set(selected);
