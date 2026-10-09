@@ -27,6 +27,7 @@ What's new in Nibie.
 
 ### Changed
 
+- Typography V1: Bricolage Grotesque for brand and display headings, Onest for UI, chat, and Workbench; code stays on system monospace.
 - Account export now includes chat attachment file names and extracted text for your own conversations (download filename `nibie-export-v2.json`).
 - Copy on a reply now pastes Word- and Docs-friendly formatting by default (headings, lists, tables, and code without Markdown markers or dark theme), with a small menu for clean plain text.
 - Deep Research now uses a higher weekly credit cost that covers the full multi-step research run (planning, search, and synthesis), not just a single reply.
