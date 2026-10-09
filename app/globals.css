@@ -632,18 +632,17 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .copy-button.is-compact { min-height: 24px; padding: 2px 7px; }
 .code-block-actions .copy-button { min-height: 28px; padding: 3px 8px; color: var(--text-2); font-size: 12px; }
 .code-block-actions .copy-button:hover { color: var(--text); }
-.copy-button.is-icon-only { justify-content: center; width: 28px; min-height: 26px; padding: 0; }
+.copy-button.is-icon-only { justify-content: center; width: 28px; min-height: 26px; padding: 0; gap: 0; }
 .copy-button.is-icon-only:focus-visible { outline: 2px solid var(--link); outline-offset: 1px; }
-.response-copy { position: relative; display: inline-flex; align-items: center; gap: 0; }
-.response-copy .copy-button { border-radius: 7px 0 0 7px; }
-.response-copy-menu-trigger { width: 22px; min-height: 28px; padding: 0; justify-content: center; border-radius: 0 7px 7px 0; }
-.response-copy-menu-trigger:hover, .response-copy-menu-trigger[aria-expanded="true"] { background: var(--hover); color: var(--text); }
-.response-copy-menu { position: absolute; z-index: 4; left: 0; bottom: calc(100% + 4px); min-width: 148px; padding: 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-raised); box-shadow: var(--shadow-menu); }
-.response-copy-menu-item { display: block; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text); text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
-.response-copy-menu-item:hover, .response-copy-menu-item:focus-visible { background: var(--hover); outline: none; }
+.message-action.is-icon-only,
+.message-actions .copy-button.is-icon-only { justify-content: center; width: 36px; min-height: 36px; padding: 0; gap: 0; }
+.message-action.is-icon-only:focus-visible,
+.message-actions .copy-button.is-icon-only:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
 @media (max-width: 760px) {
   .copy-button.is-icon-only { width: 34px; min-height: 32px; }
+  .message-action.is-icon-only,
+  .message-actions .copy-button.is-icon-only { width: 44px; min-height: 44px; }
   .code-block-actions .copy-button { min-height: 32px; padding: 4px 9px; }
 }
 .message-action:disabled { opacity: .45; cursor: not-allowed; }

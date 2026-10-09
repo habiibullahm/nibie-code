@@ -29,10 +29,12 @@ What's new in Nibie.
 ### Changed
 
 - Workbench document saves now use revision checks so a stale tab cannot overwrite newer edits.
+- Response Format V1: answers keep Natural Structured Markdown — short facts stay concise paragraphs; developed replies use headings, steps, small tables, or code only when they help; explicit requests like plain text, code only, or table only are followed literally.
+- Assistant reply actions (Copy, Regenerate, Retry) are icon-only with tooltips, and Copy is a single control (no plain-text submenu).
 - Typography V1: Bricolage Grotesque for brand and display headings, Onest for UI, chat, and Workbench; code stays on system monospace.
 - Account export now includes chat attachment file names and extracted text for your own conversations (download filename `nibie-export-v2.json`).
 - Nibie’s response guidance now accurately describes when saved memory, web tools, and Room-file excerpts can be used, instead of incorrectly saying they are unavailable.
-- Copy on a reply now pastes Word- and Docs-friendly formatting by default (headings, lists, tables, and code without Markdown markers or dark theme), with a small menu for clean plain text.
+- Copy on a reply pastes Word- and Docs-friendly formatting (headings, lists, tables, and code without Markdown markers or dark theme), with plain text on the same clipboard write.
 - Deep Research now uses a higher weekly credit cost that covers the full multi-step research run (planning, search, and synthesis), not just a single reply.
 - Model and Research controls are clearer: Research shows Off or Deep Research (with a stronger selected state when Deep Research is on), and replies have a slightly tighter vertical rhythm for easier scanning.
 - Improved message input readability, code example controls, and conversation navigation across desktop and mobile.
