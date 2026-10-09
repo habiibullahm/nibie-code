@@ -25,6 +25,8 @@ type Props = {
   disabled: boolean;
   editing: boolean;
   responseFailed?: boolean;
+  /** Brief search-navigation highlight for the matched message. */
+  highlighted?: boolean;
   // Label for the pre-first-token indicator (Responding… / Thinking… / Researching…); only the in-flight reply receives it.
   waitLabel?: string;
   onRegenerate: () => void;
@@ -77,7 +79,8 @@ function MessageTime({ value }: { value: string | undefined }) {
 }
 
 // Memoized per message: while a reply streams, only the row whose message object changed re-renders.
-export const MessageRow = memo(function MessageRow({ message, initial, isLast, isLastUser, canMutate, disabled, editing, responseFailed = false, waitLabel, onRegenerate, onStartEdit, onCancelEdit, onSaveEdit }: Props) {
+export const MessageRow = memo(function MessageRow({ message, initial, isLast, isLastUser, canMutate, disabled, editing, responseFailed = false, highlighted = false, waitLabel, onRegenerate, onStartEdit, onCancelEdit, onSaveEdit }: Props) {
+  const highlightClass = highlighted ? " is-search-highlight" : "";
   if (message.role === "assistant") {
     const waiting = message.status === "streaming" && (!message.content || message.content === claimPlaceholder);
     const canCopy = message.status !== "streaming" && message.status !== "error" && Boolean(message.content) && !placeholderResponses.has(message.content);
@@ -101,7 +104,7 @@ export const MessageRow = memo(function MessageRow({ message, initial, isLast, i
       : message.researchStage
         ? "Researching…"
         : waitLabel ?? "Responding…";
-    return <article className="message-row assistant">
+    return <article id={`message-${message.id}`} data-message-id={message.id} className={`message-row assistant${highlightClass}`}>
       <div className="message-content assistant">
         {message.status === "streaming" ? <span className="visually-hidden" role="status">{responseStatus}</span> : null}
         {!waiting && (statuses || failed || message.created_at) ? <div className="message-author">
@@ -121,7 +124,7 @@ export const MessageRow = memo(function MessageRow({ message, initial, isLast, i
       </div>
     </article>;
   }
-  return <article className="message-row user">
+  return <article id={`message-${message.id}`} data-message-id={message.id} className={`message-row user${highlightClass}`}>
     {editing
       ? <div className="message-column user"><MessageEditor message={message} disabled={disabled} onCancel={onCancelEdit} onSave={(content) => onSaveEdit(message.id, content)} /></div>
       : <div className="message-column user">

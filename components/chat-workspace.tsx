@@ -30,7 +30,7 @@ import { clearStoredConversationReference } from "@/lib/privacy/local-state";
 import { modelForComposer } from "@/lib/preferences/model";
 import { accountDisplayName } from "@/lib/auth/display-name";
 import { defaultUserPreferences, type UserPreferences } from "@/lib/preferences/types";
-import { createPreviewConversations } from "@/lib/chat/preview-data";
+import { createPreviewArchivedConversations, createPreviewConversations } from "@/lib/chat/preview-data";
 import { previewContextDiagnostics } from "@/lib/context/profile-context";
 import type { ContextDiagnostics } from "@/lib/context/context-types";
 import { followAfterSending, followStreamedContent, isNearBottom, trackNearBottom } from "@/lib/chat/scroll";
@@ -82,8 +82,10 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   // Server history captured at delete-all. It stays hidden until a newer server payload arrives, so deleted chats do not flash back.
   const [droppedServerHistory, setDroppedServerHistory] = useState<WorkspaceData | null>(null);
   const previewConversations = useMemo(() => createPreviewConversations(renderedAt ?? 0), [renderedAt]);
+  const previewArchivedConversations = useMemo(() => createPreviewArchivedConversations(renderedAt ?? 0), [renderedAt]);
   const conversations = preview ? previewConversations : initialData && initialData === droppedServerHistory ? noConversations : (initialData?.conversations ?? noConversations);
-  const archivedConversations = preview ? noConversations : initialData?.archivedConversations ?? noConversations;
+  const archivedConversations = preview ? previewArchivedConversations : initialData?.archivedConversations ?? noConversations;
+  const [focusMessageId, setFocusMessageId] = useState<string | null>(null);
   const [localMessages, setLocalMessages] = useState<Record<string, PersistedMessage[]>>({});
   const [removedIds, setRemovedIds] = useState<string[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -382,16 +384,42 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   }, [drawerOpen]);
 
   // The backend mode comes from the persisted thread or the account default for a fresh chat.
-  const openConversation = useStableCallback((id: string | null) => {
+  const openConversation = useStableCallback((id: string | null, options?: { focusMessageId?: string }) => {
     setModelChoice("Auto");
     if (busy.current && !streamController.current && liveChatConversationId() !== id) return;
     // Opening the thread that is already replying must not mark that reply stopped.
     if (id !== liveChatConversationId()) abortLiveChatStream();
-    setNotice(""); setDrawerOpen(false); setEditingId(null); setRecovery(null); setContextDiagnostics(null); setPendingRoomId(null); setPendingDraft(false); pinLatestRef.current = true;
+    setNotice(""); setDrawerOpen(false); setEditingId(null); setRecovery(null); setContextDiagnostics(null); setPendingRoomId(null); setPendingDraft(false);
+    if (options?.focusMessageId) {
+      setFocusMessageId(options.focusMessageId);
+      pinLatestRef.current = false;
+    } else {
+      setFocusMessageId(null);
+      pinLatestRef.current = true;
+    }
     if (preview) setPreviewActiveId(id);
     else { setPendingId(id); router.push(id ? conversationPath(id) : chatPath); }
     requestAnimationFrame(() => menuButtonRef.current?.focus());
   });
+  const openConversationAtMessage = useStableCallback((conversationId: string, messageId: string) => {
+    openConversation(conversationId, { focusMessageId: messageId });
+  });
+  useEffect(() => {
+    if (!focusMessageId || loadingConversation) return;
+    const target = scrollRef.current?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(focusMessageId)}"]`);
+    if (!target) return;
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    target.scrollIntoView({ block: "center", behavior: reduceMotion ? "auto" : "smooth" });
+    target.classList.add("is-search-highlight");
+    const timer = window.setTimeout(() => {
+      target.classList.remove("is-search-highlight");
+      setFocusMessageId(null);
+    }, 2_000);
+    return () => {
+      window.clearTimeout(timer);
+      target.classList.remove("is-search-highlight");
+    };
+  }, [focusMessageId, messages, loadingConversation, activeId]);
   // New chat opens the empty conversation immediately. The conversation row is created with the first message, so there is no
   // server work (and no empty "New chat" entries left in history) until the user actually sends something.
   const newChat = useStableCallback(() => {
@@ -728,7 +756,12 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     router.refresh();
   });
   const restore = useStableCallback(async (item: ConversationSummary) => {
-    if (preview) return;
+    if (preview) {
+      const archived = previewArchivedConversations.find((entry) => entry.id === item.id);
+      const restored = { ...(archived ?? item), archived_at: null };
+      setLocalConversations((items) => items.some((entry) => entry.id === item.id) ? items : [restored, ...items]);
+      return;
+    }
     const result = await restoreConversationAction(item.id);
     if (result.error) { setNotice(result.error); return; }
     setLocallyArchivedIds((ids) => ids.filter((id) => id !== item.id));
@@ -940,7 +973,17 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const welcomeGreeting = welcomeGreetings[welcomeGreetingIndex](greetingName);
   const headerRoomName = (showRoom ? activeRoom?.name : threadRoom?.name) ?? null;
   const roomThreads = activeRoom ? shownConversations.filter((item) => item.room_id === activeRoom.id) : [];
-  const sidebarProps = { conversations: shownConversations, archivedConversations, rooms, activeId: history, activeRoomId: showRoom ? selectedRoomId : threadRoom?.id ?? null, busy: controlsDisabled || recovering, activity: assistantActivity, preview, email, name: accountName, releasePreview, renderedAt, settingsActive: settingsOpen, onClose: closeDrawer, onOpen: openConversation, onOpenRoom: openRoom, onNewThreadInRoom: newThreadInRoom, onDeleteRoom: deleteRoomFromSidebar, onCreateRoom: openRoomSetup, onNewChat: newChat, onOpenSettings: openSettings, onRename: rename, onArchive: archive, onRestore: restore, onMove: moveThread };
+  const searchCorpus = useMemo(() => {
+    if (!preview) return undefined;
+    // Exclude preview archived threads the user already restored in this session.
+    const restoredIds = new Set(localConversations.map((item) => item.id));
+    return [
+      ...previewConversations,
+      ...previewArchivedConversations.filter((item) => !restoredIds.has(item.id)),
+      ...localConversations,
+    ];
+  }, [preview, previewConversations, previewArchivedConversations, localConversations]);
+  const sidebarProps = { conversations: shownConversations, archivedConversations: preview ? previewArchivedConversations.filter((item) => !localConversations.some((entry) => entry.id === item.id)) : archivedConversations, rooms, activeId: history, activeRoomId: showRoom ? selectedRoomId : threadRoom?.id ?? null, busy: controlsDisabled || recovering, activity: assistantActivity, preview, email, name: accountName, releasePreview, renderedAt, settingsActive: settingsOpen, searchCorpus, onClose: closeDrawer, onOpen: openConversation, onOpenMessage: openConversationAtMessage, onOpenRoom: openRoom, onNewThreadInRoom: newThreadInRoom, onDeleteRoom: deleteRoomFromSidebar, onCreateRoom: openRoomSetup, onNewChat: newChat, onOpenSettings: openSettings, onRename: rename, onArchive: archive, onRestore: restore, onMove: moveThread };
   const composerProps = { ref: composerRef, dockRef: composerDockRef, sending: sending || recovering || movingThread !== null, streaming, mode, models, onModelChange: changeModel, researchMode, onResearchModeChange: setResearchMode, savingMode, caption, diagnostics: contextDiagnostics ?? contextPreview, onEditProfile: editProfile, onSubmit: submitMessage, onStop: stopStream, onAttach: attach, attachmentsEnabled: !preview, onRoomFiles: threadRoom && !preview ? toggleRoomFiles : undefined, roomItems, roomId: threadRoomId ?? "", roomLabel, roomSelectionNotice, roomsLoading, onRoomChange: activeId ? rooms.length ? changeComposerRoom : undefined : chooseDraftRoom, attachmentPanel: filePickerOpen && threadRoom ? <RoomFilePicker roomId={threadRoom.id} selectedIds={selectedFileIds} disabled={controlsDisabled || sending || streaming} onChange={setSelectedFileIds} /> : null };
 
   return <main className="chat-workspace">
@@ -953,7 +996,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
         <button type="button" className="header-new-chat" aria-label="New chat" title="New chat" disabled={controlsDisabled} onClick={newChat}><SquarePen size={17} /></button>
       </header>
       <div ref={scrollRef} onScroll={handleScroll} className={`conversation-scroll ${showRoom ? "is-room" : messages.length || loadingConversation ? "has-messages" : "is-empty"}`}>
-        {showRoom && activeRoom ? <RoomDetail key={activeRoom.id} room={activeRoom} threads={roomThreads} busy={controlsDisabled} preview={preview} onOpenThread={openConversation} onNewThread={() => newThreadInRoom(activeRoom.id)} onSaveRoom={saveRoom} onSaveBrief={saveBrief} onCreatePin={createPin} onUpdatePin={updatePin} onDeletePin={removePin} onDelete={removeRoom} /> : loadingConversation ? <div className="message-list conversation-skeleton" role="status" aria-busy="true" aria-label="Loading conversation"><div className="skeleton-line is-short" /><div className="skeleton-line" /><div className="skeleton-line" /><div className="skeleton-line is-medium" /></div> : messages.length ? <div className="message-list" aria-live="polite">{messages.map((message) => <MessageRow key={message.id} message={message} initial={initial} isLast={message.id === lastMessage?.id} isLastUser={message.id === lastUser?.id} waitLabel={message.id === lastMessage?.id ? waitLabel : undefined} canMutate={!preview} disabled={messageActionsLocked} editing={editingId === message.id} responseFailed={notice === failureNotice} onRegenerate={regenerate} onStartEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} />)}{notice && <p className="local-notice" role="status">{notice}</p>}</div> : <div className="welcome-state"><div className="welcome-panel">{notice && <p className="local-notice" role="status">{notice}</p>}<div className="welcome-copy-group"><h1 data-testid={drafting ? undefined : "welcome-greeting"}>{drafting && activeRoom ? activeRoom.name : welcomeGreeting}</h1>{drafting && activeRoom ? <><p className="welcome-eyebrow">NEW THREAD</p><p className="welcome-copy">This thread starts inside the room. Nibie will use its instructions, brief, and pins.</p></> : null}</div></div>{centeredComposer ? <ChatComposer {...composerProps} centered /> : null}</div>}
+        {showRoom && activeRoom ? <RoomDetail key={activeRoom.id} room={activeRoom} threads={roomThreads} busy={controlsDisabled} preview={preview} onOpenThread={openConversation} onNewThread={() => newThreadInRoom(activeRoom.id)} onSaveRoom={saveRoom} onSaveBrief={saveBrief} onCreatePin={createPin} onUpdatePin={updatePin} onDeletePin={removePin} onDelete={removeRoom} /> : loadingConversation ? <div className="message-list conversation-skeleton" role="status" aria-busy="true" aria-label="Loading conversation"><div className="skeleton-line is-short" /><div className="skeleton-line" /><div className="skeleton-line" /><div className="skeleton-line is-medium" /></div> : messages.length ? <div className="message-list" aria-live="polite">{messages.map((message) => <MessageRow key={message.id} message={message} initial={initial} isLast={message.id === lastMessage?.id} isLastUser={message.id === lastUser?.id} waitLabel={message.id === lastMessage?.id ? waitLabel : undefined} canMutate={!preview} disabled={messageActionsLocked} editing={editingId === message.id} responseFailed={notice === failureNotice} highlighted={focusMessageId === message.id} onRegenerate={regenerate} onStartEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} />)}{notice && <p className="local-notice" role="status">{notice}</p>}</div> : <div className="welcome-state"><div className="welcome-panel">{notice && <p className="local-notice" role="status">{notice}</p>}<div className="welcome-copy-group"><h1 data-testid={drafting ? undefined : "welcome-greeting"}>{drafting && activeRoom ? activeRoom.name : welcomeGreeting}</h1>{drafting && activeRoom ? <><p className="welcome-eyebrow">NEW THREAD</p><p className="welcome-copy">This thread starts inside the room. Nibie will use its instructions, brief, and pins.</p></> : null}</div></div>{centeredComposer ? <ChatComposer {...composerProps} centered /> : null}</div>}
       </div>
       {!showRoom && !centeredComposer ? <ChatComposer {...composerProps} /> : null}    </section>
     {renaming && <dialog ref={renameDialogRef} className="room-setup-dialog" aria-labelledby={renameTitleId} aria-busy={renameSaving} onCancel={(event) => { event.preventDefault(); if (!renameSaving) setRenaming(null); }}>
