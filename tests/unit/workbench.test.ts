@@ -3,6 +3,7 @@ import { createWorkbenchDocumentAction, createWorkbenchFromAssistantAction, dele
 import { workbenchLineDiff } from "../../lib/workbench/diff";
 import { canContinueInWorkbench } from "../../lib/workbench/offer";
 import { parseWorkbenchSuggestion } from "../../lib/workbench/prompt";
+import { getWorkbenchDocument } from "../../lib/workbench/read";
 import {
   applyWorkbenchAiProposal,
   beginWorkbenchAiGenerate,
@@ -35,63 +36,90 @@ const documentId = "6f0c1c3e-9a0b-4d1e-8f2a-1b2c3d4e5f60";
 const messageId = "7a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d";
 const conversationId = "8b2c3d4e-5f60-4a1b-9c8d-7e6f5a4b3c2d";
 const roomId = "9c3d4e5f-6071-4b2c-8d9e-6f5a4b3c2d1e";
+const missingRevision = { code: "PGRST204" };
 
 type Row = Record<string, unknown>;
 
-function memoryClient(options: { fail?: boolean; message?: Row | null; conversation?: Row | null } = {}) {
-  const documents: Row[] = [];
+function projectRow(row: Row, columns: string) {
+  const keys = columns.split(",");
+  const projected: Row = {};
+  for (const key of keys) projected[key] = row[key];
+  return projected;
+}
+
+function memoryClient(options: {
+  fail?: boolean;
+  revisionMissing?: boolean;
+  message?: Row | null;
+  conversation?: Row | null;
+  seed?: Row[];
+} = {}) {
+  const documents: Row[] = [...(options.seed ?? [])];
   const inserts: Row[] = [];
   const updates: Row[] = [];
   const client = {
     auth: { getClaims: async () => ({ data: { claims: { sub: owner } }, error: null }) },
     from(table: string) {
       const filters: Array<[string, unknown]> = [];
+      let selectColumns = "";
       const api = {
-        select: () => api,
+        select(columns = "") {
+          selectColumns = columns;
+          return api;
+        },
         eq(column: string, value: unknown) {
           filters.push([column, value]);
           return api;
         },
         insert(row: Row) {
-          inserts.push(row);
           const saved = {
             id: documentId,
-            revision: 1,
+            ...(options.revisionMissing ? {} : { revision: 1 }),
             created_at: "2026-10-03T00:00:00.000Z",
             updated_at: "2026-10-03T00:00:00.000Z",
             ...row,
           };
           return {
-            select: () => ({
-              single: async () => {
-                if (options.fail) return { data: null, error: { code: "XX000" } };
-                if (row.user_id !== owner) return { data: null, error: { code: "42501" } };
-                documents.push(saved);
-                return { data: saved, error: null };
-              },
-            }),
+            select(columns: string) {
+              return {
+                single: async () => {
+                  if (options.fail) return { data: null, error: { code: "XX000" } };
+                  if (options.revisionMissing && columns.includes("revision")) return { data: null, error: missingRevision };
+                  if (row.user_id !== owner) return { data: null, error: { code: "42501" } };
+                  inserts.push(row);
+                  documents.push(saved);
+                  return { data: projectRow(saved, columns), error: null };
+                },
+              };
+            },
           };
         },
         update(patch: Row) {
-          updates.push(patch);
           const chain = {
             eq(column: string, value: unknown) {
               filters.push([column, value]);
               return chain;
             },
-            select: () => ({
-              maybeSingle: async () => {
-                if (options.fail) return { data: null, error: { code: "XX000" } };
-                const id = filters.find(([key]) => key === "id")?.[1];
-                const userId = filters.find(([key]) => key === "user_id")?.[1];
-                const expectedRevision = filters.find(([key]) => key === "revision")?.[1];
-                const existing = documents.find((doc) => doc.id === id && doc.user_id === userId);
-                if (!existing) return { data: null, error: null };
-                if (expectedRevision !== undefined && existing.revision !== expectedRevision) return { data: null, error: null };
-                Object.assign(existing, patch, { updated_at: "2026-10-03T00:00:01.000Z" });
-                return { data: { ...existing }, error: null };
-              },
-            }),
+            select(columns: string) {
+              return {
+                maybeSingle: async () => {
+                  if (options.fail) return { data: null, error: { code: "XX000" } };
+                  if (options.revisionMissing && ("revision" in patch || columns.includes("revision") || filters.some(([key]) => key === "revision"))) {
+                    updates.push(patch);
+                    return { data: null, error: missingRevision };
+                  }
+                  const id = filters.find(([key]) => key === "id")?.[1];
+                  const userId = filters.find(([key]) => key === "user_id")?.[1];
+                  const expectedRevision = filters.find(([key]) => key === "revision")?.[1];
+                  const existing = documents.find((doc) => doc.id === id && doc.user_id === userId);
+                  if (!existing) return { data: null, error: null };
+                  if (expectedRevision !== undefined && existing.revision !== expectedRevision) return { data: null, error: null };
+                  updates.push(patch);
+                  Object.assign(existing, patch, { updated_at: "2026-10-03T00:00:01.000Z" });
+                  return { data: projectRow(existing, columns), error: null };
+                },
+              };
+            },
           };
           return chain;
         },
@@ -119,12 +147,25 @@ function memoryClient(options: { fail?: boolean; message?: Row | null; conversat
           const id = filters.find(([key]) => key === "id")?.[1];
           const userId = filters.find(([key]) => key === "user_id")?.[1];
           if (table === "workbench_documents") {
-            const existing = documents.find((doc) => doc.id === id && doc.user_id === userId);
-            return { data: existing ? { ...existing } : null, error: null };
+            if (options.revisionMissing && selectColumns.includes("revision")) {
+              return { data: null, error: missingRevision };
+            }
+            const existing = documents.find((doc) => doc.id === id && (!userId || doc.user_id === userId));
+            if (!existing) return { data: null, error: null };
+            return {
+              data: selectColumns ? projectRow(existing, selectColumns) : { ...existing },
+              error: null,
+            };
+          }
+          if (table === "rooms") {
+            return { data: null, error: null };
           }
           const source = table === "messages" ? options.message : table === "conversations" ? options.conversation : null;
           if (!source || source.id !== id || source.user_id !== userId) return { data: null, error: null };
           return { data: source, error: null };
+        },
+        in() {
+          return Promise.resolve({ data: [], error: null });
         },
       };
       return api;
@@ -215,6 +256,39 @@ describe("workbench documents", () => {
     expect(canContinueInWorkbench({ role: "assistant", status: "complete", content: "Response unavailable." })).toBe(false);
     expect(canContinueInWorkbench({ role: "user", status: "complete", content: "Hello" })).toBe(false);
     expect(canContinueInWorkbench({ role: "assistant", content: "No status yet" })).toBe(false);
+  });
+
+  it("loads a document when migration 0027 revision is undeployed", async () => {
+    const memory = memoryClient({
+      revisionMissing: true,
+      seed: [{
+        id: documentId,
+        user_id: owner,
+        title: "From chat",
+        content: "Body",
+        room_id: null,
+        created_at: "2026-10-03T00:00:00.000Z",
+        updated_at: "2026-10-03T00:00:00.000Z",
+      }],
+    });
+    createClient.mockResolvedValue(memory.client);
+    await expect(getWorkbenchDocument(documentId)).resolves.toMatchObject({
+      error: null,
+      document: { id: documentId, title: "From chat", content: "Body", revision: 1, room_name: null },
+    });
+  });
+
+  it("creates and updates without revision when the column is undeployed", async () => {
+    const memory = memoryClient({ revisionMissing: true });
+    createClient.mockResolvedValue(memory.client);
+    const created = await createWorkbenchDocumentAction({ title: "Notes", content: "first" });
+    expect(created.data).toMatchObject({ title: "Notes", content: "first", revision: 1 });
+    expect(memory.inserts).toHaveLength(1);
+    const updated = await updateWorkbenchDocumentAction(documentId, { title: "Notes", content: "second", expectedRevision: 1 });
+    expect(updated.data).toMatchObject({ title: "Notes", content: "second", revision: 1 });
+    expect(memory.updates[0]).toEqual({ title: "Notes", content: "second", revision: 2 });
+    expect(memory.updates[1]).toEqual({ title: "Notes", content: "second" });
+    expect(memory.documents[0]).toMatchObject({ title: "Notes", content: "second" });
   });
 
   it("creates a document from a finished assistant response and keeps the room optional", async () => {
