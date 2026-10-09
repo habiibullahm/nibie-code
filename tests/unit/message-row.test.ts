@@ -44,6 +44,16 @@ describe("assistant MessageRow", () => {
     expect(html).not.toContain('role="status"');
   });
 
+  it("keeps assistant message actions icon-only with accessible names", () => {
+    const html = render({ status: "complete", content: "Done." });
+    expect(html).toContain('class="response-copy is-icon-only"');
+    expect(html).toContain('aria-label="Copy response"');
+    expect(html).toContain('aria-label="Regenerate"');
+    expect(html).toContain('class="message-action is-icon-only"');
+    expect(html).not.toMatch(/<span>Regenerate<\/span>/);
+    expect(html).not.toMatch(/aria-live="polite">Copy<\/span>/);
+  });
+
   it("exposes a stable message anchor and optional search highlight", () => {
     const html = render({ status: "complete", content: "Done." }, undefined, true);
     expect(html).toContain('data-message-id="m1"');

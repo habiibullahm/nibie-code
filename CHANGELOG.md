@@ -27,6 +27,7 @@ What's new in Nibie.
 
 ### Changed
 
+- Assistant reply actions (Copy, Regenerate, Retry) are icon-only with tooltips, so the action row stays lightweight.
 - Typography V1: Bricolage Grotesque for brand and display headings, Onest for UI, chat, and Workbench; code stays on system monospace.
 - Account export now includes chat attachment file names and extracted text for your own conversations (download filename `nibie-export-v2.json`).
 - Nibie’s response guidance now accurately describes when saved memory, web tools, and Room-file excerpts can be used, instead of incorrectly saying they are unavailable.

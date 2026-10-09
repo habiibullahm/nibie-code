@@ -48,13 +48,15 @@ type ResponseCopyProps = {
   markdown: string;
   sources?: readonly ClipboardCitationSource[];
   label?: string;
+  /** Icon + tooltip/aria only — used on assistant message action rows. */
+  iconOnly?: boolean;
 };
 
 /**
  * Response copy control: default action copies Word-safe formatted HTML + plain text;
  * a small adjacent menu offers clean plain-text copy. Code-block CopyButton stays unchanged.
  */
-export function ResponseCopyButton({ markdown, sources, label = "Copy response" }: ResponseCopyProps) {
+export function ResponseCopyButton({ markdown, sources, label = "Copy response", iconOnly = false }: ResponseCopyProps) {
   const { state, report } = useCopyFeedback();
   const [menuOpen, setMenuOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -107,16 +109,17 @@ export function ResponseCopyButton({ markdown, sources, label = "Copy response" 
 
   const status = state === "copied" ? "Copied" : state === "failed" ? "Copy failed" : "Copy";
   const idleTitle = "Copy formatted";
+  const iconSize = iconOnly ? 14 : 13;
 
-  return <div className="response-copy" ref={rootRef}>
-    <button type="button" className="copy-button" aria-label={label} title={state === "idle" ? idleTitle : status} onClick={() => void copyFormatted()}>
-      {state === "copied" ? <Check size={13} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />}
-      <span aria-live="polite">{status}</span>
+  return <div className={`response-copy${iconOnly ? " is-icon-only" : ""}`} ref={rootRef}>
+    <button type="button" className={`copy-button${iconOnly ? " is-icon-only" : ""}`} aria-label={label} title={state === "idle" ? idleTitle : status} onClick={() => void copyFormatted()}>
+      {state === "copied" ? <Check size={iconSize} aria-hidden="true" /> : <Copy size={iconSize} aria-hidden="true" />}
+      <span className={iconOnly ? "visually-hidden" : undefined} aria-live="polite">{iconOnly && state === "idle" ? "" : status}</span>
     </button>
     <button
       ref={menuButtonRef}
       type="button"
-      className="copy-button response-copy-menu-trigger"
+      className={`copy-button response-copy-menu-trigger${iconOnly ? " is-icon-only" : ""}`}
       aria-label="More copy options"
       title="More copy options"
       aria-haspopup="menu"
