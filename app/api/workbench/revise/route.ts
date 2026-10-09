@@ -5,6 +5,7 @@ import { getAuthenticatedUser } from "@/lib/auth/get-user";
 import { chatProvider, configuredModelLabel } from "@/lib/ai/provider";
 import { createReasoningStreamFilter, sanitizeModelOutput } from "@/lib/ai/sanitize-model-output";
 import { ProviderStreamError, readOpenAiSse } from "@/lib/ai/sse";
+import { schemaUnavailable } from "@/lib/chat/schema-error";
 import { operationalCodes } from "@/lib/observability/codes";
 import { logError, logInfo, logWarn } from "@/lib/observability/logger";
 import { requestIdFrom } from "@/lib/observability/request-id";
@@ -20,6 +21,8 @@ export const maxDuration = 120;
 
 const encoder = new TextEncoder();
 const safeError = "Nibie couldn't improve that document. Please try again.";
+/** Shown when migration 0027 (revision + workbench_revision_runs) is not on the shared DB yet. */
+const schemaPendingError = "Workbench AI isn't available on this environment yet. An owner needs to apply migration 0027 (add allow-shared-db-migrate on the PR, or run Preview App DB Migration).";
 const mode = "Balanced" as const;
 
 function event(type: string, data: unknown) {
@@ -52,7 +55,13 @@ export async function POST(request: Request) {
     .eq("id", documentId.data)
     .eq("user_id", user.id)
     .maybeSingle();
-  if (documentError) return NextResponse.json({ error: safeError }, { status: 503 });
+  if (documentError) {
+    if (schemaUnavailable(documentError)) {
+      logWarn("workbench.revise.schema_pending", { requestId, code: operationalCodes.requestFailed });
+      return NextResponse.json({ error: schemaPendingError, schemaPending: true }, { status: 503 });
+    }
+    return NextResponse.json({ error: safeError }, { status: 503 });
+  }
   if (!document) return NextResponse.json({ error: "That document is no longer available." }, { status: 404 });
   if (document.revision !== expectedRevision) {
     return NextResponse.json({ error: "This document changed elsewhere. Reload before generating.", conflict: true }, { status: 409 });
@@ -70,6 +79,10 @@ export async function POST(request: Request) {
     base_content: document.content,
   });
   if (insertError) {
+    if (schemaUnavailable(insertError)) {
+      logWarn("workbench.revise.schema_pending", { requestId, code: operationalCodes.requestFailed });
+      return NextResponse.json({ error: schemaPendingError, schemaPending: true }, { status: 503 });
+    }
     logError("workbench.revise.run_create_failed", { requestId, code: operationalCodes.requestFailed });
     return NextResponse.json({ error: safeError }, { status: 503 });
   }

@@ -26,6 +26,10 @@ What's new in Nibie.
 - Add private Room files including DOCX and source formats; Nibie can find relevant text excerpts in the current Room when answering a question.
 - Long conversations keep their thread: Nibie maintains a short summary of earlier messages in the background, so replies stay grounded in older context while recent messages are still used word for word.
 
+### Fixed
+
+- Workbench AI Assist explains when migration `0027` is not on the database yet, instead of a generic “couldn't improve that document” error.
+
 ### Changed
 
 - Workbench documents support Markdown Write and Preview (same rendering as chat replies).
