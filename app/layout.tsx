@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { Bricolage_Grotesque, Onest } from "next/font/google";
 import { ThemeSync } from "@/components/theme-switcher";
 import { getProductName } from "@/lib/config/branding";
 import { publicMetadataBase } from "@/lib/config/public-metadata";
@@ -8,6 +9,20 @@ import "./globals.css";
 
 const productName = getProductName();
 const metadataBase = publicMetadataBase();
+
+// Display/brand headings. Variable font; latin only; self-hosted by next/font.
+const bricolage = Bricolage_Grotesque({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-display",
+});
+
+// UI, chat, Workbench. Variable font; latin only; self-hosted by next/font.
+const onest = Onest({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-sans",
+});
 
 export const metadata: Metadata = {
   ...(metadataBase ? { metadataBase } : {}),
@@ -22,7 +37,7 @@ export const viewport: Viewport = { colorScheme: "dark light", themeColor: darkP
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     // data-theme is set before first paint by the script (it may change the attribute after the server rendered "dark").
-    <html lang="en" data-theme="dark" suppressHydrationWarning>
+    <html lang="en" data-theme="dark" className={`${bricolage.variable} ${onest.variable}`} suppressHydrationWarning>
       <head><script dangerouslySetInnerHTML={{ __html: themeInitScript }} /></head>
       <body><ThemeSync />{children}</body>
     </html>
