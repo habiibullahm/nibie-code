@@ -51,22 +51,11 @@ test("formatted copy writes html and plain clipboard payloads without Markdown m
   expect(payload.plain).not.toContain("## ");
 });
 
-test("plain-text menu copies readable text without Markdown syntax", async ({ page, context }) => {
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+test("reply copy exposes a single control with no plain-text submenu", async ({ page }) => {
   await openSample(page);
-
-  await page.getByRole("button", { name: "More copy options" }).click();
-  await page.getByRole("menuitem", { name: "Copy plain text" }).click();
-  await expect(page.getByRole("button", { name: "Copy response" })).toContainText("Copied");
-
-  const plain = await page.evaluate(() => navigator.clipboard.readText());
-  expect(plain).toContain("HTTP caching lets a browser");
-  expect(plain).toContain("1. The browser checks");
-  expect(plain).toContain("Static assets");
-  expect(plain).not.toContain("**");
-  expect(plain).not.toContain("```");
-  expect(plain).not.toContain("| ---");
-  expect(plain).toContain("cachedFetch");
+  await expect(page.getByRole("button", { name: "Copy response" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "More copy options" })).toHaveCount(0);
+  await expect(page.getByRole("menuitem", { name: "Copy plain text" })).toHaveCount(0);
 });
 
 test("formatted copy falls back to plain text when ClipboardItem write is denied", async ({ page, context }) => {
