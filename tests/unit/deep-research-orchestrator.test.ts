@@ -150,6 +150,43 @@ describe("deep research orchestrator", () => {
     expect(result.status).toBe("interrupted");
   });
 
+  it.each(["empty pages", "failed pages"])("marks snippet-only evidence incomplete with %s", async (caseName) => {
+    const chatProvider: ChatProvider = {
+      stream: async () => sseBody(JSON.stringify({
+        normalizedQuestion: "Compare API pricing",
+        subquestions: ["API pricing"],
+        initialQueries: ["API pricing"],
+        timeSensitive: true,
+      })),
+    };
+    const searchProvider: WebSearchProvider = {
+      id: "tavily",
+      searchWeb: async () => Array.from({ length: 4 }, (_, index) => ({
+        url: `https://source${index}.example/pricing`,
+        domain: `source${index}.example`,
+        title: "API pricing",
+        snippet: "API pricing from search snippets only.",
+        rank: index + 1,
+      })),
+    };
+    const result = await runDeepResearch({
+      question: "Compare API pricing",
+      signal: new AbortController().signal,
+      chatProvider,
+      planMode: "Fast",
+      searchProvider,
+      fetchPage: async (url) => {
+        if (caseName === "failed pages") throw new Error("unavailable");
+        return { url, finalUrl: url, contentType: "text/html", body: "" };
+      },
+    });
+    expect(result.web.length).toBeGreaterThanOrEqual(3);
+    expect(result.metrics.pagesFetched).toBe(0);
+    expect(result.status).toBe("incomplete");
+    expect(result.incompleteNotice).toMatch(/only search snippets|could not be verified/i);
+    expect(result.metrics.incompleteReason).toBe("partial");
+  });
+
   it("marks gather deadline with evidence as incomplete (not interrupted/Stop)", async () => {
     const planJson = JSON.stringify({
       normalizedQuestion: "Slow gather",

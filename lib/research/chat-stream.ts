@@ -334,46 +334,62 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
         }
 
         const attached = attachWebCitationHandles(research.web, new Date(), MAX_RESEARCH_PREPARED_SOURCES);
-        const web = attached.web.length ? attached.web : undefined;
+        let web = attached.web.length ? attached.web : undefined;
         const preparedCitationSources = attached.sources;
         researchStatus = research.status;
+        let synthesisIncompleteNotice = research.incompleteNotice;
 
         let prompt: ReturnType<typeof toProviderMessages> | undefined;
         let context: ReturnType<typeof buildContext>["diagnostics"] | undefined;
         try {
-          const extraPolicy = research.plan
-            ? researchSynthesisInstruction({
-                plan: research.plan,
-                sources: preparedCitationSources,
-                contradictions: research.contradictions,
-                incompleteNotice: research.incompleteNotice,
-              })
-            : null;
-          const plan = buildContext({
-            responseMode: mode,
-            capabilities: contextCapabilitiesFor(mode),
-            preferences,
-            preferenceReadFailed,
-            summary,
-            room,
-            files,
-            attachments,
-            web,
-            webTokenCap: RESEARCH_WEB_TOKEN_CAP,
-            webVerificationUnavailable: !web?.length,
-            memories,
-            recallOperation,
-            extraPolicyInstruction: extraPolicy,
-            messages: rows.map((row) => ({
-              role: row.role as "user" | "assistant",
-              content: row.content,
-              position: row.position,
-            })),
-            currentPosition: userMessage.position,
-          });
+          citationSources = preparedCitationSources;
+          let plan: ReturnType<typeof buildContext>;
+          let rebuildsRemaining = preparedCitationSources.length;
+          // Every rebuild removes omitted sources, so policy and evidence converge in at most n + 1 builds.
+          do {
+            const extraPolicy = research.plan
+              ? researchSynthesisInstruction({
+                  plan: research.plan,
+                  sources: citationSources,
+                  contradictions: research.contradictions,
+                  incompleteNotice: synthesisIncompleteNotice,
+                })
+              : null;
+            plan = buildContext({
+              responseMode: mode,
+              capabilities: contextCapabilitiesFor(mode),
+              preferences,
+              preferenceReadFailed,
+              summary,
+              room,
+              files,
+              attachments,
+              web,
+              webTokenCap: RESEARCH_WEB_TOKEN_CAP,
+              webVerificationUnavailable: !web?.length,
+              memories,
+              recallOperation,
+              extraPolicyInstruction: extraPolicy,
+              messages: rows.map((row) => ({
+                role: row.role as "user" | "assistant",
+                content: row.content,
+                position: row.position,
+              })),
+              currentPosition: userMessage.position,
+            });
+            const included = citationSourcesIncludedInContext(citationSources, plan.includedCitationHandles);
+            if (included.length === citationSources.length) break;
+            citationSources = included;
+            researchStatus = "incomplete";
+            const contextNotice = included.length
+              ? "Some gathered sources could not fit the synthesis context; evidence is partial."
+              : "No gathered sources fit the synthesis context; source verification was unavailable.";
+            synthesisIncompleteNotice = [research.incompleteNotice, contextNotice].filter(Boolean).join(" ");
+            const handles = new Set(included.map((source) => source.id));
+            web = attached.web.filter((source) => handles.has(source.citationHandle!));
+          } while (rebuildsRemaining-- > 0);
           prompt = toProviderMessages(plan);
           context = plan.diagnostics;
-          citationSources = citationSourcesIncludedInContext(preparedCitationSources, plan.includedCitationHandles);
           citationViews = citationViewsFromPrepared(citationSources);
           if (citationViews.length) enqueue("sources", { sources: citationViews });
           if (preparedCitationSources.length || citationSources.length) {
@@ -566,7 +582,6 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
             logInfo("research.interrupted", { requestId, durationMs: durationMs(), ...researchUsagePolicyFields() });
             if (!clientCancelled) enqueue(saved !== "failed" ? "status" : "error", saved !== "failed" ? { status: "interrupted" } : { error: safeError });
           } else if (completed && output.length > 0) {
-            researchStatus = research.incompleteNotice ? "incomplete" : "complete";
             const saved = await save("complete");
             if (saved === "saved") {
               logInfo("chat.response.completed", { requestId, status: "complete", durationMs: durationMs(), deepResearch: true });

@@ -182,6 +182,21 @@ describe("runWebSearchPipeline", () => {
     expect(fetchPage).toHaveBeenCalledTimes(2);
   });
 
+  it("cites the fetched destination and dedupes hits redirected to the same page", async () => {
+    const finalUrl = "https://docs.example/current";
+    const out = await runWebSearchPipeline("current docs", {
+      signal: new AbortController().signal,
+      provider: mockProvider([
+        result({ url: "https://old.example/docs", rank: 1 }),
+        result({ url: "https://mirror.example/docs", rank: 2 }),
+      ]),
+      config,
+      fetchPage: async (url) => ({ url, finalUrl, contentType: "text/html", body: "<p>Current docs</p>" }),
+    });
+    expect(out.sources).toHaveLength(1);
+    expect(out.sources[0]).toMatchObject({ url: finalUrl, domain: "docs.example", retrieval: "web_search" });
+  });
+
   it("partial fetch success fills remaining with snippets and stays ≤5", async () => {
     const results = Array.from({ length: 6 }, (_, i) =>
       result({
