@@ -101,7 +101,22 @@ export function buildContext(input: BuildContextInput): ContextPlan {
     } else droppedPins.push(piece);
   }
 
-  // Explicitly selected files only. They sit after pins and never become a search over the room.
+  // Reserve continuity before excerpts can consume the remaining budget. The summary stays untrusted data.
+  let summaryText = "";
+  let summaryIncluded = false;
+  let summaryDroppedForBudget = false;
+  const summary = resolved.summary;
+  if (summary) {
+    const text = renderThreadSummary(summary);
+    const tokens = estimateTokens(text);
+    if (tokens <= SUMMARY_TOKEN_CAP && tokens <= remaining.value) {
+      summaryText = text;
+      summaryIncluded = true;
+      remaining.value -= tokens;
+    } else summaryDroppedForBudget = true;
+  }
+
+  // Explicitly selected files only. They never become a search over the room.
   const requestedFiles = input.files?.length ? input.files : null;
   const renderedFiles = requestedFiles ? renderFileContext(requestedFiles, Math.min(FILE_TOKEN_CAP, remaining.value)) : null;
   if (renderedFiles?.text) remaining.value -= estimateTokens(renderedFiles.text);
@@ -119,31 +134,23 @@ export function buildContext(input: BuildContextInput): ContextPlan {
   const renderedWeb = requestedWeb ? renderWebContext(requestedWeb, Math.min(webCap, remaining.value)) : null;
   if (renderedWeb?.text) remaining.value -= estimateTokens(renderedWeb.text);
 
-  // Explicit saved memories: after web, before thread summary. Untrusted user data.
+  // Explicit saved memories: after web. Untrusted user data.
   const requestedMemories = input.memories?.length ? input.memories : null;
   const renderedMemories = requestedMemories ? renderRecallContext(requestedMemories, Math.min(MEMORY_TOKEN_CAP, remaining.value)) : null;
   if (renderedMemories?.text) remaining.value -= estimateTokens(renderedMemories.text);
 
-  let summaryText = "";
-  let summaryIncluded = false;
-  let summaryDroppedForBudget = false;
-  const summary = resolved.summary;
-  if (summary) {
-    const text = renderThreadSummary(summary);
-    const tokens = estimateTokens(text);
-    if (tokens <= SUMMARY_TOKEN_CAP && tokens <= remaining.value) {
-      summaryText = text;
-      summaryIncluded = true;
-      remaining.value -= tokens;
-    } else summaryDroppedForBudget = true;
-  }
   // The summary stands in only for positions it covers. Older messages after its coverage (the bridge between the summary and
   // the protected recent window) stay eligible as raw history, so an older summary never leaves a gap.
   const coveredThrough = summaryIncluded && summary ? summary.coversThroughPosition : 0;
   const olderFit = takeNewest(olderMessages.filter((message) => message.position > coveredThrough), remaining);
   const dialogue = [...olderFit.included, ...protectedFit.included, current];
   const droppedMessages = [...olderFit.dropped, ...protectedFit.dropped];
-  const truncated = droppedMessages.length > 0 || droppedPieces.length > 0 || droppedRoom.length > 0 || droppedPins.length > 0 || Boolean(renderedFiles?.truncated) || Boolean(renderedAttachments?.truncated) || Boolean(renderedWeb?.truncated) || Boolean(renderedMemories?.truncated) || summaryDroppedForBudget;
+  const selectedMessages = new Set(selected);
+  const historyCapped = input.messages.some((message) =>
+    Number.isInteger(message.position) && message.position > coveredThrough && message.position <= input.currentPosition
+    && (message.role === "user" || message.role === "assistant") && !selectedMessages.has(message));
+  const historyTruncated = historyCapped || droppedMessages.length > 0;
+  const truncated = historyTruncated || droppedPieces.length > 0 || droppedRoom.length > 0 || droppedPins.length > 0 || Boolean(renderedFiles?.truncated) || Boolean(renderedAttachments?.truncated) || Boolean(renderedWeb?.truncated) || Boolean(renderedMemories?.truncated) || summaryDroppedForBudget;
 
   const profileText = includedPieces.map((piece) => piece.text).join("\n");
   const roomText = includedRoom.map((piece) => piece.text).join("\n\n");
@@ -192,8 +199,8 @@ export function buildContext(input: BuildContextInput): ContextPlan {
     ? { type: "profile", label: "Your profile", state: "included", reason: profileReason(includedPieces.flatMap((piece) => piece.categories)) }
     : { type: "profile", label: "Your profile", state: "not_used", reason: input.preferenceReadFailed ? "Preferences couldn't be loaded, so Nibie used defaults." : "No extra profile details are set." };
   const earlierIncluded = dialogue.length - 1;
-  const recentDiagnostic: ContextSourceDiagnostic = earlierIncluded > 0 || droppedMessages.length > 0
-    ? { type: "recent_messages", label: "Recent conversation", state: earlierIncluded > 0 ? "included" : "not_used", reason: droppedMessages.length ? "Older messages left out so this reply stays focused." : "The latest messages in this thread." }
+  const recentDiagnostic: ContextSourceDiagnostic = earlierIncluded > 0 || historyTruncated
+    ? { type: "recent_messages", label: "Recent conversation", state: earlierIncluded > 0 ? "included" : "not_used", reason: historyTruncated ? "Older messages left out so this reply stays focused." : "The latest messages in this thread." }
     : { type: "recent_messages", label: "Recent conversation", state: "not_used", reason: "No earlier messages yet." };
   const summaryDiagnostic: ContextSourceDiagnostic = summaryIncluded
     ? { type: "thread_summary", label: "Thread summary", state: "included", reason: "Older parts of this conversation." }
