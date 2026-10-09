@@ -69,7 +69,7 @@ export function WorkbenchPanel({ documentId, onClose }: Props) {
     >
       <h2 id={titleId} className="visually-hidden">Workbench editor</h2>
       {load.status === "loading" ? <p className="workbench-panel-loading" role="status">Opening document…</p> : null}
-      {load.status === "error" ? <div className="workbench-panel-error"><p role="alert">{load.message}</p><button type="button" className="icon-button" aria-label="Close editor" title="Close editor" onClick={onClose}>Close</button></div> : null}
+      {load.status === "error" ? <div className="workbench-panel-error"><p role="alert">{load.message}</p><button type="button" className="icon-button" aria-label="Close" title="Close" onClick={onClose}>Close</button></div> : null}
       {load.status === "ready" ? <WorkbenchEditor document={load.document} roomName={load.document.room_name} variant="panel" onClose={onClose} /> : null}
     </aside>
   </>;

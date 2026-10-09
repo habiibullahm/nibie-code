@@ -314,12 +314,19 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
 
   const label = saveStatusLabel(state);
   const editingLocked = ai.phase === "generating" || ai.phase === "review";
+  const statusClass = `workbench-status${state.phase === "failed" || state.phase === "conflict" || deleteError ? " is-failed" : ""}`;
+  const statusDetail = <>
+    {deleteError || label}
+    {!deleteError && state.phase === "failed" && state.detail ? ` · ${state.detail}` : ""}
+    {!deleteError && state.phase === "conflict" && state.detail ? ` · ${state.detail}` : ""}
+    {!deleteError && state.phase === "failed" ? <button type="button" onClick={() => void persist()}>Retry</button> : null}
+  </>;
   const headerActions = <>
-    <button type="button" className="icon-button" aria-label="Improve with AI" title="Improve with AI" disabled={editingLocked || state.phase === "conflict"} onClick={() => updateAi((latest) => openWorkbenchAiPrompt(latest))}>
+    <button type="button" className="icon-button" aria-label="AI Assist" title="AI Assist" disabled={editingLocked || state.phase === "conflict"} onClick={() => updateAi((latest) => openWorkbenchAiPrompt(latest))}>
       <WandSparkles size={16} aria-hidden="true" />
     </button>
-    {variant === "panel" ? <a className="icon-button" href={workbenchDocumentPath(documentId)} aria-label="Open full editor" title="Open full editor"><Expand size={16} aria-hidden="true" /></a> : null}
-    {variant === "panel" ? <button type="button" className="icon-button" aria-label="Close editor" title="Close editor" onClick={onClose}><X size={16} aria-hidden="true" /></button> : null}
+    {variant === "panel" ? <a className="icon-button" href={workbenchDocumentPath(documentId)} aria-label="Expand" title="Expand"><Expand size={16} aria-hidden="true" /></a> : null}
+    {variant === "panel" ? <button type="button" className="icon-button" aria-label="Close" title="Close" onClick={onClose}><X size={16} aria-hidden="true" /></button> : null}
     {variant === "page" ? <button type="button" className="workbench-delete" aria-label={deleting ? "Deleting document" : "Delete document"} title={deleting ? "Deleting document" : "Delete document"} disabled={deleting} onClick={() => void remove()}><Trash2 size={16} aria-hidden="true" /></button> : null}
   </>;
 
@@ -332,7 +339,6 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
       onStop={() => reviseAbortRef.current?.abort()}
       onApply={() => void applySuggestion()}
       onDiscard={() => updateAi(() => discardWorkbenchAiProposal())}
-      onRegenerate={() => void generateSuggestion(ai.instruction)}
       onClosePrompt={() => updateAi((latest) => closeWorkbenchAiPrompt(latest))}
     />
     <form className="workbench-stage" onSubmit={(event) => event.preventDefault()} onBlur={handleBlur}>
@@ -345,13 +351,7 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
   if (variant === "panel") {
     return <div className="workbench-panel-editor">
       <header className="workbench-panel-top">
-        <p className="workbench-panel-label" title={state.draft.title}>{state.draft.title || "Document"}</p>
-        <p className={`workbench-status${state.phase === "failed" || state.phase === "conflict" || deleteError ? " is-failed" : ""}`} role="status">
-          {deleteError || label}
-          {!deleteError && state.phase === "failed" && state.detail ? ` · ${state.detail}` : ""}
-          {!deleteError && state.phase === "conflict" && state.detail ? ` · ${state.detail}` : ""}
-          {!deleteError && state.phase === "failed" ? <button type="button" onClick={() => void persist()}>Retry</button> : null}
-        </p>
+        <p className={statusClass} role="status">{statusDetail}</p>
         <div className="workbench-panel-actions">{headerActions}</div>
       </header>
       {body}
@@ -361,12 +361,7 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
   return <main className="workbench-shell">
     <header className="workbench-top">
       <Link className="workbench-back" href={workbenchPath} aria-label="Back to documents" title="Back to documents"><ArrowLeft size={16} aria-hidden="true" /></Link>
-      <p className={`workbench-status${state.phase === "failed" || state.phase === "conflict" || deleteError ? " is-failed" : ""}`} role="status">
-        {deleteError || label}
-        {!deleteError && state.phase === "failed" && state.detail ? ` · ${state.detail}` : ""}
-        {!deleteError && state.phase === "conflict" && state.detail ? ` · ${state.detail}` : ""}
-        {!deleteError && state.phase === "failed" ? <button type="button" onClick={() => void persist()}>Retry</button> : null}
-      </p>
+      <p className={statusClass} role="status">{statusDetail}</p>
       <div className="workbench-top-actions">{headerActions}</div>
     </header>
     {body}
