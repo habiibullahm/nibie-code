@@ -8,7 +8,6 @@ What's new in Nibie.
 
 ### Added
 
-- Open a finished reply in Workbench beside chat, edit Markdown with autosave, and Ask Nibie on selected text to change that span inline (credits apply).
 - Copy a single conversation’s transcript from the thread ··· menu as clean plain text.
 - Search chats now finds conversation titles and saved message content from the same dialog, with short snippets, archived Restore, and jump-to-message highlighting.
 - Download a file you attached to a chat from the message chip (your account only).
@@ -38,6 +37,7 @@ What's new in Nibie.
 
 ### Changed
 
+- Getting-started guidance now explains how to continue work with Room briefs, files, explicit Memory, and research sources; attachment limits match the current uploads.
 - Workbench UI is hidden until product-ready: Edit in Workbench and `/workbench` routes are unavailable (backend and preview harness stay in place).
 - Workbench documents support Markdown Write and Preview (same rendering as chat replies).
 - Workbench side panel is a lighter editor: Write/Preview, Ask Nibie on selected text (inline apply, no suggestion review), Expand, and Close.

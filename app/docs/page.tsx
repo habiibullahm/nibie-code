@@ -78,7 +78,7 @@ export default function DocsPage() {
         <section id="getting-started" className="docs-section" aria-labelledby="getting-started-title">
           <p className="docs-section-number" aria-hidden="true">01 / Start here</p>
           <h2 id="getting-started-title">Getting started</h2>
-          <p>Nibie is a personal AI workspace for thinking, writing, coding, and exploring ideas. A conversation can be a quick question or something you return to over time.</p>
+          <p>Nibie is a personal AI workspace that helps you think, research, and continue your work—with less repetition. A conversation can be a quick question or something you return to over time.</p>
           <ol>
             <li><Link href="/signup">Create an account</Link> or <Link href="/login">sign in</Link>. You can use Google or your email and password.</li>
             <li>Open the workspace and choose <strong>New chat</strong>.</li>
@@ -136,6 +136,9 @@ export default function DocsPage() {
           <h2 id="context-title">Understanding context</h2>
           <p>Select <strong>Context</strong> above the composer to see what Nibie is using in the conversation. The panel reports your profile, Room context when relevant, a thread summary when available, and recent conversation messages.</p>
           <p>Room instructions and the Brief apply to threads in that Room. Profile context comes from the preferences you choose to save. A Room does not automatically bring every other thread into a reply.</p>
+          <p>For ongoing work, keep the goal, decisions, current focus, and next step in the Room Brief. Add Room files when the work needs reference material; Nibie can retrieve relevant excerpts rather than include every file.</p>
+          <p>Ask Nibie to <strong>remember</strong> a reusable preference or project fact. When Memory is enabled, relevant saved facts can help across conversations. Review, edit, or forget them in <strong>Settings → Memory</strong>. Your current request takes priority over saved context.</p>
+          <p>For current public facts, Nibie can use Web Search when available. Choose <strong>Deep Research</strong> for a question that needs several sources. Open the citations to check what supports the answer; an <strong>Incomplete</strong> result means some evidence could not be verified or included.</p>
           <p>Long conversations have limited space for context. Some older messages or optional context may be left out; the Context panel explains what was included. Restate an important detail in your current message if Nibie needs it.</p>
         </section>
 
@@ -181,12 +184,12 @@ export default function DocsPage() {
         <section id="common-questions" className="docs-section" aria-labelledby="common-questions-title">
           <p className="docs-section-number" aria-hidden="true">09 / A few useful answers</p>
           <h2 id="common-questions-title">Common questions</h2>
-          <details><summary>Can I attach files?</summary><p>You can attach up to three supported text, Markdown, CSV, JSON, source-code, or PDF files to a message. Attachments stay with that conversation. Images and scanned PDFs are not supported.</p></details>
+          <details><summary>Can I attach files?</summary><p>You can attach up to three supported text, Markdown, CSV, JSON, source-code, or PDF files to a message, up to 10 MB per file and 20 MB total. Attachments stay with that conversation. Images and scanned PDFs are not supported.</p></details>
           <details><summary>Can I add files to a Room?</summary><p>Rooms accept text, Markdown, CSV, JSON, source code, text-based PDFs, and DOCX files up to 5 MB. Select files for full context, or ask a question and Nibie can retrieve relevant text excerpts from that Room. Scanned PDFs and image or spreadsheet files are not supported.</p></details>
           <details><summary>Why is a model missing?</summary><p>Only configured modes appear in the model picker. If your saved default is unavailable, Nibie uses an available mode for new chats.</p></details>
           <details><summary>What should I do if a response fails?</summary><p>Use Retry on the latest turn. If your session has expired, sign in again and reopen the conversation. Avoid sending the same message repeatedly while a response is still running.</p></details>
           <details><summary>Do I need an account?</summary><p>The documentation is public. <Link href="/signup">Create an account</Link> or <Link href="/login">sign in</Link> to use the workspace and save your conversations.</p></details>
-          <details><summary>Does Nibie remember everything?</summary><p>Saved conversations and active AI context are different. Nibie uses selected context from the current thread, your saved profile, and its Room when relevant. Check the Context panel and repeat details that matter to your next question.</p></details>
+          <details><summary>Does Nibie remember everything?</summary><p>Saved conversations and active AI context are different. Nibie uses selected context from the current thread, your profile, its Room, and relevant facts you explicitly saved in Memory when enabled. It does not automatically read every other conversation. Check the Context panel and restate a detail when it was left out.</p></details>
         </section>
         <div className="docs-end"><p>A question is a good place to start.</p><Link className="landing-button" href={chatPath}>Start a conversation <ArrowUpRight size={16} aria-hidden="true" /></Link></div>
       </main>

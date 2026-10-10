@@ -27,7 +27,11 @@ for (const width of [1440, 1024, 768, 390, 320]) {
       expect(await heading.evaluate((element) => element.getBoundingClientRect().top)).toBeGreaterThanOrEqual(80);
     }
     await page.getByText("Can I attach files?", { exact: true }).click();
-    await expect(page.getByText("Attachments are not available yet. You can paste relevant text into a message.", { exact: true })).toBeVisible();
+    const attachmentsHelp = page.locator("details").filter({ has: page.getByText("Can I attach files?", { exact: true }) });
+    await expect(attachmentsHelp).toContainText("up to three");
+    await expect(attachmentsHelp).toContainText("10 MB per file and 20 MB total");
+    await expect(attachmentsHelp).toContainText("PDF");
+    await expect(attachmentsHelp).toContainText("Images and scanned PDFs are not supported");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.getByRole("navigation", { name: "Footer", exact: true }).getByRole("link", { name: "Privacy", exact: true }).click();
     await expect(page).toHaveURL(/\/privacy$/);

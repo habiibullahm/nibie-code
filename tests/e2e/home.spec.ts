@@ -152,8 +152,15 @@ test("assistant replies render safe Markdown with working copy controls", async 
   expect(code.endsWith("}")).toBe(true);
   expect(code).not.toContain("```");
 
-  await page.getByRole("button", { name: "Copy response" }).click();
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain("## Example");
+  const copyResponse = page.getByRole("button", { name: "Copy response" });
+  await copyResponse.click();
+  await expect(copyResponse).toContainText("Copied");
+  const reply = await page.evaluate(() => navigator.clipboard.readText());
+  expect(reply).toContain("Example");
+  expect(reply).toContain("Use wait to tune responsiveness.");
+  expect(reply).toContain("export function debounce");
+  expect(reply).not.toContain("## Example");
+  expect(reply).not.toContain("```");
 
   // The mock workspace has no server, so last-turn mutation controls stay hidden here.
   await expect(page.getByRole("button", { name: "Regenerate" })).toHaveCount(0);
