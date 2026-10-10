@@ -3,15 +3,18 @@
 import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Expand, MoreHorizontal, Trash2, X } from "lucide-react";
+import { ArrowLeft, ClipboardCopy, Download, Expand, History, MoreHorizontal, Save, Trash2, X } from "lucide-react";
 import {
   applyWorkbenchSuggestionAction,
+  createWorkbenchVersionAction,
   deleteWorkbenchDocumentAction,
   updateWorkbenchDocumentAction,
 } from "@/app/actions/workbench";
 import { MessageMarkdown } from "@/components/message-markdown";
 import { WorkbenchAskNibie } from "@/components/workbench-ask-nibie";
+import { WorkbenchHistory } from "@/components/workbench-history";
 import { useStableCallback } from "@/components/use-stable-callback";
+import { markdownToClipboard, writeFormattedClipboard } from "@/lib/markdown/clipboard";
 import { workbenchDocumentPath, workbenchPath } from "@/lib/routes";
 import {
   beginWorkbenchAiGenerate,
@@ -96,8 +99,11 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
   const [selection, setSelection] = useState<SelectionSpan | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionNotice, setActionNotice] = useState("");
   const stateRef = useRef(state);
   const aiRef = useRef(ai);
   const selectionRef = useRef<SelectionSpan | null>(null);
@@ -410,13 +416,87 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
     router.refresh();
   }
 
+  function closeMenu() {
+    setMenuOpen(false);
+    setMenuPos(null);
+  }
+
+  async function saveVersionCheckpoint() {
+    closeMenu();
+    setActionNotice("");
+    const ready = await ensureSaved();
+    if (!ready) {
+      setActionNotice(stateRef.current.detail ?? "Save the document before creating a version.");
+      return;
+    }
+    setActionBusy(true);
+    const result = await createWorkbenchVersionAction({
+      documentId,
+      expectedRevision: stateRef.current.revision,
+    });
+    setActionBusy(false);
+    if (result.conflict) {
+      update((latest) => conflictWorkbenchSave(latest, result.error));
+      return;
+    }
+    if (result.error) {
+      setActionNotice(result.error);
+      return;
+    }
+    setActionNotice("Version saved.");
+  }
+
+  async function downloadExport(format: "md" | "txt") {
+    closeMenu();
+    setActionNotice("");
+    setActionBusy(true);
+    try {
+      const response = await fetch(`/api/workbench/documents/${documentId}/export?format=${format}`, { method: "GET" });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { error?: string } | null;
+        setActionNotice(payload?.error ?? "Download failed.");
+        return;
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") ?? "";
+      const match = /filename\*=UTF-8''([^;]+)|filename="([^"]+)"/i.exec(disposition);
+      const filename = match?.[1] ? decodeURIComponent(match[1]) : match?.[2] ?? `document.${format}`;
+      const url = URL.createObjectURL(blob);
+      const anchor = globalThis.document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setActionNotice(format === "md" ? "Markdown downloaded." : "Plain text downloaded.");
+    } catch {
+      setActionNotice("Download failed.");
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function copyFormatted() {
+    closeMenu();
+    setActionNotice("");
+    setActionBusy(true);
+    try {
+      const { html, plain } = markdownToClipboard(stateRef.current.draft.content);
+      await writeFormattedClipboard(html, plain);
+      setActionNotice("Copied for Word / Docs.");
+    } catch {
+      setActionNotice("Copy failed.");
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
   const label = saveStatusLabel(state);
   const editingLocked = ai.phase === "generating" || ai.phase === "applying";
   const statusClass = `workbench-status${state.phase === "failed" || state.phase === "conflict" || deleteError ? " is-failed" : ""}`;
   const statusDetail = <>
-    {deleteError || label}
-    {!deleteError && state.phase === "failed" && state.detail ? ` · ${state.detail}` : ""}
-    {!deleteError && state.phase === "conflict" && state.detail ? ` · ${state.detail}` : ""}
+    {deleteError || actionNotice || label}
+    {!deleteError && !actionNotice && state.phase === "failed" && state.detail ? ` · ${state.detail}` : ""}
+    {!deleteError && !actionNotice && state.phase === "conflict" && state.detail ? ` · ${state.detail}` : ""}
     {!deleteError && state.phase === "failed" ? <button type="button" onClick={() => void persist()}>Retry</button> : null}
   </>;
   const modeToggle = <div className="workbench-mode" role="group" aria-label="Editor mode">
@@ -424,7 +504,7 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
     <button type="button" className={mode === "preview" ? "is-active" : undefined} aria-pressed={mode === "preview"} onClick={() => setMode("preview")}>Preview</button>
   </div>;
 
-  const actionsMenu = variant === "page" ? <div className="workbench-menu">
+  const actionsMenu = <div className="workbench-menu">
     <button
       ref={menuTriggerRef}
       type="button"
@@ -434,7 +514,7 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
       aria-haspopup="menu"
       aria-expanded={menuOpen}
       aria-controls={menuOpen ? menuId : undefined}
-      disabled={editingLocked || state.phase === "conflict"}
+      disabled={editingLocked || state.phase === "conflict" || actionBusy}
       onClick={toggleActionsMenu}
     >
       <MoreHorizontal size={16} aria-hidden="true" />
@@ -447,11 +527,28 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
       aria-label="Document actions"
       style={menuPos ? { top: menuPos.top, right: menuPos.right } : undefined}
     >
-      <button type="button" role="menuitem" className="is-danger" disabled={deleting} onClick={() => { setMenuOpen(false); setMenuPos(null); void remove(); }}>
-        <Trash2 size={14} aria-hidden="true" />Delete document
+      <button type="button" role="menuitem" disabled={actionBusy} onClick={() => void saveVersionCheckpoint()}>
+        <Save size={14} aria-hidden="true" />Save version
       </button>
+      <button type="button" role="menuitem" disabled={actionBusy} onClick={() => { closeMenu(); setHistoryOpen(true); }}>
+        <History size={14} aria-hidden="true" />Version history
+      </button>
+      <button type="button" role="menuitem" disabled={actionBusy} onClick={() => void downloadExport("md")}>
+        <Download size={14} aria-hidden="true" />Download Markdown
+      </button>
+      <button type="button" role="menuitem" disabled={actionBusy} onClick={() => void downloadExport("txt")}>
+        <Download size={14} aria-hidden="true" />Download plain text
+      </button>
+      <button type="button" role="menuitem" disabled={actionBusy} onClick={() => void copyFormatted()}>
+        <ClipboardCopy size={14} aria-hidden="true" />Copy formatted for Word/Docs
+      </button>
+      {variant === "page" ? (
+        <button type="button" role="menuitem" className="is-danger" disabled={deleting} onClick={() => { closeMenu(); void remove(); }}>
+          <Trash2 size={14} aria-hidden="true" />Delete document
+        </button>
+      ) : null}
     </div> : null}
-  </div> : null;
+  </div>;
 
   const headerActions = <>
     {actionsMenu}
@@ -501,6 +598,17 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
     </form>
   </>;
 
+  const history = <WorkbenchHistory
+    documentId={documentId}
+    expectedRevision={state.revision}
+    open={historyOpen}
+    onClose={() => setHistoryOpen(false)}
+    onRestored={(restored) => {
+      update((latest) => replaceWorkbenchFromServer(latest, { title: restored.title, content: restored.content }, restored.revision));
+      setActionNotice("Version restored.");
+    }}
+  />;
+
   if (variant === "panel") {
     return <div className="workbench-panel-editor">
       <header className="workbench-panel-top">
@@ -509,6 +617,7 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
         <div className="workbench-panel-actions">{headerActions}</div>
       </header>
       {body}
+      {history}
     </div>;
   }
 
@@ -520,5 +629,6 @@ export function WorkbenchEditor({ document, roomName = null, variant = "page", o
       <div className="workbench-top-actions">{headerActions}</div>
     </header>
     {body}
+    {history}
   </main>;
 }
