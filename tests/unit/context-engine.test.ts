@@ -397,4 +397,41 @@ describe("context engine", () => {
     buildContext(input({ messages: messages(32, 200), currentPosition: 32 }));
     expect(Date.now() - started).toBeLessThan(15);
   });
+
+  it.each([3, 7])("does not resurrect older facts across an oversized message at position %i", (gapPosition) => {
+    const thread = messages(9, 40).map((message) => ({
+      ...message,
+      content: message.position === gapPosition ? "Correction: use Redis, not Kafka. ".repeat(300) : `turn ${message.position}`,
+    }));
+    const windowTokens = estimateTokens(CONTEXT_POLICY_TEXT) + 300;
+    const plan = buildContext(input({ messages: thread, currentPosition: 9, capabilities: { contextWindowTokens: windowTokens, maxOutputTokens: 40 } }));
+    const dialogue = toProviderMessages(plan).filter((message) => message.role !== "system");
+    expect(dialogue.map((message) => message.content)).toEqual(thread.filter((message) => message.position > gapPosition).map((message) => message.content));
+    expect(plan.budget.truncated).toBe(true);
+  });
+
+  it("reserves a valid thread summary before optional Room and profile text exhaust the budget", () => {
+    const thread = messages(8, 40);
+    const saved = { ...summary(2), importantContext: "Use PostgreSQL and preserve tenant isolation. ".repeat(20) };
+    const windowTokens = estimateTokens(CONTEXT_POLICY_TEXT) + 60 + 900 + 40;
+    const plan = buildContext(input({
+      messages: thread, currentPosition: 8, summary: saved,
+      preferences: { ...defaultUserPreferences(), aboutYou: "p".repeat(1500) },
+      room: { name: "Project", instructions: "r".repeat(2000), brief: null },
+      capabilities: { contextWindowTokens: windowTokens, maxOutputTokens: 40 },
+    }));
+    expect(plan.blocks.find((block) => block.id === "thread_summary")?.included).toBe(true);
+    expect(toProviderMessages(plan).some((message) => message.content.includes("preserve tenant isolation"))).toBe(true);
+    expect(plan.budget.estimatedTokens).toBeLessThanOrEqual(plan.budget.inputBudgetTokens);
+    expect(plan.budget.truncated).toBe(true);
+  });
+
+  it("reports history lost at the fetch cap unless the summary covers it", () => {
+    const thread = messages(34, 20);
+    const missing = buildContext(input({ messages: thread, currentPosition: 34 }));
+    expect(missing.budget.truncated).toBe(true);
+    expect(missing.diagnostics.sources.find((source) => source.type === "recent_messages")?.reason).toContain("left out");
+    const covered = buildContext(input({ messages: thread, currentPosition: 34, summary: summary(2) }));
+    expect(covered.budget.truncated).toBe(false);
+  });
 });

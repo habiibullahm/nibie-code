@@ -5,6 +5,8 @@
 **Baseline:** `c693106` on `main`  
 **Implementation:** landed through `feature/staging-v1` (profile, room, room pins, explicitly selected file text, and recent-message context; thread summary stays unused)
 
+**Current implementation note:** The historical V1 design below predates live thread summaries, Recall, and research. For the Chat Intelligence V3 candidate allocation and its validation limits, see [BACKEND_V2.md](../architecture/BACKEND_V2.md#chat-context-allocation-chat-intelligence-v3-candidate) and [CHAT_INTELLIGENCE_V3.md](../engineering/CHAT_INTELLIGENCE_V3.md).
+
 Related:
 
 - [PERSONAL_AI_WORKSPACE.md](./PERSONAL_AI_WORKSPACE.md) — Phase 1 of the personal workspace roadmap

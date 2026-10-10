@@ -5,6 +5,11 @@ import { modelForComposer, resolveDefaultModel } from "../../lib/preferences/mod
 const all = ["Fast", "Balanced", "High"] as const;
 
 describe("default model fallback", () => {
+  it.each(all)("starts fresh chats on the saved Fast default while existing %s chats keep their mode", (conversationModel) => {
+    expect(modelForComposer({ hasConversation: false, accountDefault: "fast", available: all })).toBe("Fast");
+    expect(modelForComposer({ hasConversation: true, conversationModel, accountDefault: "fast", available: all })).toBe(conversationModel);
+  });
+
   it("uses the account default only when starting a conversation", () => {
     expect(modelForComposer({ hasConversation: false, accountDefault: "reasoning", available: all })).toBe("High");
     expect(modelForComposer({ hasConversation: true, conversationModel: "Fast", accountDefault: "reasoning", available: all })).toBe("Fast");

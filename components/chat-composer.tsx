@@ -256,7 +256,7 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
       <div className="composer-left-tools">
         {onRoomChange ? <ComposerMenu name="Room" description="Choose where this conversation belongs." value={roomId} items={roomItems} onChange={onRoomChange} disabled={sending || streaming || roomsLoading} disabledReason={roomsLoading ? "Loading rooms" : "Message is being sent"} /> : <span className="composer-room-context" aria-label={`Room context: ${roomLabel}`} title={roomLabel}>{roomLabel}</span>}
         <ComposerMenu name="Model" description="Choose how Nibie answers: Fast, Balanced, or High." value={mode} items={modelItems} onChange={onModelChange} disabled={sending || streaming || !models.length} disabledReason={!models.length ? "No models are configured" : savingMode ? "Saving…" : "A response is running"} />
-        <ComposerMenu name="Research" description="Choose how far Nibie should research before answering." value={researchMode} items={researchItems} onChange={onResearchModeChange} disabled={sending || streaming} disabledReason="A response is running" emphasizedValue="deep" />
+        <ComposerMenu name="Research" description="Choose how far Nibie should research before answering." value={researchMode} items={researchItems} onChange={onResearchModeChange} disabled={sending || streaming} disabledReason={savingMode ? "Saving…" : "A response is running"} emphasizedValue="deep" />
       </div>
     </div>
     {caption ? <p className="composer-caption" role="status">{caption}</p> : null}

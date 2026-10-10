@@ -76,8 +76,8 @@ export async function* readOpenAiSse(body: ReadableStream<Uint8Array>, signal?: 
 }
 
 const contextDiagnosticSchema = z.strictObject({
-  type: z.enum(["profile", "room", "pins", "file", "attachment", "web", "thread_summary", "recent_messages"]),
-  label: z.enum(["Your profile", "This room", "Pinned context", "File context", "Attachments", "Web sources", "Thread summary", "Recent conversation"]),
+  type: z.enum(["profile", "room", "pins", "file", "attachment", "web", "memory", "thread_summary", "recent_messages"]),
+  label: z.enum(["Your profile", "This room", "Pinned context", "File context", "Attachments", "Web sources", "Saved memories", "Thread summary", "Recent conversation"]),
   state: z.enum(["included", "not_used"]),
   reason: z.string(),
 });
