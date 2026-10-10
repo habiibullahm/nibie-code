@@ -121,9 +121,9 @@ export async function gatherResearchSources(
       return {
         ok: true,
         source: {
-          url: result.url,
+          url: page.finalUrl,
           title: result.title || page.finalUrl,
-          domain: result.domain,
+          domain: new URL(page.finalUrl).hostname,
           retrieval: "web_search",
           publishedAt: result.publishedAt ?? null,
           text,
@@ -153,7 +153,10 @@ export async function gatherResearchSources(
 
   // Snippet fill from candidates not successfully fetched as full pages.
   if (fetched.length < 10) {
-    const fetchedKeys = new Set(fetched.map((s) => s.url));
+    const fetchedKeys = new Set([
+      ...fetched.map((s) => s.url),
+      ...outcomes.flatMap((outcome, index) => outcome.ok ? [toFetch[index]!.url] : []),
+    ]);
     for (const result of candidates) {
       if (fetched.length >= 10) break;
       if (fetchedKeys.has(result.url)) continue;

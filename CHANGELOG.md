@@ -28,6 +28,9 @@ What's new in Nibie.
 
 ### Fixed
 
+- Long chats preserve summaries and their recent updates before large source excerpts, and leave out stale history when newer corrections cannot fit.
+- Deep Research cites only evidence used in the reply and stays Incomplete when sources are omitted or only search snippets are available.
+- Web citations point to the page reached after redirects instead of an outdated search-result URL.
 - Long chats reserve space for their existing summary, keep recent history continuous when a message cannot fit, and report older context omitted by the history limit.
 - Saving a conversation's model shows “Saving…” on the Research control instead of incorrectly claiming a response is running.
 - Replies that use saved Memory can finish streaming without a false connection-recovery error.

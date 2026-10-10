@@ -1,0 +1,135 @@
+{
+  "schemaVersion": 1,
+  "baselineCommit": "981f0c6f22b2f344edee2b86628443cc6d512ca7",
+  "candidateCommit": null,
+  "date": "2026-10-10",
+  "timezone": "Asia/Bangkok",
+  "files": [
+    {
+      "path": ".github/workflows/ai-quality-v2.yml",
+      "gitBlob": "c65534911d09ed6e7ac15c092be7901ae33ffaff",
+      "sha256": "018fe6cf6da4fc3b62623d88301ea1dfcc588a735201f5afdb38284f8934e8c1"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "gitBlob": "e7e90cb70ce8284438c38bfc62ca02c587fef582",
+      "sha256": "82156595de931e6f1350e9eea2f24d27b33fe4ed6ab8fbe38bd1589fd50948ae"
+    },
+    {
+      "path": "docs/engineering/CHAT_INTELLIGENCE_V3_EVALUATION.md",
+      "gitBlob": "9111af6643b61d5a083d3c0d1c2222d07ea8cb5d",
+      "sha256": "e00141e52bbeb1df6f601e1181e1694e6a4b79d8caf4a25fae12814777bcf27a"
+    },
+    {
+      "path": "docs/engineering/chat-intelligence-v3-baseline.json",
+      "gitBlob": "c27ea9b87cc2df8ea4bbe5f04fa252de3a27003c",
+      "sha256": "5dbdce791f748578c06242bb62727363dfa682eb06a394d567b277ff94e4afd1"
+    },
+    {
+      "path": "lib/context/build-context.ts",
+      "gitBlob": "e85f1cdda420822910c92a18c29fcbb2757e0e61",
+      "sha256": "9b7af7eb91c40ecd2f5a4354317c98c8e2f8e3178698706907dce440f522f932"
+    },
+    {
+      "path": "lib/research/chat-stream.ts",
+      "gitBlob": "9ca30d8e743a07000d4361f857602b91bdbe6f8f",
+      "sha256": "22b8b668790f5fbd3234e8159aaf7f1a36ae5792b6459daacf49e90aa4281bd0"
+    },
+    {
+      "path": "lib/research/gather.ts",
+      "gitBlob": "14ba9e86ccde25f9500a387d5b73fc9b42ce66d1",
+      "sha256": "b66d5f6406493dae17627e360aa4a599ffb68a4f25b2e64b8ca090eae6216516"
+    },
+    {
+      "path": "lib/research/orchestrator.ts",
+      "gitBlob": "237a95898576b2048117d33734763077e9e318d4",
+      "sha256": "9eae8f1894922502db381b032db0fa7eacede21156dc1beec95788d3dd2a54f4"
+    },
+    {
+      "path": "lib/web/pipeline.ts",
+      "gitBlob": "2e909eccc3ba3d6c831f91e5475a3df1b7dc8705",
+      "sha256": "fa129b24d8eff1a8359d2439809a11fc48b7a0147a855643500b676243e1557f"
+    },
+    {
+      "path": "tests/e2e/default-model-inheritance.spec.ts",
+      "gitBlob": "381fd1b93a5a1f71c159662f805bb998f8686eea",
+      "sha256": "e9f00f47de94a92f024ef2673fd31a283c994d50e8beda769b3ebf644004b460"
+    },
+    {
+      "path": "tests/unit/chat-context-continuity.test.ts",
+      "gitBlob": "15a74f1a34018a334925d6b6b4151d746569b79e",
+      "sha256": "ed2203448749c00865673e074ccecb3e971ff653f1304c26fde9d4e50831de31"
+    },
+    {
+      "path": "tests/unit/deep-research-chat-stream.test.ts",
+      "gitBlob": "e3b60bd5c1cd4118dc6835ee29513dc617a5518f",
+      "sha256": "e8074dd09585fd82dd5c7cc4b75ee02d3b97bee75da148d8960346b76e72de8f"
+    },
+    {
+      "path": "tests/unit/deep-research-gather.test.ts",
+      "gitBlob": "765dc73fa482e741c1d425cf4ed4dd0de609d317",
+      "sha256": "7b65290085d63ef95c56f125469ed1920a9fa45c9d16cdabc0760fb5e5440468"
+    },
+    {
+      "path": "tests/unit/deep-research-orchestrator.test.ts",
+      "gitBlob": "ed4c22b6e1534c547ca87bd90db6099cc94455bf",
+      "sha256": "5739b6fa057bcaf67da7e21aab6c98182cf60c63c5c7228cdf47fefc06b38bc4"
+    },
+    {
+      "path": "tests/unit/web-pipeline.test.ts",
+      "gitBlob": "c2e926b1df3646f5234867b8b3487df7632ada33",
+      "sha256": "f971ca6f9960b24acdb501b11269e524fef8e33dc14093101a58c821f04e148e"
+    }
+  ],
+  "verification": {
+    "unit": {
+      "passed": 1294,
+      "files": 110,
+      "stage": "after_rebase"
+    },
+    "integration": {
+      "passed": 56,
+      "isolatedDatabase": true,
+      "stage": "pre_rebase"
+    },
+    "browser": {
+      "passed": 22,
+      "fixture": 21,
+      "authenticated": 1,
+      "providerRequestsInAuthenticatedTest": 0,
+      "stage": "pre_rebase"
+    },
+    "lint": {
+      "errors": 0,
+      "existingWarnings": 3,
+      "stage": "after_rebase"
+    },
+    "typecheck": "passed_after_rebase",
+    "productionBuild": "passed_default_turbopack_after_rebase",
+    "releaseConsistency": "passed_after_rebase",
+    "independentCodeReview": "complete_no_remaining_findings",
+    "ciAndVercelPreview": "see_pr_checks"
+  },
+  "realModel": {
+    "budgetUsd": 1,
+    "requests": 10,
+    "retries": 0,
+    "matchedPairs": {
+      "Fast": 0,
+      "Balanced": 5,
+      "High": 0
+    },
+    "providerReportedInputTokens": 11562,
+    "providerReportedCompletionTokens": 6611,
+    "meteredCostUpperUsd": 0.0044617,
+    "invoiceCostUsd": null,
+    "humanRatings": "pending",
+    "qualityScore": null,
+    "improvement": "not_established",
+    "qualityGate": "blocked"
+  },
+  "integrationBaseCommit": "3e33269f13115079aeb5e6bb365d7332443d25cd",
+  "candidateRef": "fix/chat-intelligence-v3-quality",
+  "commitBinding": "The PR body identifies the final commit; this manifest fingerprints file contents without embedding its own commit SHA.",
+  "fingerprintNote": "gitBlob is canonical Git content; sha256 reflects checkout line endings."
+}
