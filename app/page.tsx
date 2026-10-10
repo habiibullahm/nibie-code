@@ -4,7 +4,7 @@ import { absolutePublicUrl, publicShareImage } from "@/lib/config/public-metadat
 import "./landing.css";
 
 const title = "Nibie — A quieter place to think with AI";
-const description = "Nibie is a personal AI workspace for thinking, writing, coding, exploring ideas, and getting work done.";
+const description = "Nibie is a personal AI workspace that helps you think, research, and continue your work—with less repetition.";
 
 // Absolute only when the public origin is known. A missing production origin must not become localhost.
 const canonical = absolutePublicUrl("/");
