@@ -50,7 +50,7 @@ export function SettingsDialog({ initialSection = "general", fallbackFocusRef, e
     document.body.style.overflow = "hidden";
     const frame = requestAnimationFrame(() => {
       const target = matchMedia("(max-width: 640px)").matches
-        ? dialog?.querySelector<HTMLElement>(".settings-section-picker")
+        ? dialog?.querySelector<HTMLElement>(".settings-mobile-nav [aria-selected='true']")
         : dialog?.querySelector<HTMLElement>("[role='tab'][aria-selected='true']");
       target?.focus();
     });

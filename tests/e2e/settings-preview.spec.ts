@@ -13,11 +13,7 @@ async function open(page: Page) {
 }
 
 async function select(page: Page, name: string) {
-  const picker = settings(page).getByRole("button", { name: /^Settings section:/ });
-  if (await picker.isVisible()) {
-    await picker.click();
-    await settings(page).getByRole("navigation", { name: "Section", exact: true }).getByRole("button", { name, exact: true }).click();
-  } else await settings(page).getByRole("tab", { name, exact: true }).click();
+  await settings(page).getByRole("tab", { name, exact: true }).click();
 }
 
 test.beforeEach(async ({ qaPage }) => {
@@ -109,7 +105,7 @@ test("two asynchronous keyboard saves retain radio focus and subsequent navigati
   }
 });
 
-test("signed-in sections and expanded picker fit narrow layouts in both themes", async ({ qaPage: page }, info) => {
+test("signed-in sections and sliding tabs fit narrow layouts in both themes", async ({ qaPage: page }, info) => {
   test.setTimeout(90_000);
   for (const width of [320, 390]) {
     await page.setViewportSize({ width, height: 844 });
@@ -117,11 +113,10 @@ test("signed-in sections and expanded picker fit narrow layouts in both themes",
     for (const theme of ["Dark", "Light"]) {
       await select(page, "General");
       await settings(page).getByRole("button", { name: `${theme} theme` }).click();
-      await settings(page).getByRole("button", { name: /^Settings section:/ }).click();
-      const navigation = settings(page).getByRole("navigation", { name: "Section", exact: true });
-      expect((await navigation.boundingBox())!.height).toBeLessThanOrEqual(200);
-      await page.screenshot({ path: info.outputPath(`picker-${width}-${theme.toLowerCase()}.png`) });
-      await page.keyboard.press("Escape");
+      const navigation = settings(page).getByRole("tablist", { name: "Settings sections" });
+      await expect(navigation).toHaveAttribute("aria-orientation", "horizontal");
+      expect((await navigation.boundingBox())!.height).toBeLessThanOrEqual(70);
+      await page.screenshot({ path: info.outputPath(`tabs-${width}-${theme.toLowerCase()}.png`) });
       for (const section of sections) {
         await select(page, section);
         await expect(settings(page).getByRole("heading", { name: section, exact: true })).toBeVisible();

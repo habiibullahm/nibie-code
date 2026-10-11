@@ -862,15 +862,12 @@ a.message-source-title:hover { text-decoration: underline; text-decoration-thick
 .settings-discard-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 @media (max-width: 640px) {
   .settings-dialog { width: 100%; height: 100dvh; border: 0; border-radius: 0; }
-  .settings-body { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+  .settings-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
   .settings-nav { display: none; }
-  .settings-mobile-nav { display: flex; flex-direction: column; gap: 6px; padding: 10px 16px; border-bottom: 1px solid var(--border-soft); color: var(--text-3); font-size: 12px; }
-  .settings-section-picker { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 44px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-raised); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
-  .settings-section-picker[aria-expanded="true"] svg { transform: rotate(180deg); }
-  .settings-section-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
-  .settings-section-options button { min-width: 0; min-height: 44px; padding: 6px 8px; border: 1px solid transparent; border-radius: 8px; background: var(--bg-subtle); color: var(--text-3); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
-  .settings-section-options button:hover { background: var(--hover); color: var(--text); }
-  .settings-section-options button[aria-current="page"] { border-color: var(--border-strong); background: var(--active); color: var(--text); }
+  .settings-mobile-nav { display: flex; min-width: 0; gap: 4px; padding: 8px 12px; border-bottom: 1px solid var(--border-soft); overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; scroll-padding-inline: 12px; }
+  .settings-mobile-nav button { flex: none; min-height: 44px; padding: 0 12px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text-3); font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; }
+  .settings-mobile-nav button:hover { background: var(--hover); color: var(--text); }
+  .settings-mobile-nav button[aria-selected="true"] { border-color: var(--border-strong); background: var(--active); color: var(--text); font-weight: 600; }
   .settings-content { padding: 14px 16px; }
   .settings-feedback { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
 }

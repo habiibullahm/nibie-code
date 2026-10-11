@@ -40,7 +40,7 @@ What's new in Nibie.
 
 ### Changed
 
-- Settings now groups appearance, AI defaults, chat behavior, personalization, memory, usage, and privacy in a clearer dialog, with a full-height mobile layout and keyboard navigation.
+- Settings now groups appearance, AI defaults, chat behavior, personalization, memory, usage, and privacy in a clearer dialog, with a full-height mobile layout, swipeable section tabs, and keyboard navigation.
 
 - Getting-started guidance now explains how to continue work with Room briefs, files, explicit Memory, and research sources; attachment limits match the current uploads.
 - Workbench UI is hidden until product-ready: Edit in Workbench and `/workbench` routes are unavailable (backend and preview harness stay in place).

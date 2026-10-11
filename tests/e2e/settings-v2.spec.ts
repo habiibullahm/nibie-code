@@ -11,12 +11,7 @@ async function open(page: Page) {
 }
 
 async function select(page: Page, name: string) {
-  const picker = settings(page).getByRole("button", { name: /^Settings section:/ });
-  if (await picker.isVisible()) {
-    await picker.click();
-    await settings(page).getByRole("navigation", { name: "Section", exact: true }).getByRole("button", { name, exact: true }).click();
-  }
-  else await settings(page).getByRole("tab", { name, exact: true }).click();
+  await settings(page).getByRole("tab", { name, exact: true }).click();
 }
 
 for (const width of [320, 390, 768, 1024, 1440]) {
@@ -126,12 +121,12 @@ test("malformed or unavailable device storage does not break Settings", async ({
   await expect(settings(page).getByText("No saved memories yet.", { exact: false })).toBeVisible();
 });
 
-test("mobile section selector contains focus and close returns to the menu button", async ({ page }) => {
+test("mobile tabs contain focus and close returns to the menu button", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/preview");
   const menu = page.getByRole("button", { name: "Open conversation menu", exact: true });
   await open(page);
-  await expect(settings(page).getByRole("button", { name: /^Settings section:/ })).toBeFocused();
+  await expect(settings(page).getByRole("tab", { name: "General", exact: true })).toBeFocused();
   await settings(page).getByRole("button", { name: "Close settings" }).focus();
   await page.keyboard.press("Shift+Tab");
   await expect(settings(page).getByRole("button", { name: "System theme" })).toBeFocused();
@@ -140,31 +135,80 @@ test("mobile section selector contains focus and close returns to the menu butto
   await expect(menu).toBeFocused();
 });
 
-test("mobile picker is compact, keyboard operable and Escape closes only the picker", async ({ page }) => {
-  await page.setViewportSize({ width: 320, height: 844 });
-  await page.goto("/preview");
-  await open(page);
-  const picker = settings(page).getByRole("button", { name: /^Settings section:/ });
-  await page.keyboard.press("ArrowDown");
-  const navigation = settings(page).getByRole("navigation", { name: "Section", exact: true });
-  await expect(navigation.getByRole("button", { name: "General", exact: true })).toBeFocused();
-  const bounds = await navigation.boundingBox();
-  expect(bounds!.height).toBeLessThanOrEqual(200);
-  expect(await navigation.evaluate((element) => element.scrollHeight <= element.clientHeight && element.scrollWidth <= element.clientWidth)).toBe(true);
-  await page.keyboard.press("End");
-  await expect(navigation.getByRole("button", { name: "Data & Privacy", exact: true })).toBeFocused();
-  await page.keyboard.press("Home");
-  await page.keyboard.press("ArrowRight");
-  await page.keyboard.press("Enter");
-  await expect(settings(page).getByRole("heading", { name: "AI & Models", exact: true })).toBeVisible();
-  await expect(picker).toBeFocused();
-  await picker.click();
-  await page.keyboard.press("Escape");
-  await expect(picker).toHaveAttribute("aria-expanded", "false");
-  await expect(picker).toBeFocused();
-  await expect(settings(page)).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(settings(page)).toHaveCount(0);
+test.describe("mobile section tabs", () => {
+  test.use({ isMobile: true, hasTouch: true });
+
+  for (const width of [320, 390]) test(`touch scrolling, keyboard selection and drafts at ${width}px`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto("/preview");
+    await open(page);
+    const navigation = settings(page).getByRole("tablist", { name: "Settings sections" });
+    await expect(navigation).toHaveAttribute("aria-orientation", "horizontal");
+    await expect(navigation.getByRole("tab")).toHaveCount(7);
+    expect((await navigation.boundingBox())!.height).toBeLessThanOrEqual(70);
+    expect(await navigation.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+
+    // A real Chromium touch sequence scrolls the strip without switching sections.
+    const touch = await page.context().newCDPSession(page);
+    const bounds = (await navigation.boundingBox())!;
+    const y = bounds.y + bounds.height / 2;
+    await touch.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: width - 30, y }] });
+    for (const x of [width - 80, width / 2, 30]) await touch.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y }] });
+    await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await touch.detach();
+    await expect.poll(() => navigation.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+    await expect(navigation.getByRole("tab", { name: "General", exact: true })).toHaveAttribute("aria-selected", "true");
+    await navigation.getByRole("tab", { name: "Data & Privacy", exact: true }).tap();
+    await expect(settings(page).getByRole("heading", { name: "Data & Privacy", exact: true })).toBeVisible();
+
+    await navigation.getByRole("tab", { name: "General", exact: true }).focus();
+    await page.keyboard.press("End");
+    const last = navigation.getByRole("tab", { name: "Data & Privacy", exact: true });
+    await expect(last).toBeFocused();
+    await expect(last).toHaveAttribute("aria-selected", "true");
+    await expect(settings(page).getByRole("tabpanel", { name: "Data & Privacy", exact: true })).toBeVisible();
+    await expect.poll(() => last.evaluate((element) => {
+      const tab = element.getBoundingClientRect();
+      const strip = element.parentElement!.getBoundingClientRect();
+      return tab.left >= strip.left && tab.right <= strip.right;
+    })).toBe(true);
+    await page.setViewportSize({ width: 1440, height: 844 });
+    await expect(settings(page).getByRole("tablist")).toHaveAttribute("aria-orientation", "vertical");
+    await page.setViewportSize({ width, height: 844 });
+    await expect(navigation).toHaveAttribute("aria-orientation", "horizontal");
+    await expect.poll(() => last.evaluate((element) => {
+      const tab = element.getBoundingClientRect();
+      const strip = element.parentElement!.getBoundingClientRect();
+      return tab.left >= strip.left && tab.right <= strip.right;
+    })).toBe(true);
+    await last.focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(navigation.getByRole("tab", { name: "General", exact: true })).toBeFocused();
+    await page.keyboard.press("ArrowLeft");
+    await expect(last).toBeFocused();
+    await page.keyboard.press("Home");
+    await page.keyboard.press("ArrowRight");
+    await expect(navigation.getByRole("tab", { name: "AI & Models", exact: true })).toBeFocused();
+    await expect(settings(page).getByRole("heading", { name: "AI & Models", exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+
+    for (const theme of ["Dark", "Light"]) {
+      await select(page, "General");
+      await settings(page).getByRole("button", { name: `${theme} theme` }).click();
+      await page.addStyleTag({ content: "nextjs-portal { display: none; }" });
+      await page.screenshot({ path: info.outputPath(`tabs-${width}-${theme.toLowerCase()}.png`) });
+    }
+    await select(page, "Personalization");
+    await settings(page).getByLabel("Preferred name", { exact: true }).fill("Mobile draft");
+    await select(page, "General");
+    await select(page, "Personalization");
+    await expect(settings(page).getByLabel("Preferred name", { exact: true })).toHaveValue("Mobile draft");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("alertdialog", { name: "Discard unsaved changes?" })).toBeVisible();
+    await page.getByRole("button", { name: "Discard changes", exact: true }).click();
+    await expect(settings(page)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Open conversation menu", exact: true })).toBeFocused();
+  });
 });
 
 test("both drafts survive section switches and every close path requires a deliberate discard", async ({ page }) => {
