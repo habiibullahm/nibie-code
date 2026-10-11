@@ -6,8 +6,8 @@ Ordinary chat (`app/api/chat/route.ts`) and automatic Web/GitHub Actions
 extraction in the architecture implementation plan.
 
 The authenticated route still supplies the Supabase client, owner, conversation,
-and claimed assistant id. Authentication, turn claiming, intent routing, provider
-streaming, and SSE events retain their existing owners. Stop polling, timeout
+and claimed assistant id. Authentication, turn claiming, intent routing, context preparation retain their existing owners. Provider stream consumption
+and SSE events use the [shared runner](CHAT_GENERATION_STREAM.md). Stop polling, timeout
 cleanup, and usage start/release/settlement now use the shared
 [generation lifecycle](CHAT_GENERATION_LIFECYCLE.md).
 
@@ -42,5 +42,5 @@ Action citations and Stop/Send races. GitHub Action and usage guard tests remain
 part of the focused regression set.
 
 This extraction has no schema, provider, pricing, or hosted environment changes.
-Deep Research retains its specialized persistence implementation. Session and
-shared streaming-runner extraction remain subsequent work.
+Deep Research retains its specialized persistence implementation. Shared cancellation/usage coordination and streaming now use their documented
+helpers.
