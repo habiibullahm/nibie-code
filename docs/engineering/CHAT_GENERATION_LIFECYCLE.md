@@ -54,7 +54,7 @@ request/consumer cancellation, timer disposal, failed Stop reads, and cleanup
 during an outstanding read. Existing route and server-authoritative Stop tests
 exercise adoption through ordinary and Action responses.
 
-Shared prompt preparation, stream filtering, persistence terminal decisions,
-SSE framing, and telemetry formatting remain in the callers for the subsequent
-stream-runner extraction. Live provider quality acceptance remains a separate
-release gate.
+Provider stream consumption, reasoning/citation filters, terminal-save decisions,
+and SSE framing now use the [shared runner](CHAT_GENERATION_STREAM.md).
+Prompt preparation, tools, cost estimates, and final telemetry stay in callers.
+Live provider quality acceptance remains a separate release gate.

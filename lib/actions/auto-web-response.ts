@@ -4,15 +4,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { chatProvider, configuredModelLabel } from "@/lib/ai/provider";
 import { toProviderMessages } from "@/lib/ai/provider-messages";
 import { contextCapabilitiesFor, providerFor } from "@/lib/ai/registry";
-import { createReasoningStreamFilter } from "@/lib/ai/sanitize-model-output";
-import { ProviderStreamError, readOpenAiSse } from "@/lib/ai/sse";
 import type { ChatModel } from "@/lib/chat/validation";
 import { stoppedPlaceholder } from "@/lib/chat/stop";
 import { createGenerationPersistence } from "@/lib/chat/orchestration/persist-result";
 import { createGenerationLifecycle } from "@/lib/chat/orchestration/generation-lifecycle";
+import { chatSseEvent as event, createGenerationStream } from "@/lib/chat/orchestration/stream-response";
 import { attachWebCitationHandles } from "@/lib/citations/attach";
 import { citationSourcesIncludedInContext } from "@/lib/citations/included";
-import { createCitationStreamFilter } from "@/lib/citations/parse";
 import { citationViewsFromPrepared } from "@/lib/citations/persist";
 import { citationInstructionFor } from "@/lib/citations/prepare";
 import type { SourceReference } from "@/lib/citations/types";
@@ -38,16 +36,13 @@ import { logError, logInfo, logWarn } from "@/lib/observability/logger";
 import type { UserPreferences } from "@/lib/preferences/types";
 import type { MemoryRecord, RecallOperationStatus } from "@/lib/recall/types";
 import { reserveUsageBeforeGeneration } from "@/lib/usage/guards";
-import { estimateUsageFromText, withCostEstimate, type ProviderTokenUsage } from "@/lib/usage/provider-usage";
+import { estimateUsageFromText, withCostEstimate } from "@/lib/usage/provider-usage";
 import { failureCategoryFrom, logGenerationTelemetry } from "@/lib/usage/telemetry";
 import type { WebContextInput } from "@/lib/web/types";
 
 const encoder = new TextEncoder();
 const safeError = "Nibie couldn't complete that response. Please try again.";
 
-function event(type: string, data: unknown) {
-  return `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
-}
 
 type AutoActionChatBase = {
   request: Request;
@@ -171,7 +166,7 @@ async function createAutoActionChatResponse(input: ResolvedActionChat): Promise<
 
   let citationSources: SourceReference[] = [];
   let citationViews: ReturnType<typeof citationViewsFromPrepared> = [];
-  const { persist, persistCitationSourcesForKeptReply } = createGenerationPersistence({
+  const persistence = createGenerationPersistence({
     supabase,
     userId,
     conversationId,
@@ -180,15 +175,13 @@ async function createAutoActionChatResponse(input: ResolvedActionChat): Promise<
     citationSources: () => citationSources,
   });
 
+  const { persist } = persistence;
   const releaseReservation = lifecycle.releaseBeforeStart;
 
   const summaryMaintenance = deferThreadSummaryMaintenance({ supabase, conversationId, requestId });
   let usageReservationMs = 0;
   let spendReservedMicros = 0;
   let providerStartedAt = Date.now();
-  let providerTtftMs: number | null = null;
-  let finishReason = "unspecified";
-  let providerUsage: ProviderTokenUsage | null = null;
   const timeoutError = "The provider took too long to finish this response. Please try again.";
 
   const stream = new ReadableStream<Uint8Array>({
@@ -488,117 +481,23 @@ async function createAutoActionChatResponse(input: ResolvedActionChat): Promise<
         // Re-announce start metadata now that context/sources exist (client already has the row).
         if (citationViews.length) enqueue("sources", { sources: citationViews });
 
-        const reasoningFilter = createReasoningStreamFilter();
-        const citationFilter = createCitationStreamFilter(citationSources);
-        let output = "";
-        let completed = false;
-        let sealed = false;
-        let interruptedSave: Promise<"saved" | "stopped" | "failed"> | undefined;
-        const publish = (text: string) => {
-          if (!text) return;
-          if (providerTtftMs === null) providerTtftMs = Date.now() - providerStartedAt;
-          output += text;
-          if (!lifecycle.clientCancelled) controller.enqueue(encoder.encode(event("delta", { text })));
-        };
-        const feedModelText = (chunk: string) => {
-          if (!chunk) return;
-          publish(citationFilter.push(reasoningFilter.push(chunk)));
-        };
-        const logCitationStats = () => {
-          logInfo("citation.references.parsed", {
-            requestId,
-            sourceCount: citationSources.length,
-            citationCount: citationFilter.citationCount,
-          });
-          if (citationFilter.invalidCitationCount > 0) {
-            logInfo("citation.references.invalid", {
-              requestId,
-              sourceCount: citationSources.length,
-              invalidCitationCount: citationFilter.invalidCitationCount,
-            });
-          }
-        };
-        const seal = () => {
-          if (sealed) return;
-          sealed = true;
-          const afterReasoning = reasoningFilter.finish();
-          if (afterReasoning) publish(citationFilter.push(afterReasoning));
-          publish(citationFilter.finish());
-          logCitationStats();
-        };
-        const save = async (status: "complete" | "interrupted" | "error") => {
-          seal();
-          if (lifecycle.userStopped) {
-            await persistCitationSourcesForKeptReply(output);
-            return "stopped" as const;
-          }
-          const content = output || (status === "interrupted" ? stoppedPlaceholder : "Response unavailable.");
-          if (status === "interrupted") return (interruptedSave ??= persist(content, status));
-          return persist(content, status);
-        };
-
+        const generation = createGenerationStream({
+          responseStream, lifecycle, persistence, sources: citationSources,
+          requestId, assistantId: assistant.id, providerStartedAt, durationMs,
+          path: "action",
+          interrupted: () => lifecycle.userStopped || lifecycle.clientCancelled || lifecycle.signal.aborted,
+          emit: enqueue,
+          onComplete: () => summaryMaintenance.complete(assistant.position),
+        });
         try {
-          for await (const item of readOpenAiSse(responseStream, lifecycle.signal)) {
-            if (item.type === "done") {
-              completed = true;
-              finishReason = item.finishReason ?? "unspecified";
-              if (item.usage) providerUsage = item.usage;
-              break;
-            }
-            feedModelText(item.text);
-          }
-          seal();
-          if (lifecycle.userStopped || lifecycle.clientCancelled || lifecycle.signal.aborted) {
-            const saved = await save("interrupted");
-            logWarn("chat.response.interrupted", { requestId, status: "interrupted", durationMs: durationMs() });
-            if (!lifecycle.clientCancelled) {
-              enqueue(saved !== "failed" ? "status" : "error", saved !== "failed" ? { status: "interrupted" } : { error: safeError });
-            }
-          } else if (completed && output.length > 0) {
-            const saved = await save("complete");
-            if (saved === "saved") {
-              logInfo("chat.response.completed", { requestId, status: "complete", durationMs: durationMs() });
-              try {
-                summaryMaintenance.complete(assistant.position);
-              } catch {
-                /* best effort */
-              }
-              enqueue("status", { status: "complete" });
-            } else if (saved === "stopped") {
-              enqueue("status", { status: "interrupted" });
-            } else {
-              await save("error");
-              enqueue("error", { error: safeError });
-            }
-          } else if ((await save("error")) === "stopped") {
-            enqueue("status", { status: "interrupted" });
-          } else {
-            enqueue("error", { error: safeError });
-          }
-        } catch (error) {
-          if (error instanceof ProviderStreamError) finishReason = error.finishReason;
-          else if (lifecycle.providerTimedOut) finishReason = "timeout";
-          let saved: "saved" | "stopped" | "failed" = "failed";
-          try {
-            saved = await save(lifecycle.userStopped || lifecycle.clientCancelled || lifecycle.signal.aborted ? "interrupted" : "error");
-          } catch {
-            logError("chat.persistence.failed", { requestId, code: operationalCodes.assistantPersistFailed, stage: "persist" });
-          }
-          const interrupted = saved === "stopped" || lifecycle.userStopped || lifecycle.clientCancelled || lifecycle.signal.aborted;
-          if (interrupted) {
-            if (!lifecycle.clientCancelled) enqueue(saved !== "failed" ? "status" : "error", saved !== "failed" ? { status: "interrupted" } : { error: safeError });
-          } else {
-            enqueue("error", {
-              error: error instanceof ProviderStreamError ? error.message : lifecycle.providerTimedOut ? timeoutError : safeError,
-            });
-          }
+          await generation.run();
         } finally {
           lifecycle.clearProviderTimeout();
           const costEstimate = withCostEstimate(
             mode,
-            providerUsage ?? estimateUsageFromText({
+            generation.providerUsage ?? estimateUsageFromText({
               promptChars: prompt.reduce((sum, message) => sum + message.content.length, 0),
-              outputChars: output.length,
+              outputChars: generation.output.length,
             }),
           );
           await lifecycle.settleSpend(costEstimate.estimatedUsdMicros);
@@ -609,13 +508,13 @@ async function createAutoActionChatResponse(input: ResolvedActionChat): Promise<
             model: configuredModelLabel(mode),
             usageKind: "chat",
             usage: costEstimate,
-            providerTtftMs,
+            providerTtftMs: generation.providerTtftMs,
             generationDurationMs: Date.now() - providerStartedAt,
             totalDurationMs: Date.now() - requestStartedAt,
-            finishReason,
-            failureCategory: failureCategoryFrom({ finishReason }),
-            streamCompleted: completed,
-            outputChars: output.length,
+            finishReason: generation.finishReason,
+            failureCategory: failureCategoryFrom({ finishReason: generation.finishReason }),
+            streamCompleted: generation.completed,
+            outputChars: generation.output.length,
             usageReservationMs,
             spendReservedMicros,
             spendAccepted: true,
