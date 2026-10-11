@@ -26,6 +26,28 @@ export const FORBIDDEN = [
   { name: "DROP SCHEMA", re: /\bdrop\s+schema\b/i },
 ];
 
+// Reviewed runtime retention for the new Workbench versions table. This definition
+// performs no DELETE while the migration is applied. Match its exact SQL so a
+// broader body, another table, or a top-level DELETE still fails the gate.
+const workbenchRetentionDefinition = `CREATE OR REPLACE FUNCTION public.prune_workbench_versions()
+RETURNS trigger LANGUAGE plpgsql SECURITY INVOKER SET search_path = '' AS $$
+BEGIN
+  DELETE FROM public.workbench_document_versions
+    WHERE id IN (
+      SELECT id FROM public.workbench_document_versions
+      WHERE document_id = NEW.document_id AND user_id = NEW.user_id
+      ORDER BY created_at DESC, id DESC OFFSET 50
+    );
+  RETURN NEW;
+END;
+$$;`;
+
+function migrationSqlForCheck(name, sql) {
+  if (name !== "0028_workbench_document_versions.sql" ||
+      !/^CREATE TABLE IF NOT EXISTS "workbench_document_versions" \(/m.test(sql)) return sql;
+  return sql.replace(workbenchRetentionDefinition, "");
+}
+
 /** @param {string} sql */
 export function findForbiddenPatterns(sql) {
   /** @type {string[]} */
@@ -71,7 +93,7 @@ export function checkAdditiveMigrations(root, opts = {}) {
       continue;
     }
     const sql = readFileSync(path, "utf8");
-    for (const hit of findForbiddenPatterns(sql)) {
+    for (const hit of findForbiddenPatterns(migrationSqlForCheck(name, sql))) {
       problems.push(`${name}: forbidden pattern ${hit}`);
     }
   }

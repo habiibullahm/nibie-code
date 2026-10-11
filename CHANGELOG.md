@@ -8,6 +8,8 @@ What's new in Nibie.
 
 ### Added
 
+- Workbench version history: save a checkpoint, preview prior versions (manual or AI-applied), and restore atomically with confirmation and recoverable text, keeping up to 50 versions per document; download Markdown or plain text, or copy formatted for Word/Docs (UI stays behind `WORKBENCH_UI_ENABLED`).
+- Open a finished reply in Workbench beside chat, edit Markdown with autosave, and Ask Nibie on selected text to change that span inline (credits apply).
 - Copy a single conversation’s transcript from the thread ··· menu as clean plain text.
 - Search chats now finds conversation titles and saved message content from the same dialog, with short snippets, archived Restore, and jump-to-message highlighting.
 - Download a file you attached to a chat from the message chip (your account only).

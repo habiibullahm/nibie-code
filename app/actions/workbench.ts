@@ -6,6 +6,12 @@ import { sanitizeModelOutput } from "@/lib/ai/sanitize-model-output";
 import { schemaUnavailable } from "@/lib/chat/schema-error";
 import { canContinueInWorkbench } from "@/lib/workbench/offer";
 import { workbenchTitleFromContent } from "@/lib/workbench/title";
+import {
+  workbenchVersionLimit,
+  type WorkbenchVersion,
+  type WorkbenchVersionSource,
+  type WorkbenchVersionSummary,
+} from "@/lib/workbench/types";
 import { asWorkbenchDraft, parseWorkbenchCreate, parseWorkbenchWrite, validateWorkbenchId, workbenchCreateDefaults } from "@/lib/workbench/validation";
 
 export type WorkbenchActionResult<T = undefined> = { data?: T; error?: string; conflict?: boolean };
@@ -22,6 +28,16 @@ type SavedDocument = {
 
 type SavedDocumentRow = Omit<SavedDocument, "revision"> & { revision?: number | null };
 
+type VersionRow = {
+  id: string;
+  source: WorkbenchVersionSource;
+  title: string;
+  content: string;
+  document_revision: number;
+  revision_run_id: string | null;
+  created_at: string;
+};
+
 const saveFailed = "We couldn't save that document. Please try again.";
 const unavailable = "That document is no longer available.";
 const conflictMessage = "This document changed elsewhere. Reload the latest version before saving.";
@@ -29,9 +45,13 @@ const responseUnavailable = "That response is no longer available.";
 const responseNotReady = "Only a finished response can be opened in Workbench.";
 const roomUnavailable = "That room is no longer available.";
 const sessionFailed = "Your session has expired or the service is unavailable. Please try again.";
+const versionUnavailable = "That version is no longer available.";
+const versionsUnavailable = "Version history isn't available on this environment yet.";
 
 const documentSelectWithRevision = "id,title,content,revision,room_id,created_at,updated_at";
 const documentSelectWithoutRevision = "id,title,content,room_id,created_at,updated_at";
+const versionSelect = "id,source,title,content,document_revision,revision_run_id,created_at";
+const versionSummarySelect = "id,source,title,document_revision,created_at";
 
 async function authenticatedClient() {
   const supabase = await createSupabaseServerClient();
@@ -52,6 +72,27 @@ function withRevision(row: SavedDocumentRow): SavedDocument {
     ...row,
     revision: typeof row.revision === "number" && row.revision >= 1 ? row.revision : 1,
   };
+}
+
+function asVersion(row: VersionRow): WorkbenchVersion {
+  return {
+    id: row.id,
+    source: row.source === "ai" ? "ai" : "manual",
+    title: row.title,
+    content: row.content,
+    document_revision: row.document_revision,
+    revision_run_id: row.revision_run_id,
+    created_at: row.created_at,
+  };
+}
+
+function versionWriteFailure(error: { code?: string } | null): WorkbenchActionResult<never> | null {
+  if (!error) return null;
+  if (schemaUnavailable(error) || error.code === "PGRST202") return { error: versionsUnavailable };
+  if (error.code === "PT409") return { error: conflictMessage, conflict: true };
+  if (error.code === "PT404") return { error: versionUnavailable };
+  if (error.code === "22023") return { error: "That suggestion is incomplete." };
+  return failedWrite(error);
 }
 
 export async function createWorkbenchDocumentAction(input: unknown): Promise<WorkbenchActionResult<SavedDocument>> {
@@ -130,25 +171,119 @@ export async function applyWorkbenchSuggestionAction(input: unknown): Promise<Wo
   if (!parsedId.success || !runId.success) return { error: "Choose a valid document." };
   if ("error" in parsed) return { error: parsed.error };
   try {
+    const { supabase } = await authenticatedClient();
+    const { data, error } = await supabase.rpc("commit_workbench_version", {
+      p_document_id: parsedId.data,
+      p_expected_revision: parsed.data.expectedRevision,
+      p_revision_run_id: runId.data,
+      p_title: parsed.data.title,
+      p_content: parsed.data.content,
+    });
+    const failure = versionWriteFailure(error);
+    if (failure) return failure;
+    if (!data?.document) return { error: saveFailed };
+    return { data: withRevision(data.document as SavedDocumentRow) };
+  } catch {
+    return { error: sessionFailed };
+  }
+}
+
+export async function createWorkbenchVersionAction(input: unknown): Promise<WorkbenchActionResult<WorkbenchVersion>> {
+  const parsedId = validateWorkbenchId((input as { documentId?: unknown } | null)?.documentId);
+  const expectedRevision = (input as { expectedRevision?: unknown } | null)?.expectedRevision;
+  const revision = typeof expectedRevision === "number" && Number.isInteger(expectedRevision) && expectedRevision >= 1
+    ? expectedRevision
+    : null;
+  if (!parsedId.success || revision == null) return { error: "Choose a valid document." };
+  try {
+    const { supabase } = await authenticatedClient();
+    const { data, error } = await supabase.rpc("commit_workbench_version", {
+      p_document_id: parsedId.data,
+      p_expected_revision: revision,
+    });
+    const failure = versionWriteFailure(error);
+    if (failure) return failure;
+    if (!data?.version) return { error: saveFailed };
+    return { data: asVersion(data.version as VersionRow) };
+  } catch {
+    return { error: sessionFailed };
+  }
+}
+
+export async function listWorkbenchVersionsAction(documentId: unknown): Promise<WorkbenchActionResult<WorkbenchVersionSummary[]>> {
+  const parsedId = validateWorkbenchId(documentId);
+  if (!parsedId.success) return { error: "Choose a valid document." };
+  try {
     const { supabase, user } = await authenticatedClient();
-    const { data: run, error: runError } = await supabase.from("workbench_revision_runs")
-      .select("id,status,proposed_title,proposed_content,base_revision,document_id")
-      .eq("id", runId.data)
+    const { data: document, error: documentError } = await supabase.from("workbench_documents")
+      .select("id")
+      .eq("id", parsedId.data)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (documentError) return { error: saveFailed };
+    if (!document) return { error: unavailable };
+    const { data, error } = await supabase.from("workbench_document_versions")
+      .select(versionSummarySelect)
       .eq("user_id", user.id)
       .eq("document_id", parsedId.data)
+      .order("created_at", { ascending: false }).order("id", { ascending: false })
+      .limit(workbenchVersionLimit);
+    if (schemaUnavailable(error)) return { error: versionsUnavailable };
+    if (error) return { error: saveFailed };
+    return {
+      data: (data ?? []).map((row) => ({
+        id: row.id as string,
+        source: row.source === "ai" ? "ai" : "manual",
+        title: row.title as string,
+        document_revision: row.document_revision as number,
+        created_at: row.created_at as string,
+      })),
+    };
+  } catch {
+    return { error: sessionFailed };
+  }
+}
+
+export async function getWorkbenchVersionAction(input: unknown): Promise<WorkbenchActionResult<WorkbenchVersion>> {
+  const documentId = validateWorkbenchId((input as { documentId?: unknown } | null)?.documentId);
+  const versionId = validateWorkbenchId((input as { versionId?: unknown } | null)?.versionId);
+  if (!documentId.success || !versionId.success) return { error: "Choose a valid document." };
+  try {
+    const { supabase, user } = await authenticatedClient();
+    const { data, error } = await supabase.from("workbench_document_versions")
+      .select(versionSelect)
+      .eq("id", versionId.data)
+      .eq("document_id", documentId.data)
+      .eq("user_id", user.id)
       .maybeSingle();
-    if (runError) return { error: saveFailed };
-    if (!run || run.status !== "complete" || run.proposed_content == null) {
-      return { error: "That suggestion is no longer available." };
-    }
-    if (run.proposed_content !== parsed.data.content || (run.proposed_title ?? parsed.data.title) !== parsed.data.title) {
-      return { error: "That suggestion is incomplete." };
-    }
-    if (run.base_revision !== parsed.data.expectedRevision) {
-      return { error: conflictMessage, conflict: true };
-    }
-    const result = await updateWorkbenchDocumentAction(parsedId.data, parsed.data);
-    return result;
+    if (schemaUnavailable(error)) return { error: versionsUnavailable };
+    if (error) return { error: saveFailed };
+    if (!data) return { error: versionUnavailable };
+    return { data: asVersion(data as VersionRow) };
+  } catch {
+    return { error: sessionFailed };
+  }
+}
+
+export async function restoreWorkbenchVersionAction(input: unknown): Promise<WorkbenchActionResult<SavedDocument>> {
+  const documentId = validateWorkbenchId((input as { documentId?: unknown } | null)?.documentId);
+  const versionId = validateWorkbenchId((input as { versionId?: unknown } | null)?.versionId);
+  const expectedRevision = (input as { expectedRevision?: unknown } | null)?.expectedRevision;
+  const revision = typeof expectedRevision === "number" && Number.isInteger(expectedRevision) && expectedRevision >= 1
+    ? expectedRevision
+    : null;
+  if (!documentId.success || !versionId.success || revision == null) return { error: "Choose a valid document." };
+  try {
+    const { supabase } = await authenticatedClient();
+    const { data, error } = await supabase.rpc("commit_workbench_version", {
+      p_document_id: documentId.data,
+      p_expected_revision: revision,
+      p_version_id: versionId.data,
+    });
+    const failure = versionWriteFailure(error);
+    if (failure) return failure;
+    if (!data?.document) return { error: saveFailed };
+    return { data: withRevision(data.document as SavedDocumentRow) };
   } catch {
     return { error: sessionFailed };
   }

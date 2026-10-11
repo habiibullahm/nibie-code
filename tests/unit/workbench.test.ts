@@ -1,5 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createWorkbenchDocumentAction, createWorkbenchFromAssistantAction, deleteWorkbenchDocumentAction, updateWorkbenchDocumentAction } from "../../app/actions/workbench";
+import {
+  createWorkbenchDocumentAction,
+  createWorkbenchFromAssistantAction,
+  createWorkbenchVersionAction,
+  deleteWorkbenchDocumentAction,
+  listWorkbenchVersionsAction,
+  restoreWorkbenchVersionAction,
+  updateWorkbenchDocumentAction,
+} from "../../app/actions/workbench";
+import {
+  workbenchExportContentDisposition,
+  workbenchExportFilename,
+  workbenchMarkdownExportBody,
+  workbenchPlainExportBody,
+} from "../../lib/workbench/export";
 import { workbenchLineDiff } from "../../lib/workbench/diff";
 import { WORKBENCH_UI_ENABLED } from "../../lib/workbench/flags";
 import { canContinueInWorkbench } from "../../lib/workbench/offer";
@@ -51,18 +65,51 @@ function projectRow(row: Row, columns: string) {
 function memoryClient(options: {
   fail?: boolean;
   revisionMissing?: boolean;
+  versionsMissing?: boolean;
   message?: Row | null;
   conversation?: Row | null;
   seed?: Row[];
+  versionSeed?: Row[];
 } = {}) {
   const documents: Row[] = [...(options.seed ?? [])];
+  const versions: Row[] = [...(options.versionSeed ?? [])];
   const inserts: Row[] = [];
   const updates: Row[] = [];
+  let versionSeq = 0;
+  const matches = (row: Row) => filters.every(([key, value]) => {
+    if (Array.isArray(value)) return value.includes(row[key]);
+    return row[key] === value;
+  });
+  let filters: Array<[string, unknown]> = [];
+  let selectColumns = "";
+  let orderBy: { column: string; ascending: boolean } | null = null;
+  let limitCount: number | null = null;
+
+  function resetQuery() {
+    filters = [];
+    selectColumns = "";
+    orderBy = null;
+    limitCount = null;
+  }
+
+  function applyList(rows: Row[]) {
+    let next = rows.filter(matches);
+    if (orderBy) {
+      const { column, ascending } = orderBy;
+      next = [...next].sort((a, b) => {
+        const left = String(a[column] ?? "");
+        const right = String(b[column] ?? "");
+        return ascending ? left.localeCompare(right) : right.localeCompare(left);
+      });
+    }
+    if (limitCount != null) next = next.slice(0, limitCount);
+    return next;
+  }
+
   const client = {
     auth: { getClaims: async () => ({ data: { claims: { sub: owner } }, error: null }) },
     from(table: string) {
-      const filters: Array<[string, unknown]> = [];
-      let selectColumns = "";
+      resetQuery();
       const api = {
         select(columns = "") {
           selectColumns = columns;
@@ -72,7 +119,42 @@ function memoryClient(options: {
           filters.push([column, value]);
           return api;
         },
+        in(column: string, value: unknown[]) {
+          filters.push([column, value]);
+          return api;
+        },
+        order(column: string, opts?: { ascending?: boolean }) {
+          orderBy = { column, ascending: opts?.ascending !== false };
+          return api;
+        },
+        limit(count: number) {
+          limitCount = count;
+          return api;
+        },
         insert(row: Row) {
+          if (table === "workbench_document_versions") {
+            versionSeq += 1;
+            const saved = {
+              id: `aaaaaaaa-aaaa-4aaa-8aaa-${String(versionSeq).padStart(12, "0")}`,
+              created_at: `2026-10-03T00:00:${String(versionSeq).padStart(2, "0")}.000Z`,
+              revision_run_id: null,
+              ...row,
+            };
+            return {
+              select(columns: string) {
+                return {
+                  single: async () => {
+                    if (options.fail) return { data: null, error: { code: "XX000" } };
+                    if (options.versionsMissing) return { data: null, error: missingRevision };
+                    if (row.user_id !== owner) return { data: null, error: { code: "42501" } };
+                    inserts.push(row);
+                    versions.push(saved);
+                    return { data: projectRow(saved, columns), error: null };
+                  },
+                };
+              },
+            };
+          }
           const saved = {
             id: documentId,
             ...(options.revisionMissing ? {} : { revision: 1 }),
@@ -130,6 +212,10 @@ function memoryClient(options: {
               filters.push([column, value]);
               return chain;
             },
+            in(column: string, value: unknown[]) {
+              filters.push([column, value]);
+              return chain;
+            },
             select: () => ({
               maybeSingle: async () => {
                 if (options.fail) return { data: null, error: { code: "XX000" } };
@@ -141,12 +227,26 @@ function memoryClient(options: {
                 return { data: { id }, error: null };
               },
             }),
+            then(resolve: (value: { data: null; error: null }) => unknown) {
+              if (table === "workbench_document_versions") {
+                for (let i = versions.length - 1; i >= 0; i -= 1) {
+                  if (matches(versions[i]!)) versions.splice(i, 1);
+                }
+              }
+              return Promise.resolve(resolve({ data: null, error: null }));
+            },
           };
           return chain;
         },
         async maybeSingle() {
           const id = filters.find(([key]) => key === "id")?.[1];
           const userId = filters.find(([key]) => key === "user_id")?.[1];
+          if (table === "workbench_document_versions") {
+            if (options.versionsMissing) return { data: null, error: missingRevision };
+            const existing = applyList(versions)[0];
+            if (!existing) return { data: null, error: null };
+            return { data: selectColumns ? projectRow(existing, selectColumns) : { ...existing }, error: null };
+          }
           if (table === "workbench_documents") {
             if (options.revisionMissing && selectColumns.includes("revision")) {
               return { data: null, error: missingRevision };
@@ -165,14 +265,19 @@ function memoryClient(options: {
           if (!source || source.id !== id || source.user_id !== userId) return { data: null, error: null };
           return { data: source, error: null };
         },
-        in() {
-          return Promise.resolve({ data: [], error: null });
+        then(resolve: (value: { data: Row[] | null; error: { code: string } | null }) => unknown) {
+          if (table === "workbench_document_versions") {
+            if (options.versionsMissing) return Promise.resolve(resolve({ data: null, error: missingRevision }));
+            const rows = applyList(versions).map((row) => (selectColumns ? projectRow(row, selectColumns) : { ...row }));
+            return Promise.resolve(resolve({ data: rows, error: null }));
+          }
+          return Promise.resolve(resolve({ data: [], error: null }));
         },
       };
       return api;
     },
   };
-  return { client, documents, inserts, updates };
+  return { client, documents, versions, inserts, updates };
 }
 
 describe("workbench documents", () => {
@@ -421,5 +526,69 @@ describe("workbench AI revision state", () => {
     expect(messages[0]?.content).toContain("replacement text for that selection");
     expect(messages[1]?.content).toContain("Selected text:\nworld");
     expect(messages[1]?.content).toContain("Full document (context only");
+  });
+});
+
+describe("workbench versions and export", () => {
+  beforeEach(() => createClient.mockReset());
+
+  it("builds safe Markdown and plain export payloads", () => {
+    expect(workbenchExportFilename("Clinic notes / v1", "md")).toBe("Clinic-notes-v1.md");
+    expect(workbenchExportFilename("  ", "txt")).toBe("Untitled.txt");
+    expect(workbenchExportContentDisposition("Café.md")).toContain('filename="Caf_.md"');
+    expect(workbenchExportContentDisposition("Café.md")).toContain("filename*=UTF-8''Caf%C3%A9.md");
+    expect(workbenchPlainExportBody("line\r\none")).toBe("line\none");
+    expect(workbenchPlainExportBody("# Notes\n\nHello **world**")).toBe("Notes\n\nHello world");
+    expect(workbenchMarkdownExportBody("Notes", "Hello")).toBe("# Notes\n\nHello\n");
+    expect(workbenchMarkdownExportBody("Notes", "## Already\n\nBody")).toBe("## Already\n\nBody\n");
+  });
+
+  it("lists only owned document version summaries", async () => {
+    const memory = memoryClient({ seed: [{ id: documentId, user_id: owner }], versionSeed: [
+      { id: messageId, user_id: owner, document_id: documentId, source: "manual", title: "Notes", document_revision: 1, content: "private body", created_at: "2026-10-03" },
+      { id: conversationId, user_id: "stranger", document_id: documentId, source: "manual", title: "Hidden", document_revision: 1 },
+    ] });
+    createClient.mockResolvedValue(memory.client);
+    const result = await listWorkbenchVersionsAction(documentId);
+    expect(result.data).toHaveLength(1);
+    expect(result.data?.[0]).toMatchObject({ id: messageId, title: "Notes" });
+    expect(result.data?.[0]).not.toHaveProperty("content");
+  });
+
+  it("returns the database checkpoint without changing the document", async () => {
+    const version = { id: messageId, source: "manual", title: "Notes", content: "draft", document_revision: 2 };
+    const rpc = vi.fn().mockResolvedValue({ data: { version }, error: null });
+    createClient.mockResolvedValue({ ...memoryClient().client, rpc });
+    const result = await createWorkbenchVersionAction({ documentId, expectedRevision: 2 });
+    expect(result.data).toMatchObject(version);
+    expect(rpc).toHaveBeenCalledWith("commit_workbench_version", {
+      p_document_id: documentId, p_expected_revision: 2,
+    });
+  });
+
+  it.each([
+    ["PT409", true, "changed elsewhere"],
+    ["PGRST202", undefined, "isn't available"],
+    ["XX000", undefined, "couldn't save"],
+  ])("does not fall back to a document write after snapshot transaction failure %s", async (code, conflict, text) => {
+    const memory = memoryClient();
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: { code } });
+    createClient.mockResolvedValue({ ...memory.client, rpc });
+    const result = await restoreWorkbenchVersionAction({ documentId, versionId: messageId, expectedRevision: 3 });
+    expect(result.conflict).toBe(conflict);
+    expect(result.error).toContain(text);
+    expect(memory.updates).toEqual([]);
+    expect(memory.inserts).toEqual([]);
+  });
+
+  it("uses the restored document returned by the atomic transaction", async () => {
+    const document = { id: documentId, title: "Older", content: "older body", revision: 4 };
+    const rpc = vi.fn().mockResolvedValue({ data: { document }, error: null });
+    createClient.mockResolvedValue({ ...memoryClient().client, rpc });
+    const result = await restoreWorkbenchVersionAction({ documentId, versionId: messageId, expectedRevision: 3 });
+    expect(result.data).toMatchObject(document);
+    expect(rpc).toHaveBeenCalledWith("commit_workbench_version", {
+      p_document_id: documentId, p_expected_revision: 3, p_version_id: messageId,
+    });
   });
 });

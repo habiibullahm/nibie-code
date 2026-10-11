@@ -127,6 +127,8 @@ describe("Supabase row-level security", () => {
     await sql`drop type if exists public.citation_source_kind cascade`;
     await sql`drop table if exists public.attachment_upload_sessions cascade`;
     await sql`drop table if exists public.message_attachments cascade`;
+    await sql`drop table if exists public.workbench_document_versions cascade`;
+    await sql`drop table if exists public.workbench_revision_runs cascade`;
     await sql`drop table if exists public.workbench_documents cascade`;
     // Chunks reference room_files; drop them first so a re-migrate after incomplete cleanup cannot hit 42P07.
     await sql`drop table if exists public.room_file_chunks cascade`;
@@ -585,6 +587,28 @@ describe("Supabase row-level security", () => {
       values (${userB}, ${docGeneral}, 'generating', 'Steal', 2, 'CAS', 'next')
     `)).rejects.toThrow();
 
+    const versionId = randomUUID();
+    await asUser(userA, (tx) => tx`
+      insert into public.workbench_document_versions
+        (id, user_id, document_id, source, title, content, document_revision)
+      values (${versionId}, ${userA}, ${docGeneral}, 'manual', 'CAS', 'next', 2)
+    `);
+    const hiddenVersion = await asUser(userB, (tx) => tx`select id from public.workbench_document_versions where id = ${versionId}`);
+    expect(hiddenVersion).toHaveLength(0);
+    await expect(asUser(userB, (tx) => tx`
+      insert into public.workbench_document_versions
+        (user_id, document_id, source, title, content, document_revision)
+      values (${userB}, ${docGeneral}, 'manual', 'Stolen', 'no', 2)
+    `)).rejects.toThrow();
+    const { versionUpdated, versionDeleted } = await asUser(userB, async (tx) => ({
+      versionUpdated: await tx`update public.workbench_document_versions set title = 'hijacked' where id = ${versionId} returning id`,
+      versionDeleted: await tx`delete from public.workbench_document_versions where id = ${versionId} returning id`,
+    }));
+    expect(versionUpdated).toHaveLength(0);
+    expect(versionDeleted).toHaveLength(0);
+    const [ownerVersion] = await sql`select title, content from public.workbench_document_versions where id = ${versionId}`;
+    expect(ownerVersion).toEqual({ title: "CAS", content: "next" });
+
     await asUser(userA, (tx) => tx`delete from public.rooms where id = ${roomA}`);
     const [detached] = await asUser(userA, (tx) => tx`select room_id, title, content from public.workbench_documents where id = ${docRoom}`);
     expect(detached).toEqual({ room_id: null, title: "In room", content: "body" });
@@ -592,6 +616,8 @@ describe("Supabase row-level security", () => {
     await asUser(userA, (tx) => tx`delete from public.workbench_documents where id = ${docGeneral}`);
     const gone = await asUser(userA, (tx) => tx`select id from public.workbench_documents where id = ${docGeneral}`);
     expect(gone).toHaveLength(0);
+    const goneVersions = await asUser(userA, (tx) => tx`select id from public.workbench_document_versions where document_id = ${docGeneral}`);
+    expect(goneVersions).toHaveLength(0);
   });
 
   it("scopes vector search and missing-only backfill to owner and Room", async () => {
@@ -1552,4 +1578,88 @@ describe("Supabase row-level security", () => {
       )
     `)).rejects.toThrow();
   });
+  it("serializes duplicate checkpoints, restores with CAS, and keeps overwritten text recoverable", async () => {
+    const documentId = randomUUID();
+    await asUser(userA, tx => tx`insert into public.workbench_documents (id, user_id, title, content) values (${documentId}, ${userA}, 'Original', 'first draft')`);
+    const checkpoints = await Promise.all(Array.from({ length: 8 }, () => asUser(userA, tx => tx`
+      select public.commit_workbench_version(${documentId}::uuid, 1) as result
+    `)));
+    const versionId = checkpoints[0][0].result.version.id;
+    expect(new Set(checkpoints.map(rows => rows[0].result.version.id)).size).toBe(1);
+    await asUser(userA, tx => tx`update public.workbench_documents set title = 'Latest', content = 'newer draft', revision = 2 where id = ${documentId}`);
+    await expect(asUser(userA, tx => tx`select public.commit_workbench_version(${documentId}::uuid, 1, ${versionId}::uuid)`)).rejects.toMatchObject({ code: "PT409" });
+    const [restored] = await asUser(userA, tx => tx`select public.commit_workbench_version(${documentId}::uuid, 2, ${versionId}::uuid) as result`);
+    expect(restored.result.document).toMatchObject({ title: "Original", content: "first draft", revision: 3 });
+    const versions = await asUser(userA, tx => tx`select title, content from public.workbench_document_versions where document_id = ${documentId}`);
+    expect(versions).toEqual(expect.arrayContaining([{ title: "Original", content: "first draft" }, { title: "Latest", content: "newer draft" }]));
+    await expect(asUser(userB, tx => tx`select public.commit_workbench_version(${documentId}::uuid, 3, ${versionId}::uuid)`)).rejects.toMatchObject({ code: "PT404" });
+    const [newerVersion] = await sql`select id from public.workbench_document_versions where document_id = ${documentId} and title = 'Latest'`;
+    await asUser(userA, tx => tx`update public.workbench_documents set content = 'third draft', revision = 4 where id = ${documentId}`);
+    const competing = await Promise.allSettled([versionId, newerVersion.id].map(target => asUser(userA, tx => tx`
+      select public.commit_workbench_version(${documentId}::uuid, 4, ${target}::uuid)
+    `)));
+    expect(competing.filter(result => result.status === "fulfilled")).toHaveLength(1);
+    expect(competing.filter(result => result.status === "rejected")).toHaveLength(1);
+    const rejected = competing.find(result => result.status === "rejected");
+    expect(rejected?.status === "rejected" && rejected.reason.code).toBe("PT409");
+    const recovered = await sql`select id from public.workbench_document_versions where document_id = ${documentId} and content = 'third draft'`;
+    expect(recovered).toHaveLength(1);
+  });
+
+  it("bounds direct and concurrent version writes to 50 snapshots", async () => {
+    const documentId = randomUUID();
+    await asUser(userA, tx => tx`insert into public.workbench_documents (id, user_id, title, content) values (${documentId}, ${userA}, 'Bounded', 'body')`);
+    await asUser(userA, tx => tx`insert into public.workbench_document_versions (user_id, document_id, source, title, content, document_revision)
+      select ${userA}::uuid, ${documentId}::uuid, 'manual', 'Bounded', 'snapshot ' || n, n from generate_series(1, 55) n`);
+    await Promise.all(Array.from({ length: 8 }, (_, i) => asUser(userA, tx => tx`
+      insert into public.workbench_document_versions (user_id, document_id, source, title, content, document_revision)
+      values (${userA}, ${documentId}, 'manual', 'Bounded', ${`concurrent ${i}`}, 56)
+    `)));
+    const [count] = await sql`select count(*)::integer as count from public.workbench_document_versions where document_id = ${documentId}`;
+    expect(count.count).toBe(50);
+    const oldest = await sql`select content from public.workbench_document_versions where document_id = ${documentId} and content = 'snapshot 1'`;
+    expect(oldest).toHaveLength(0);
+  });
+
+  it("snapshots the applied AI result and rolls back recovery snapshots when the write fails", async () => {
+    const documentId = randomUUID();
+    const runId = randomUUID();
+    await asUser(userA, tx => tx`insert into public.workbench_documents (id, user_id, title, content) values (${documentId}, ${userA}, 'Before', 'original')`);
+    await asUser(userA, tx => tx`insert into public.workbench_revision_runs
+      (id, user_id, document_id, status, instruction, base_revision, base_title, base_content, proposed_title, proposed_content)
+      values (${runId}, ${userA}, ${documentId}, 'complete', 'Revise', 1, 'Before', 'original', 'After', 'revised')`);
+    await expect(asUser(userA, tx => tx`select public.commit_workbench_version(${documentId}::uuid, 1, null, ${runId}::uuid, 'After', 'tampered')`)).rejects.toMatchObject({ code: "22023" });
+    const [result] = await asUser(userA, tx => tx`select public.commit_workbench_version(${documentId}::uuid, 1, null, ${runId}::uuid, 'After', 'revised') as result`);
+    expect(result.result.document).toMatchObject({ title: "After", content: "revised", revision: 2 });
+    expect(result.result.version).toMatchObject({ source: "ai", content: "revised", document_revision: 2, revision_run_id: runId });
+    const snapshots = await sql`select title, content, source from public.workbench_document_versions where document_id = ${documentId}`;
+    expect(snapshots).toEqual(expect.arrayContaining([{ title: "Before", content: "original", source: "manual" }, { title: "After", content: "revised", source: "ai" }]));
+    await expect(asUser(userA, tx => tx`select public.commit_workbench_version(${documentId}::uuid, 2, null, ${runId}::uuid, 'After', 'revised')`)).rejects.toMatchObject({ code: "PT409" });
+
+    const badRun = randomUUID();
+    // Simulate a provider proposal that violates the document constraint after the recovery snapshot.
+    await asUser(userA, tx => tx`update public.workbench_documents set content = 'unsnapshotted', revision = 3 where id = ${documentId}`);
+    const badTitle = 'x'.repeat(121);
+    await asUser(userA, tx => tx`insert into public.workbench_revision_runs
+      (id, user_id, document_id, status, instruction, base_revision, base_title, base_content, proposed_title, proposed_content)
+      values (${badRun}, ${userA}, ${documentId}, 'complete', 'Revise', 3, 'After', 'unsnapshotted', ${badTitle}, 'bad proposal')`);
+    await expect(asUser(userA, tx => tx`select public.commit_workbench_version(${documentId}::uuid, 3, null, ${badRun}::uuid, ${badTitle}, 'bad proposal')`)).rejects.toMatchObject({ code: "23514" });
+    const [unchanged] = await sql`select title, content, revision from public.workbench_documents where id = ${documentId}`;
+    expect(unchanged).toEqual({ title: "After", content: "unsnapshotted", revision: 3 });
+    const rolledBack = await sql`select id from public.workbench_document_versions where document_id = ${documentId} and content = 'unsnapshotted'`;
+    expect(rolledBack).toHaveLength(0);
+
+    await expect(asUser(userB, tx => tx`insert into public.workbench_document_versions
+      (user_id, document_id, source, title, content, document_revision, revision_run_id)
+      values (${userB}, ${documentId}, 'ai', 'Foreign', 'body', 1, ${runId})`)).rejects.toThrow();
+    await asUser(userA, tx => tx`delete from public.workbench_revision_runs where id = ${runId}`);
+    const [unlinked] = await sql`select revision_run_id from public.workbench_document_versions where document_id = ${documentId} and source = 'ai'`;
+    expect(unlinked.revision_run_id).toBeNull();
+    await asUser(userA, tx => tx`insert into public.workbench_document_versions
+      (user_id, document_id, source, title, content, document_revision, revision_run_id)
+      values (${userA}, ${documentId}, 'ai', 'After', 'unsnapshotted', 3, ${badRun})`);
+    await asUser(userA, tx => tx`delete from public.workbench_documents where id = ${documentId}`);
+    expect(await sql`select id from public.workbench_document_versions where document_id = ${documentId}`).toHaveLength(0);
+  });
+
 });
