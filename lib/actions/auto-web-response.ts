@@ -8,10 +8,11 @@ import { createReasoningStreamFilter } from "@/lib/ai/sanitize-model-output";
 import { ProviderStreamError, readOpenAiSse } from "@/lib/ai/sse";
 import type { ChatModel } from "@/lib/chat/validation";
 import { stopPollMs, stoppedPlaceholder } from "@/lib/chat/stop";
+import { createGenerationPersistence } from "@/lib/chat/orchestration/persist-result";
 import { attachWebCitationHandles } from "@/lib/citations/attach";
 import { citationSourcesIncludedInContext } from "@/lib/citations/included";
 import { createCitationStreamFilter } from "@/lib/citations/parse";
-import { citationViewsFromPrepared, persistMessageSources } from "@/lib/citations/persist";
+import { citationViewsFromPrepared } from "@/lib/citations/persist";
 import { citationInstructionFor } from "@/lib/citations/prepare";
 import type { SourceReference } from "@/lib/citations/types";
 import { buildContext } from "@/lib/context/build-context";
@@ -190,58 +191,16 @@ async function createAutoActionChatResponse(input: ResolvedActionChat): Promise<
     stopCheck ??= checkStopped();
   }, stopPollMs);
 
-  const replyStopped = async () => {
-    const { data, error } = await supabase.from("messages").select("status").eq("id", assistant.id).maybeSingle();
-    return !error && data?.status === "interrupted";
-  };
-
   let citationSources: SourceReference[] = [];
   let citationViews: ReturnType<typeof citationViewsFromPrepared> = [];
-  let citationSourcesPersisted = false;
-  const persistCitationSourcesForKeptReply = async (keptContent: string) => {
-    if (citationSourcesPersisted || !citationSources.length) return;
-    if (!keptContent.trim() || keptContent === stoppedPlaceholder) return;
-    citationSourcesPersisted = true;
-    const savedSources = await persistMessageSources({
-      supabase,
-      userId,
-      conversationId,
-      messageId: assistant.id,
-      sources: citationSources,
-    });
-    if (!savedSources.ok) {
-      citationSourcesPersisted = false;
-      logWarn("citation.sources.persist_failed", { requestId, sourceCount: citationSources.length });
-    }
-  };
-
-  const persist = async (
-    content: string,
-    status: "complete" | "interrupted" | "error",
-  ): Promise<"saved" | "stopped" | "failed"> => {
-    try {
-      const { data, error } = await supabase
-        .from("messages")
-        .update({ content, status })
-        .eq("id", assistant.id)
-        .eq("status", "streaming")
-        .select("id")
-        .maybeSingle();
-      if (!error && data) {
-        if (status === "complete" || status === "interrupted") {
-          await persistCitationSourcesForKeptReply(content);
-        }
-        return "saved";
-      }
-      if (!error && (await replyStopped())) {
-        await persistCitationSourcesForKeptReply(content);
-        return "stopped";
-      }
-      return "failed";
-    } catch {
-      return "failed";
-    }
-  };
+  const { persist, persistCitationSourcesForKeptReply } = createGenerationPersistence({
+    supabase,
+    userId,
+    conversationId,
+    assistantId: assistant.id,
+    requestId,
+    citationSources: () => citationSources,
+  });
 
   const releaseReservation = async () => {
     await releaseUsageHold({ supabase, userId, generationId: assistant.id, requestId, logicalMode: mode });

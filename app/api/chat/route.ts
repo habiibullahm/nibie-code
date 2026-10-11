@@ -12,10 +12,11 @@ import { createReasoningStreamFilter, sanitizeModelOutput } from "@/lib/ai/sanit
 import { ProviderStreamError, readOpenAiSse } from "@/lib/ai/sse";
 import { citationSourcesIncludedInContext } from "@/lib/citations/included";
 import { createCitationStreamFilter } from "@/lib/citations/parse";
-import { citationViewsFromPrepared, persistMessageSources } from "@/lib/citations/persist";
+import { citationViewsFromPrepared } from "@/lib/citations/persist";
 import { citationInstructionFor } from "@/lib/citations/prepare";
 import type { SourceReference } from "@/lib/citations/types";
 import { stopPollMs, stoppedPlaceholder } from "@/lib/chat/stop";
+import { createGenerationPersistence } from "@/lib/chat/orchestration/persist-result";
 import { buildContext } from "@/lib/context/build-context";
 import { CONTEXT_POLICY_VERSION } from "@/lib/context/context-policy";
 import type { FileContextInput } from "@/lib/context/context-types";
@@ -421,49 +422,17 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   let citationViews: ReturnType<typeof citationViewsFromPrepared> = [];
   const webVerificationUnavailable = false;
 
-  // Every save of this generation only applies while its row is still streaming. An explicit Stop has already written the
-  // text the user saw and marked the row interrupted, so a late finish, error or disconnect save can never replace it.
-  const replyStopped = async () => {
-    const { data, error } = await supabase.from("messages").select("status").eq("id", assistant.id).maybeSingle();
-    return !error && data?.status === "interrupted";
-  };
-  // Citations are advertised on SSE start; if Stop wins the content write, still attach message_sources so reload
-  // keeps Sources alongside any [n] markers in the kept partial. Once-only: Stop + generation race must not double-insert.
-  let citationSourcesPersisted = false;
-  const persistCitationSourcesForKeptReply = async (keptContent: string) => {
-    if (citationSourcesPersisted || !citationSources.length) return;
-    if (!keptContent.trim() || keptContent === stoppedPlaceholder) return;
-    citationSourcesPersisted = true;
-    const savedSources = await persistMessageSources({
-      supabase,
-      userId: user.id,
-      conversationId: conversation.id,
-      messageId: assistant.id,
-      sources: citationSources,
-    });
-    if (!savedSources.ok) {
-      citationSourcesPersisted = false;
-      logWarn("citation.sources.persist_failed", { requestId, sourceCount: citationSources.length });
-    }
-  };
-  const persist = async (content: string, status: "complete" | "interrupted" | "error"): Promise<"saved" | "stopped" | "failed"> => {
-    try {
-      const { data, error } = await supabase.from("messages").update({ content, status }).eq("id", assistant.id).eq("status", "streaming").select("id").maybeSingle();
-      if (!error && data) {
-        if (status === "complete" || status === "interrupted") {
-          await persistCitationSourcesForKeptReply(content);
-        }
-        return "saved";
-      }
-      if (!error && await replyStopped()) {
-        // Stop already saved the visible text; still persist Sources for that kept partial.
-        await persistCitationSourcesForKeptReply(content);
-        return "stopped";
-      }
-    } catch { /* reported below */ }
-    logError("chat.persistence.failed", { requestId, code: operationalCodes.assistantPersistFailed, stage: "persist", status });
-    return "failed";
-  };
+  const { persist, persistCitationSourcesForKeptReply } = createGenerationPersistence({
+    supabase,
+    userId: user.id,
+    conversationId: conversation.id,
+    assistantId: assistant.id,
+    requestId,
+    citationSources: () => citationSources,
+    onFailure: (status) => {
+      logError("chat.persistence.failed", { requestId, code: operationalCodes.assistantPersistFailed, stage: "persist", status });
+    },
+  });
   let prompt: ReturnType<typeof toProviderMessages> | undefined;
   let context: ReturnType<typeof buildContext>["diagnostics"] | undefined;
   try {
