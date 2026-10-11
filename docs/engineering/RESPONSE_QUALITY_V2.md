@@ -32,6 +32,12 @@ This is a **code-path diagnosis, not a real-model quality score**. At assessment
     "latencyMs": 1200,
     "outputTokens": 340,
     "contextTruncated": false,
+    "responseDepth": "balanced",
+    "fixtureFingerprint": "SHA-256 from fixtureFingerprint(loadCases().find(c => c.id === caseId))",
+    "historyFingerprint": "none",
+    "roomFingerprint": "none",
+    "filesFingerprint": "none",
+    "toolsFingerprint": "none",
     "response": "Actual redacted output from the model",
     "reviewer": "reviewer-id",
     "reviewNotes": "Checkable references to answer mechanics, known caveats and missing facts",
@@ -51,6 +57,52 @@ This is a **code-path diagnosis, not a real-model quality score**. At assessment
 4. Score with \`npm run eval:response-quality -- --baseline private-before.json --after private-after.json --out private-report.md\`. The scorer consumes **actual, saved response text**, requires \`sourceFidelity: "human_reviewed"\` plus reviewer ratings for the case's relevant rubric dimensions, and reports *matched* before/after only. It never invokes an LLM, never inspects hidden reasoning, and never estimates quality by response length. Missing input fails BLOCKED rather than inventing scores.
 5. Rubric per dimension: 0 absent/incorrect, 1 partial or weak, 2 accurate/useful. Evaluate factual accuracy, task completeness, public why/how rationale, helpful example, conversation continuity, meaningful tradeoffs, grounding/citations, and requested brevity. Reviewers must fact-check security, factual claims and all stated external sources. A response may be verbose and score poorly.
 6. Acceptance: at least 80% **on comparable reviewed cases**, **strict positive improvement vs baseline** (identical scores are FAIL), **hard non-regression on accuracy/completeness**, **minimum coverage of 5 comparable pairs per mode and 15 total**, **category floors** (technical, debugging, architecture, follow-up, grounding) and **both Indonesian and English**, zero critical factual/security issues, zero explicit brevity failures or regressions, matched model/provider/effort/truncation/`finishReason`/responseDepth/fixture/context fingerprints, complete finishes only (`stop`; `length`/error excluded from fair pairs), and human-reviewed source fidelity on every run. One comparable pair is not enough for PASS. Do not call the PR release-ready while real-model output validation is BLOCKED.
+
+### October 12 offline audit and next real-output package
+
+The scorer previously treated missing context fingerprints as empty strings and
+missing response depth as Default. Both sides could therefore qualify for PASS
+without evidence that their inputs matched. Configuration fields separated by
+`|` could also collide. The scorer now requires explicit provenance, checks the
+fixture-content digest, and compares structured configuration fields. These
+are evaluation-integrity fixes; they do not prove better generated answers.
+
+Generate the current fixture digests without network or credentials:
+
+```sh
+node --input-type=module -e 'import {loadCases, fixtureFingerprint} from "./scripts/response-quality-eval.mjs"; console.log(JSON.stringify(loadCases().map(c => ({caseId:c.id, fixtureFingerprint:fixtureFingerprint(c)})), null, 2))'
+```
+
+For every real run, record the *effective* context supplied to that request.
+Use SHA-256 digests for history (including the applied summary and its coverage),
+Room instructions/brief/Pins, files/attachments, and tools/Web/Memory evidence.
+Use `none` only when that category is known to be absent; unknown or failed
+capture is BLOCKED. Do not copy `none` from the example into a populated case.
+Retain the redacted inputs privately so another reviewer can reproduce them.
+The fixture digest covers the complete committed case object, including its
+prompt, dimensions, and synthetic history/context; a reused id does not prove
+the same fixture. Missing saved depth must be captured rather than inferred.
+
+Before any paid evaluation, freeze this separate run manifest privately:
+
+| Required record | Gate |
+| --- | --- |
+| Baseline and candidate full commit SHAs; exact Preview deployment SHAs | BLOCKED until both deployments and signed-in test access are verified |
+| Actual model/provider ids, route overrides, supported reasoning parameters, output accounting, image/tool support where relevant | BLOCKED until verified for each effective gateway route; registry defaults are configuration, not capability proof |
+| Dated provider/gateway price basis, currency, cached/input/output and reasoning billing semantics | BLOCKED until verified; do not infer prices from weekly credits |
+| Written budget authorization and enforceable hard aggregate spend cap, including capability probes, summaries and retries | BLOCKED; credentials alone never authorize spend; no executor is added by this package |
+| Selected case/mode pairs and maximum requests; retry policy | At least 5 comparable pairs/mode and 15 total; a minimum run is 30 successful baseline/candidate calls, plus separately capped probes/retries/maintenance |
+| Independent human reviewer identity, factual source checks, ratings and review notes | BLOCKED until a human reviews the actual redacted outputs; an agent or synthetic scorer fixture cannot satisfy this gate |
+
+The configured code routes remain Fast = Sumopod/DeepSeek V4.1 Flash,
+Balanced = OpenAI/GPT-6 Luna, High = OpenAI/GPT-6.1 Sol (server overrides may
+change them). Fast has 8,192 configured output tokens; Balanced retains provider
+default effort unless configured and High defaults to high. All three retain
+the 16,384/2,048 application allocation policy. Active provider capabilities,
+pricing, measured latency/cost, and live answer scores remain **UNVERIFIED /
+BLOCKED**. Run the existing offline scorer only after authorized captures and
+human ratings exist. Do not run synthetic test records through the CLI and
+present their arithmetic PASS as Issue #80 acceptance.
 
 ## Verification and exclusions
 
