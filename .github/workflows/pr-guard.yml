@@ -84,6 +84,50 @@ jobs:
       - name: Release consistency check
         run: npm run release:check
 
+  backend-packages:
+    name: Fastify and contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: branch-policy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            packages/contracts/package-lock.json
+            apps/api/package-lock.json
+
+      # The API's file dependency exports contracts/dist. Build it before the
+      # API install so clean checkouts do not depend on a developer's artifacts.
+      - name: Install contracts
+        run: npm ci
+        working-directory: packages/contracts
+
+      - name: Typecheck contracts
+        run: npm run typecheck
+        working-directory: packages/contracts
+
+      - name: Build contracts
+        run: npm run build
+        working-directory: packages/contracts
+
+      - name: Install API
+        run: npm ci
+        working-directory: apps/api
+
+      - name: Typecheck API
+        run: npm run typecheck
+        working-directory: apps/api
+
+      - name: Test API and shared contracts
+        run: npm test
+        working-directory: apps/api
+
   # Local Docker only — does NOT migrate the Vercel Preview / production Supabase DB.
   # Shared app DB migrations for Preview: .github/workflows/preview-app-db-migration.yml
   integration-db:

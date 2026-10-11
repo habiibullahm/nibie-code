@@ -1,6 +1,10 @@
 # BACKEND V2 — Nibie
 
-Status: architecture and scope. This document records the decision that Fastify becomes Nibie's dedicated backend. It does not implement that backend.
+Status, October 11, 2026: Fastify foundation, preference and account routes are
+implemented beside the production Next.js app. Production traffic remains on
+Next.js; no hosting or domain cutover is authorized by this document. The later
+migration sequence below remains a proposal requiring measured operational
+benefit, auth/session parity, hosting and a rehearsed routing rollback.
 
 The archived starter note [`docs/archive/starter/ARCHITECTURE.md`](../archive/starter/ARCHITECTURE.md) locked the backend as Next.js on 2026-09-30. Production still runs that Next.js app. What V1 ships is [docs/product/V1_RELEASE.md](../product/V1_RELEASE.md). This document does not move production traffic to Fastify.
 
@@ -27,7 +31,26 @@ The first milestone is a foundation beside the current app. It adds no productio
 
 ## 2. Current architecture
 
-Nibie is one npm package, `nibie-code`. Next.js 16 App Router and React 19 are both the UI and the backend. There is no workspaces file, no Turbo config, and no Fastify dependency.
+The root `nibie-code` package uses Next.js 16 App Router and React 19 for the
+production UI and backend. `apps/api` is an independent Fastify 5 package;
+`packages/contracts` is its built local dependency. Each uses its own lockfile;
+there is no npm-workspaces or Turbo migration.
+
+Implemented Fastify routes are `/health`, `/v1/health`, GET/PATCH
+`/v1/preferences`, GET `/v1/account/export`, POST
+`/v1/account/conversations/delete-all`, and POST `/v1/auth/sign-out`. They use
+verified caller claims and owner-scoped Supabase access. Conversation CRUD and
+chat SSE remain Next.js responsibilities. The package CI job validates these
+routes using mocked authentication and `inject()`, without hosted credentials.
+
+Ordinary chat and automatic Web/GitHub Actions share persistence,
+cancellation/usage coordination and provider-stream consumption under
+`lib/chat/orchestration/`. The route retains authentication, claim, context and
+usage gates; Actions retain tool authorization/execution. Deep Research retains
+specialized orchestration. Workspace streaming/recovery/navigation/Room state
+has focused hook owners; view state and cross-domain transactions stay in
+`ChatWorkspace`. See [delivery status](../engineering/ARCHITECTURE_CLOSEOUT.md).
+
 
 ```text
 Browser
@@ -326,7 +349,7 @@ The API schema does not include `DATABASE_URL`, `AI_PROVIDER`, `AI_BASE_URL`, `A
 
 Missing required variables, an invalid URL, or a service-role publishable key throw during env plugin setup. The process does not listen.
 
-`.env.example` gains commented API names when the foundation is implemented. This document does not change that file.
+`.env.example` gains commented API names for the implemented foundation. The commented API names are already present in that file.
 
 ## 15. SSE strategy
 
@@ -368,6 +391,28 @@ Fastify is a long-running Node process because the last migration is an unbuffer
 The foundation does not add a Vercel rewrite, a DNS name, or a public URL. Production traffic stays on Next.js route handlers and server actions.
 
 ## 17. Testing strategy using Fastify inject()
+
+PR Guard also runs a separate **Fastify and contracts** check on every PR to
+`main` or `release/**`. It installs and typechecks `packages/contracts`, builds
+its exported `dist` files, then installs, typechecks, and tests `apps/api` using
+each package's own lockfile. Building contracts before the API install makes the
+local file dependency work from a clean checkout. These checks use mocked
+authentication and `inject()`; no hosted credentials or database are required.
+
+Add **Fastify and contracts** to the protected branch's required checks after
+its first successful hosted run. Root checks alone do not validate these two
+independent packages.
+
+Run the same package checks locally:
+
+```sh
+npm ci --prefix packages/contracts
+npm run typecheck --prefix packages/contracts
+npm run build --prefix packages/contracts
+npm ci --prefix apps/api
+npm run typecheck --prefix apps/api
+npm test --prefix apps/api
+```
 
 `apps/api` has its own Vitest config. Tests call `buildApp()` and `app.inject()`. They do not bind a port. Root `npm test`, `npm run test:integration`, and Playwright stay as they are and do not import Fastify.
 
@@ -446,7 +491,7 @@ These hold for the foundation and for every later milestone.
 
 ## 22. Definition of done for Backend V2 Foundation
 
-The foundation is done when all of the following are true. Writing this document is the scope step. The items below are the later implementation bar.
+The foundation is done when all of the following are true. The implementation satisfies the package foundation; production cutover remains outside this milestone.
 
 - `apps/api` is an independent Fastify 5 + TypeScript package. `packages/contracts` exports the health and error schemas.
 - The process boots only with a valid `SUPABASE_URL` and a non-service-role `SUPABASE_PUBLISHABLE_KEY`.
@@ -463,7 +508,7 @@ The foundation is done when all of the following are true. Writing this document
 
 ## Repository inventory
 
-Reviewed against the tree at the time of this document. The foundation milestone adds the files in the first two lists only when it is implemented. This document is the only file added by the scope step.
+Reviewed against the tree at the time of this document. The inventory originated in the scope proposal. Foundation and preference/account files now exist; use the current repository tree and route list above as the implementation authority.
 
 ### Added by this document
 
@@ -567,10 +612,18 @@ These stay Next.js responsibilities:
 
 `lib/auth/get-user.ts` stays with Next.js while Next.js still verifies sessions. The Fastify auth plugin follows the same `getClaims` rules. The file is removed only when Next.js no longer verifies tokens itself.
 
-### Chat context allocation (Chat Intelligence V3 candidate)
+### Chat context allocation (current policy)
 
 The shared `lib/context/build-context.ts` serves ordinary chat, automatic Web/GitHub Actions, and Deep Research. Allocation keeps the core policy and current request, then the protected recent suffix, then a valid existing thread summary (at most 800 estimated tokens), then optional profile/Room/pins/files/attachments/web/Recall and remaining older history. This allocation order does not change source authority: the current request still overrides stale memories and summaries, and all supplied context remains untrusted.
 
 Raw history stops at the first message that cannot fit, including across the protected/older boundary. Older turns are never reintroduced across that gap. The 32-message selection limit is unchanged; messages discarded at that limit count as truncation unless an included summary covers them. No query, summary generation, provider route, reasoning setting, output ceiling, or spend guard is added or changed.
 
 See [Chat Intelligence V3 evaluation](../engineering/CHAT_INTELLIGENCE_V3.md) for reproduced failures, offline measurements, trade-offs, and blocked live validation.
+
+
+The architecture budget experiment retains the current 16,384/2,048 policy;
+see [measured allocation and decision](../engineering/CONTEXT_BUDGET_DECISION.md).
+These ceilings are not verified provider windows or actual output limits.
+Workbench V2 code remains behind `WORKBENCH_UI_ENABLED=false`; history/export
+PR #102 and migration `0028` remain separate, deferred product work. Preview
+Supabase isolation is excluded from this delivery at the user's request.
