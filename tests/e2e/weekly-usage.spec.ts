@@ -14,7 +14,10 @@ test("keeps weekly usage in Usage & Plan settings and the picker shows safe mode
 
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   const settings = dialog(page);
-  if (await settings.getByRole("combobox", { name: "Settings section" }).isVisible()) await settings.getByRole("combobox", { name: "Settings section" }).selectOption("usage");
+  if (await settings.getByRole("button", { name: /^Settings section:/ }).isVisible()) {
+    await settings.getByRole("button", { name: /^Settings section:/ }).click();
+    await settings.getByRole("navigation", { name: "Section", exact: true }).getByRole("button", { name: "Usage & Plan", exact: true }).click();
+  }
   else await settings.getByRole("tab", { name: "Usage & Plan" }).click();
   await expect(settings.getByRole("heading", { name: "Usage & Plan" })).toBeVisible();
   await expect(settings.getByText("Free usage resets weekly. There’s no paid plan or billing yet.")).toBeVisible();
@@ -28,7 +31,10 @@ test("weekly usage settings fit a mobile viewport without horizontal overflow", 
   await page.getByRole("button", { name: "Open conversation menu" }).click();
   await page.locator(".mobile-sidebar").getByRole("button", { name: "Settings", exact: true }).click();
   const settings = dialog(page);
-  if (await settings.getByRole("combobox", { name: "Settings section" }).isVisible()) await settings.getByRole("combobox", { name: "Settings section" }).selectOption("usage");
+  if (await settings.getByRole("button", { name: /^Settings section:/ }).isVisible()) {
+    await settings.getByRole("button", { name: /^Settings section:/ }).click();
+    await settings.getByRole("navigation", { name: "Section", exact: true }).getByRole("button", { name: "Usage & Plan", exact: true }).click();
+  }
   else await settings.getByRole("tab", { name: "Usage & Plan" }).click();
   await expect(settings.getByRole("heading", { name: "Usage & Plan" })).toBeVisible();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);

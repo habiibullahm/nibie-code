@@ -6,7 +6,10 @@ const transcript = (page: Page, text: string) => page.locator(".message-list").g
 async function openChatSettings(page: Page, opener = page.getByRole("button", { name: "Settings" })) {
   await opener.click();
   const dialog = page.getByRole("dialog", { name: "Settings" });
-  if (await dialog.getByRole("combobox", { name: "Settings section" }).isVisible()) await dialog.getByRole("combobox", { name: "Settings section" }).selectOption("chat");
+  if (await dialog.getByRole("button", { name: /^Settings section:/ }).isVisible()) {
+    await dialog.getByRole("button", { name: /^Settings section:/ }).click();
+    await dialog.getByRole("navigation", { name: "Section", exact: true }).getByRole("button", { name: "Chat", exact: true }).click();
+  }
   else await dialog.getByRole("tab", { name: "Chat" }).click();
   return dialog;
 }

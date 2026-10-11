@@ -10,11 +10,16 @@ import type { ChatPreferenceFlag } from "@/lib/chat/preferences";
 import { chatModelToPreferenceModel, preferenceModelToChatModel, resolveDefaultModel } from "@/lib/preferences/model";
 import { aboutYouLimit, preferredNameLimit, type PreferencePatch, type UserPreferences } from "@/lib/preferences/types";
 
+export type PersonalizationDrafts = Partial<Record<"preferredName" | "aboutYou", string>>;
+
 export type SettingsSectionProps = {
   preferences: UserPreferences;
   models: ModelOption[];
   email?: string;
   disabled: boolean;
+  saving: boolean;
+  drafts: PersonalizationDrafts;
+  onDraftChange: (field: keyof PersonalizationDrafts, value: string) => void;
   preview?: boolean;
   busy?: boolean;
   onChange: (patch: PreferencePatch) => void;
@@ -40,9 +45,9 @@ const styleOptions = [
   { value: "direct", label: "Direct" },
 ] as const;
 
-export function GeneralSettingsSection({ preferences, disabled, onChange }: SettingsSectionProps) {
+export function GeneralSettingsSection({ preferences, disabled, saving, onChange }: SettingsSectionProps) {
   return <SettingsSection title="General" description="Appearance on this device and the language Nibie should prefer.">
-    <SettingsChoice label="Preferred language" hint="Auto follows the language you are using. English and Bahasa Indonesia are saved on your account." value={preferences.preferredLanguage} options={[...languageOptions]} disabled={disabled} onChange={(preferredLanguage) => onChange({ preferredLanguage })} />
+    <SettingsChoice label="Preferred language" hint="Auto follows the language you are using. English and Bahasa Indonesia are saved on your account." value={preferences.preferredLanguage} options={[...languageOptions]} disabled={disabled} pending={saving} onChange={(preferredLanguage) => onChange({ preferredLanguage })} />
     <div className="settings-theme">
       <div className="settings-theme-label">Theme</div>
       <p>Dark, light, or match this device. Stored on this device.</p>
@@ -51,7 +56,7 @@ export function GeneralSettingsSection({ preferences, disabled, onChange }: Sett
   </SettingsSection>;
 }
 
-export function AISettingsSection({ preferences, models, disabled, onChange }: SettingsSectionProps) {
+export function AISettingsSection({ preferences, models, disabled, saving, onChange }: SettingsSectionProps) {
   const available = models.map((option) => option.id);
   const options = models.map((option) => ({ value: chatModelToPreferenceModel[option.id], label: modelPickerCopy[option.id].label }));
   const storedMode = preferenceModelToChatModel[preferences.defaultModel];
@@ -61,9 +66,9 @@ export function AISettingsSection({ preferences, models, disabled, onChange }: S
     ? "Used for new chats and new Room threads. Existing conversations keep their own model; you can change it in the composer."
     : `${modelPickerCopy[storedMode].label} isn't available, so new chats use ${modelPickerCopy[fallback].label}. Conversations you already have keep their own model.`;
   return <SettingsSection title="AI & Models" description="Defaults for new conversations. They do not change a chat you already started.">
-    <SettingsChoice label="Default model" hint={hint} value={preferences.defaultModel} options={options} disabled={disabled || options.length === 0} onChange={(defaultModel) => onChange({ defaultModel })} />
-    <SettingsChoice label="Response depth" hint="Default fully answers the task without padding. A request in your message, like “in one sentence”, still wins." value={preferences.responseLength} options={[...depthOptions]} disabled={disabled} onChange={(responseLength) => onChange({ responseLength })} />
-    <SettingsChoice label="Response style" value={preferences.responseStyle} options={[...styleOptions]} disabled={disabled} onChange={(responseStyle) => onChange({ responseStyle })} />
+    <SettingsChoice label="Default model" hint={hint} value={preferences.defaultModel} options={options} disabled={disabled || options.length === 0} pending={saving} onChange={(defaultModel) => onChange({ defaultModel })} />
+    <SettingsChoice label="Response depth" hint="Default fully answers the task without padding. A request in your message, like “in one sentence”, still wins." value={preferences.responseLength} options={[...depthOptions]} disabled={disabled} pending={saving} onChange={(responseLength) => onChange({ responseLength })} />
+    <SettingsChoice label="Response style" value={preferences.responseStyle} options={[...styleOptions]} disabled={disabled} pending={saving} onChange={(responseStyle) => onChange({ responseStyle })} />
   </SettingsSection>;
 }
 
@@ -85,10 +90,10 @@ export function ChatSettingsSection() {
   </SettingsSection>;
 }
 
-export function PersonalizationSettingsSection({ preferences, email = "", disabled, onChange }: SettingsSectionProps) {
+export function PersonalizationSettingsSection({ preferences, email = "", disabled, saving, drafts, onDraftChange, onChange }: SettingsSectionProps) {
   return <SettingsSection title="Personalization" description="Optional details to tailor responses. Save each field when you’re ready.">
-    <SettingsTextField id="preferred-name" label="Preferred name" hint="Leave blank to use the name from your sign-in." value={preferences.preferredName ?? ""} maxLength={preferredNameLimit} disabled={disabled} onCommit={(preferredName) => onChange({ preferredName })} />
-    <SettingsTextField id="about-you" label="About you" hint="Role, goals, or working context. Leave blank to clear it." value={preferences.aboutYou ?? ""} maxLength={aboutYouLimit} multiline disabled={disabled} onCommit={(aboutYou) => onChange({ aboutYou })} />
+    <SettingsTextField id="preferred-name" label="Preferred name" hint="Leave blank to use the name from your sign-in." value={preferences.preferredName ?? ""} maxLength={preferredNameLimit} disabled={disabled || saving} draft={drafts.preferredName ?? preferences.preferredName ?? ""} onDraftChange={(value) => onDraftChange("preferredName", value)} onCommit={(preferredName) => onChange({ preferredName })} />
+    <SettingsTextField id="about-you" label="About you" hint="Role, goals, or working context. Leave blank to clear it." value={preferences.aboutYou ?? ""} maxLength={aboutYouLimit} multiline disabled={disabled || saving} draft={drafts.aboutYou ?? preferences.aboutYou ?? ""} onDraftChange={(value) => onDraftChange("aboutYou", value)} onCommit={(aboutYou) => onChange({ aboutYou })} />
     <div className="settings-field"><div className="settings-theme-label">Email</div><p className="settings-note">{email}</p></div>
   </SettingsSection>;
 }

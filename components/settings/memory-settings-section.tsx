@@ -61,7 +61,8 @@ function MemoryRow({ memory, disabled, preview, onChanged }: {
   </div>;
 }
 
-export function MemorySettingsSection({ preferences, disabled, preview = false, onChange }: SettingsSectionProps) {
+export function MemorySettingsSection({ preferences, disabled: unavailable, saving, preview = false, onChange }: SettingsSectionProps) {
+  const disabled = unavailable || saving;
   const [memories, setMemories] = useState<MemoryRecord[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(!preview);
