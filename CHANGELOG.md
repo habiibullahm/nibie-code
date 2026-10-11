@@ -29,6 +29,7 @@ What's new in Nibie.
 
 ### Fixed
 
+- Workbench downloads preserve emoji in long document filenames instead of failing during export.
 - Settings keeps unsaved personalization drafts between sections, asks before discarding them, and preserves keyboard focus while choices save.
 - Switching threads with Back, Forward, or a chat URL releases the previous reply so a delayed stream cannot block the next conversation.
 - Web and GitHub replies keep consistent usage accounting if an error occurs after the response starts.
