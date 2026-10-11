@@ -77,16 +77,16 @@ A Vercel Preview is the staging environment for a pull request.
 
 Do not create a permanent staging branch just to obtain a staging deployment.
 
-Today, Vercel Preview and Production share the same Supabase project (`NEXT_PUBLIC_SUPABASE_URL` / `DATABASE_URL` on both targets). The GitHub check named **Supabase Preview** is skipped: this repo migrates with Drizzle under `drizzle/`, not `supabase/migrations`, and Supabase branching is not the source of truth.
+Preview migrations require a separate Supabase project. The repository cutover is prepared; hosted bindings must be configured and verified using [Preview environment isolation](PREVIEW_ENVIRONMENT_ISOLATION.md). The former shared-project setup is not an allowed fallback. The GitHub check named **Supabase Preview** is skipped: this repo migrates with Drizzle under `drizzle/`, not `supabase/migrations`, and Supabase branching is not the source of truth.
 
-When a PR adds or changes `drizzle/**`, the **Preview App DB Migration** workflow (`.github/workflows/preview-app-db-migration.yml`) can apply those additive migrations to the shared app database before merge so Preview can exercise new tables. It uses the same `POSTGRES_URL_NON_POOLING` secret and the same concurrency group as Production DB Migration. PR Guard’s **Integration DB + RLS** job only migrates a local Docker Postgres for tests — it does not touch the Preview app DB.
+When a PR adds or changes `drizzle/**`, **Preview App DB Migration** uses `PREVIEW_POSTGRES_URL_NON_POOLING` from the protected GitHub `preview` environment. It verifies distinct Preview/Production project refs and the actual connection target before connecting. Missing or mismatched configuration fails closed. Preview writes serialize under `preview-app-db-migration`. PR Guard’s **Integration DB + RLS** job only migrates a local Docker Postgres for tests — it does not touch the Preview app DB.
 
-Shared DB writes from that workflow are **not** silent. After reviewing the SQL, a reviewer must either add the PR label `allow-shared-db-migrate` or run the workflow via `workflow_dispatch`. The job also refuses non-additive SQL (DROP TABLE/COLUMN, TRUNCATE, DELETE FROM, etc.). Prefer enabling required reviewers on the GitHub `production` environment as a second gate. Long-term: give Preview its own database and stop PR writes to production.
+After SQL/target review, a reviewer must add `allow-preview-db-migrate` or run `workflow_dispatch`; require reviewers on the `preview` environment as well. The old shared-DB label is ignored. Non-additive SQL remains refused. Validate divergent migration branches separately or rebuild the disposable Preview project; the queue alone does not isolate branch schemas.
 
 Before merge:
 
 1. PR Guard must pass (including Integration DB + RLS when that job runs).
-2. When the PR touches `drizzle/**`, Preview App DB Migration must pass (additive check always; shared DB apply only after `allow-shared-db-migrate` or `workflow_dispatch`).
+2. When the PR touches `drizzle/**`, Preview App DB Migration must pass (additive check always; isolated Preview apply only after `allow-preview-db-migrate` or `workflow_dispatch` and environment review).
 3. Vercel Preview must build successfully.
 4. Smoke-test changed user flows on the Preview when UI/runtime behavior changed (`npm run test:qa:preview` for exact-HEAD acceptance).
 5. Run additional integration/E2E checks when the change requires them.
@@ -217,10 +217,10 @@ migration PASS
 Vercel production deploy
 ```
 
-- The workflow runs on every push to `main` and on manual dispatch. Runs queue with Preview App DB Migration under `shared-app-db-migration`; they never overlap or cancel.
+- The workflow runs on every push to `main` and on manual dispatch. Production retains `shared-app-db-migration` during cutover so any old shared-DB runs cannot overlap it. New isolated Preview runs have their own queue. Running migrations are never cancelled.
 - It reads `POSTGRES_URL_NON_POOLING` from the GitHub `production` environment and passes it to Drizzle as `DATABASE_URL`.
 - Vercel runs the default `npm run build` only. Its Deployment Checks require the `Production DB migration` check before promoting to production.
-- Migrations must stay additive and backward compatible: Preview may apply them before merge (shared DB), and the previous app version must keep serving until promotion.
+- Migrations must stay additive and backward compatible: Preview validates them on its separate project before merge, and the previous production app version must keep serving until promotion.
 
 Run heavier suites when relevant:
 

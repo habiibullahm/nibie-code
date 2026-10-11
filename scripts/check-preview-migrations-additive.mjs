@@ -1,21 +1,21 @@
 #!/usr/bin/env node
 /**
- * Gate for Preview App DB Migration against the shared production Postgres.
+ * Additive SQL gate for Preview App DB Migration.
  *
- * Prefer an isolated Preview database. Until then, refuse PR migrations that look
- * destructive so unreviewed DROP/TRUNCATE/DELETE cannot reach production.
+ * Keep PR migrations backward compatible even on an isolated Preview project.
+ * Database target validation is separate in check-preview-db-target.mjs.
  *
  * Compares drizzle/*.sql against origin/main when available; otherwise scans all
  * SQL files in the working tree.
  *
- * Shared DB *writes* are separately gated by PR label `allow-shared-db-migrate`
+ * Preview *writes* are separately gated by PR label `allow-preview-db-migrate`
  * or workflow_dispatch in preview-app-db-migration.yml.
  */
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-export const SHARED_DB_MIGRATE_LABEL = "allow-shared-db-migrate";
+export const PREVIEW_DB_MIGRATE_LABEL = "allow-preview-db-migrate";
 
 export const FORBIDDEN = [
   { name: "DROP TABLE", re: /\bdrop\s+table\b/i },
@@ -105,10 +105,10 @@ function main() {
   const root = process.cwd();
   const result = checkAdditiveMigrations(root);
   if (result.problems.length) {
-    console.error("::error::Preview migrations must be strictly additive against the shared app DB.");
+    console.error("::error::Preview migrations must be strictly additive.");
     for (const problem of result.problems) console.error(`::error::${problem}`);
     console.error(
-      "::error::Apply schema changes via the Production DB Migration workflow on main, or use an isolated Preview database.",
+      "::error::Review destructive schema changes separately; this Preview workflow permits additive changes only.",
     );
     process.exit(1);
   }

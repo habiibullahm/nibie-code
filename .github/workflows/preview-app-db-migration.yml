@@ -1,14 +1,9 @@
 name: Preview App DB Migration
 
-# INTERIM: Preview and Production Vercel targets share one Supabase/Postgres today.
-# Prefer an isolated Preview database. Until that exists, this job may apply only
-# strictly additive Drizzle migrations (gated below) under the `production`
-# environment — enable required reviewers on that environment as a second gate.
-#
-# Shared DB writes are NOT automatic on every PR synchronize. They require either:
-#   - PR label `allow-shared-db-migrate` (explicit approval after reviewing SQL), or
-#   - `workflow_dispatch` (manual run).
-# Without that, the job refuses to migrate (and fails when drizzle SQL changed).
+# Uses only the isolated Preview project and the protected `preview` environment.
+# Fails closed until Preview credentials and distinct project refs are configured.
+# See docs/engineering/PREVIEW_ENVIRONMENT_ISOLATION.md before enabling it.
+# Writes require `allow-preview-db-migrate` after SQL review, or workflow_dispatch.
 # Label presence is resolved via the Issues Labels API (not only the webhook
 # payload), because synchronize events can omit labels that are already on the PR.
 #
@@ -16,8 +11,7 @@ name: Preview App DB Migration
 # Not Supabase GitHub "Preview" branching (skipped here; migrations live in drizzle/).
 # Vercel must not run db:migrate in the build.
 #
-# Long-term: remove PR writes to production; apply schema only via
-# Production DB Migration on main once Preview has its own database.
+# Production schema is owned exclusively by Production DB Migration on main.
 
 on:
   pull_request:
@@ -28,6 +22,7 @@ on:
       - 'drizzle/**'
       - 'drizzle.config.ts'
       - 'scripts/check-preview-migrations-additive.mjs'
+      - 'scripts/check-preview-db-target.mjs'
       - '.github/workflows/preview-app-db-migration.yml'
     types: [opened, synchronize, reopened, ready_for_review, labeled]
   workflow_dispatch:
@@ -37,9 +32,9 @@ permissions:
   # Live label lookup on synchronize (event payload labels can be empty).
   pull-requests: read
 
-# Share the queue with Production DB Migration — never overlap or cancel mid-migrate.
+# Serialize branches writing to the Preview project; never cancel mid-migration.
 concurrency:
-  group: shared-app-db-migration
+  group: preview-app-db-migration
   cancel-in-progress: false
 
 jobs:
@@ -47,8 +42,8 @@ jobs:
     name: Preview app DB migration
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Holds POSTGRES_URL_NON_POOLING. Require reviewers on this environment.
-    environment: production
+    # Holds PREVIEW_POSTGRES_URL_NON_POOLING. Require reviewers on this environment.
+    environment: preview
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -66,10 +61,10 @@ jobs:
 
       - name: Refuse non-additive PR migrations
         run: |
-          git fetch --no-tags origin main 2>/dev/null || true
+          git fetch --no-tags origin main
           node scripts/check-preview-migrations-additive.mjs
 
-      - name: Decide whether to write to shared app DB
+      - name: Decide whether to write to Preview DB
         id: decide
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -80,25 +75,24 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          git fetch --no-tags origin main 2>/dev/null || true
-          CHANGED="$(git diff --name-only origin/main...HEAD -- 'drizzle/*.sql' || true)"
+          # Manual dispatch can bootstrap a new Preview from the reviewed main journal.
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "apply=true" >> "$GITHUB_OUTPUT"
+            echo "reason=workflow_dispatch" >> "$GITHUB_OUTPUT"
+            echo "Explicit workflow_dispatch — isolated Preview migrate allowed."
+            exit 0
+          fi
+          CHANGED="$(git diff --name-only origin/main...HEAD -- 'drizzle/*.sql')"
           if [[ -z "${CHANGED//[$' \t\r\n']/}" ]]; then
             echo "apply=false" >> "$GITHUB_OUTPUT"
             echo "reason=no_drizzle_sql_changes" >> "$GITHUB_OUTPUT"
-            echo "No new/changed drizzle SQL vs origin/main; skip shared DB write."
+            echo "No new/changed drizzle SQL vs origin/main; skip Preview DB write."
             exit 0
           fi
           echo "Changed SQL vs origin/main:"
           printf '%s\n' "$CHANGED"
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            echo "apply=true" >> "$GITHUB_OUTPUT"
-            echo "reason=workflow_dispatch" >> "$GITHUB_OUTPUT"
-            echo "Explicit workflow_dispatch — shared DB migrate allowed."
-            exit 0
-          fi
-
           # pull_request synchronize payloads sometimes omit labels even when the
-          # PR already has allow-shared-db-migrate (seen empty LABEL_CSV on 4c773d4).
+          # PR already has allow-preview-db-migrate.
           LABEL_CSV="${LABEL_CSV_EVENT:-}"
           if [[ -n "${PR_NUMBER:-}" ]]; then
             API_LABELS="$(gh api "repos/${GH_REPO}/issues/${PR_NUMBER}/labels" --paginate --jq '.[].name' 2>/dev/null | paste -sd, - || true)"
@@ -110,42 +104,31 @@ jobs:
             fi
           fi
 
-          if [[ ",${LABEL_CSV}," == *",allow-shared-db-migrate,"* ]]; then
+          if [[ ",${LABEL_CSV}," == *",allow-preview-db-migrate,"* ]]; then
             echo "apply=true" >> "$GITHUB_OUTPUT"
             echo "reason=pr_label" >> "$GITHUB_OUTPUT"
-            echo "PR label allow-shared-db-migrate present — shared DB migrate allowed."
+            echo "PR label allow-preview-db-migrate present — isolated Preview migrate allowed."
             exit 0
           fi
           echo "apply=false" >> "$GITHUB_OUTPUT"
           echo "reason=missing_label" >> "$GITHUB_OUTPUT"
-          echo "::error::Shared app DB migrate refused without explicit approval."
-          echo "::error::Review the drizzle SQL, then add label allow-shared-db-migrate (re-runs this workflow) or run workflow_dispatch."
-          echo "::error::Do not rely on silent PR CI writes; Production environment required reviewers should also stay enabled."
+          echo "::error::Preview DB migrate refused without explicit approval."
+          echo "::error::Review the drizzle SQL, then add label allow-preview-db-migrate (re-runs this workflow) or run workflow_dispatch."
+          echo "::error::The preview environment must also require reviewers; production fallback is forbidden."
           exit 1
 
-      - name: Check migration connection
+      - name: Verify isolated Preview migration target
         if: steps.decide.outputs.apply == 'true'
         env:
-          POSTGRES_URL_NON_POOLING: ${{ secrets.POSTGRES_URL_NON_POOLING }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [[ -z "$POSTGRES_URL_NON_POOLING" ]]; then
-            echo "::error::Secret POSTGRES_URL_NON_POOLING is not set on the 'production' environment."
-            echo "::error::Preview Vercel uses the shared app DB; this workflow cannot apply PR migrations without it."
-            exit 1
-          fi
-
-          if [[ "$POSTGRES_URL_NON_POOLING" == *":6543"* ]]; then
-            echo "::error::POSTGRES_URL_NON_POOLING points at a pooled port (6543). Use the direct or session-mode connection."
-            exit 1
-          fi
+          PREVIEW_DATABASE_URL: ${{ secrets.PREVIEW_POSTGRES_URL_NON_POOLING }}
+          PREVIEW_SUPABASE_PROJECT_REF: ${{ vars.PREVIEW_SUPABASE_PROJECT_REF }}
+          PRODUCTION_SUPABASE_PROJECT_REF: ${{ vars.PRODUCTION_SUPABASE_PROJECT_REF }}
+        run: node scripts/check-preview-db-target.mjs
 
       - name: Probe database connection
         if: steps.decide.outputs.apply == 'true'
         env:
-          DATABASE_URL: ${{ secrets.POSTGRES_URL_NON_POOLING }}
+          DATABASE_URL: ${{ secrets.PREVIEW_POSTGRES_URL_NON_POOLING }}
         run: |
           node --input-type=module -e '
             import postgres from "postgres";
@@ -167,13 +150,13 @@ jobs:
       - name: Apply migrations
         if: steps.decide.outputs.apply == 'true'
         env:
-          DATABASE_URL: ${{ secrets.POSTGRES_URL_NON_POOLING }}
+          DATABASE_URL: ${{ secrets.PREVIEW_POSTGRES_URL_NON_POOLING }}
         run: npm run db:migrate
 
       - name: Verify action_runs and server write RPCs when journal includes them
         if: steps.decide.outputs.apply == 'true'
         env:
-          DATABASE_URL: ${{ secrets.POSTGRES_URL_NON_POOLING }}
+          DATABASE_URL: ${{ secrets.PREVIEW_POSTGRES_URL_NON_POOLING }}
         run: |
           node --input-type=module -e '
             import { readFileSync, existsSync } from "node:fs";

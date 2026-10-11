@@ -3,14 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  SHARED_DB_MIGRATE_LABEL,
+  PREVIEW_DB_MIGRATE_LABEL,
   checkAdditiveMigrations,
   findForbiddenPatterns,
 } from "../../scripts/check-preview-migrations-additive.mjs";
 
-describe("preview shared-DB migration additive gate", () => {
+describe("preview migration additive gate", () => {
   it("exports the explicit-approval label used by Preview App DB Migration", () => {
-    expect(SHARED_DB_MIGRATE_LABEL).toBe("allow-shared-db-migrate");
+    expect(PREVIEW_DB_MIGRATE_LABEL).toBe("allow-preview-db-migrate");
   });
 
   it("accepts additive create/alter patterns", () => {
@@ -22,7 +22,7 @@ describe("preview shared-DB migration additive gate", () => {
     expect(findForbiddenPatterns(sql)).toEqual([]);
   });
 
-  it("flags destructive patterns that must not hit the shared app DB from PR CI", () => {
+  it("flags destructive patterns excluded from Preview PR migrations", () => {
     expect(findForbiddenPatterns("DROP TABLE public.widgets;")).toContain("DROP TABLE");
     expect(findForbiddenPatterns("ALTER TABLE t DROP COLUMN x;")).toContain("DROP COLUMN");
     expect(findForbiddenPatterns("TRUNCATE public.widgets;")).toContain("TRUNCATE");
