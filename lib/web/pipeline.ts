@@ -115,9 +115,9 @@ export async function runWebSearchPipeline(
       return {
         ok: true,
         source: {
-          url: result.url,
+          url: page.finalUrl,
           title: result.title || page.finalUrl,
-          domain: result.domain,
+          domain: new URL(page.finalUrl).hostname,
           retrieval: "web_search",
           publishedAt: result.publishedAt ?? null,
           text,

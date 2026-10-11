@@ -1,34 +1,42 @@
 # Nibie V1 release
 
-Status: release notes for the integrated `feature/staging-v1` candidate. Do not deploy from this document alone; follow the sequence below after a backup.
+Status: implemented scope on `main` at `88bd23b` (2026-10-10). This is a code inventory, not completed beta or real-model acceptance. See [Chat V1 beta acceptance](../engineering/CHAT_V1_BETA_ACCEPTANCE.md) for the outstanding quality and user-journey gates. Release through reviewed PRs to `main` using the [branching strategy](../engineering/BRANCHING_STRATEGY.md) and [release checklist](../releases/V1_RELEASE_CHECKLIST.md).
 
 ## V1 feature set
 
-Ships:
+Implemented in this main baseline:
 
 - Public landing, docs, and privacy pages, with Open Graph metadata when `NEXT_PUBLIC_APP_URL` is set
 - Email sign-in and sign-up, Google sign-in, auth callback, and sign-out everywhere
 - Chat: new chat, streaming, Stop, Retry, Regenerate, edit and resend of the latest user message, the Fast / Balanced / High mode picker, refresh, and conversation restore
 - Archive and restore for conversations
-- Context Engine: explicit profile, Room instructions and Room Brief, room Pins, explicitly selected room-file text, and recent messages. The thread-summary slot stays empty. Pin and file text are untrusted data and cannot override the current request
+- Context Engine: profile, Room instructions/Brief/Pins, authorized file excerpts and attachments, relevant explicit Memory, web evidence, recent messages, and background thread summaries. Summaries and uncovered recent history receive space before large excerpts; stale summaries are omitted across missing newer corrections. External and saved context cannot override the current request
 - Rooms: create, rename, instructions, editable brief, new thread, move thread, delete Room. Deleting a Room detaches its threads; it does not delete them
 - Pins: create, edit, and delete inside a Room. A general thread does not receive that Room's pins
-- Files: owner-scoped plain-text, Markdown, and CSV files on a Room, used only when the sender explicitly selects them. No embeddings, OCR, or retrieval
-- Workbench: create, edit, save, refresh, and delete an owner document. A document may have no Room. Deleting a Room detaches the document. A finished assistant reply can be opened as a document
-- Settings: General, Nibie, Chat, Personalization, Data & Privacy
+- Files: owner-scoped Room text, Markdown, CSV, JSON, source code, text-based PDF, and DOCX files (5 MB per file); explicit selection and automatic Room-scoped lexical/hybrid retrieval. Semantic retrieval is optional when embeddings are configured. No OCR
+- Chat attachments: up to three supported text/source/PDF files, 10 MB each and 20 MB total, direct storage upload, text extraction, truncation indicators, and owner download
+- Memory: explicit save, retrieval, edit, forget/delete, and opt-out; relevant owner memories can carry facts across conversations
+- Research: optional Web Search and explicit bounded Deep Research, citation/source displays, and truthful Incomplete/Failed states for missing or partial evidence
+- Actions: server-owned public GitHub read actions and Web Search; tool results are untrusted data, and a failed tool is not described as successful
+- Settings: Profile, General, Nibie, Chat, Personalization, Memory, Data & Privacy; a saved default applies to new Chat/Room threads while existing conversations retain their model
 - Account menu: profile, Settings, sign out
 - Conversation export and delete-all, both limited to the signed-in owner
+- Weekly usage and a separate estimated dollar spend guard, provider-token telemetry, and reconciliation of stale reservations
+- Workbench backend/preview harness remains present, but its product UI and `/workbench` routes are hidden by `WORKBENCH_UI_ENABLED = false`
 
-Does not ship:
+Not part of the chat beta:
 
-- Recall, Actions, RAG, agents, or web search
+- Autonomous agents or automatic reading of all other conversations
 - Account deletion
-- A per-minute per-account rate limit or real provider-dollar spend ceiling
-- Weekly AI usage is **not shipped in the current production release**. This worktree contains an unverified branch candidate only; see [Weekly AI usage candidate](../feature/weekly-usage/v1.md). Do not describe it as shipped until the approved production migration/deployment and post-deploy checks pass.
+- OCR and image/scanned-document understanding
+- Enabled Workbench or its version-history/export work; PR #102 and migration `0028` remain deferred and unapproved for this milestone
+- A completed human-reviewed Fast/Balanced/High quality acceptance; Issue #80 remains open
 
-## Weekly usage policy (candidate only)
+## Usage policy
 
-The candidate sets a free allowance of 500 weighted credits per account/week, resetting Monday 00:00 UTC. Fast / Balanced / High cost 1 / 3 / 6 credits per newly established provider generation. These are product policy weights, not model prices. Authentication, reading history, model selection, Rooms, Pins, file uploads alone, Workbench/database-only actions, and provider-free replays are not charged. Stop after stream establishment stays charged; setup failures attempt idempotent release. The weekly read is shown quietly in Settings; quota rejection returns stable `WEEKLY_USAGE_LIMIT` plus the server-generated reset timestamp. There are no paid tiers, billing, or checkout. This is an allowance, not a true dollar ceiling or a general per-minute abuse limit. Full lifecycle/security details and rollout gates are in [the candidate spec](../feature/weekly-usage/v1.md).
+The implemented allowance is 500 weighted credits per account/week, resetting Monday 00:00 UTC. Normal Fast / Balanced / High chat costs 1 / 3 / 6 credits per newly established generation; Deep Research adds six credits of overhead. These are product weights, not provider prices. Authentication, history reads, model selection, Room/Pin actions, uploads alone, and provider-free replays are not charged. Stop after stream establishment stays charged; setup failures attempt idempotent release. Quota rejection returns `WEEKLY_USAGE_LIMIT` and the server reset timestamp.
+
+A separate estimated provider-dollar guard uses `AI_SPEND_LIMIT_USER_DAILY_USD` and `AI_SPEND_LIMIT_GLOBAL_HOURLY_USD`; defaults are USD5/user/day and USD50/global/hour, while explicit zero fails closed. These guards and token estimates are not a provider invoice or a general per-minute rate limit. Background summaries and optional embedding/search work must be included in live evaluation accounting. There are no paid plans, billing, or checkout. See [usage details](../feature/weekly-usage/v1.md).
 
 ## Migrations
 
@@ -47,6 +55,25 @@ Drizzle journal order:
 9. `drizzle/0008_workbench.sql` — owner-scoped workbench documents, forced RLS. Deleting a room sets only `room_id` to null
 10. `drizzle/0009_chat_attachments.sql` — message attachment metadata and owner-scoped access; additive only
 11. `drizzle/0010_weekly_ai_usage.sql` — weekly account allowance and exactly-once generation reservations; additive only
+12. `drizzle/0011_thread_summaries.sql` — owner thread summaries
+13. `drizzle/0012_files_v2_lexical.sql` — lexical Room-file chunks
+14. `drizzle/0013_files_v2_lexical_recall.sql` — lexical recall refinement
+15. `drizzle/0014_files_v3_hybrid.sql` — optional semantic retrieval
+16. `drizzle/0015_memories.sql` — explicit owner Memory
+17. `drizzle/0016_message_sources.sql` — persisted citations
+18. `drizzle/0017_weekly_usage_limit_500.sql` — 500-credit allowance
+19. `drizzle/0018_message_research.sql` — research status/metrics
+20. `drizzle/0019_action_runs.sql` — Action audit records
+21. `drizzle/0020_action_runs_insert_checks.sql` — Action insert validation
+22. `drizzle/0021_action_runs_server_writes.sql` — server Action audit writes
+23. `drizzle/0022_action_runs_insert_returning_fix.sql` — audit return contract
+24. `drizzle/0023_action_runs_service_role_writes.sql` — scoped server audit RPCs
+25. `drizzle/0024_ai_cost_usage_guard.sql` — spend guards and reservation reconciliation
+26. `drizzle/0025_chat_attachment_direct_upload_10mb.sql` — bounded direct uploads
+27. `drizzle/0026_chat_attachment_owner_download.sql` — owner original-file downloads
+28. `drizzle/0027_workbench_v2_revision.sql` — existing Workbench revision checks
+
+Verify this inventory against `drizzle/meta/_journal.json` at the release SHA. Migration `0028` is not in this main baseline and must not be applied through chat-beta acceptance.
 
 `0003` does not change conversations or messages. `0005` does not change preferences or rooms. Do not regenerate `0004` from `lib/db/schema.ts`; the SQL, not the Drizzle `onDelete("set null")` shorthand, is authoritative for the column-specific null.
 
@@ -61,6 +88,9 @@ Application runtime:
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` or `NEXT_PUBLIC_SUPABASE_ANON_KEY` — publishable key only. Boot rejects a service-role key
 - `SUMOPOD_API_KEY`, `SUMOPOD_BASE_URL` — the gateway behind Fast (DeepSeek V4.1 Flash); the earlier `AI_API_KEY` / `AI_BASE_URL` names still work as a fallback
 - `OPENAI_API_KEY` — OpenAI direct, behind Balanced (GPT-6 Luna) and High (GPT-6.1 Sol); without it only Fast is offered. Optional: `OPENAI_BASE_URL` (HTTPS), `SUMOPOD_MODEL_FAST`, `OPENAI_MODEL_BALANCED`, `OPENAI_MODEL_HIGH`, `OPENAI_BALANCED_REASONING_EFFORT` and `OPENAI_HIGH_REASONING_EFFORT` (`low`, `medium` or `high`; High always sends one and defaults to `high`, Balanced only when set)
+- `TAVILY_API_KEY` and `WEB_SEARCH_PROVIDER` — optional Web Search/Deep Research configuration
+- `SUPABASE_SERVICE_ROLE_KEY` — server-only, narrowly used for Action audit RPCs; ordinary user data continues to use the cookie-bound publishable client and owner RLS
+- `AI_SPEND_LIMIT_USER_DAILY_USD`, `AI_SPEND_LIMIT_GLOBAL_HOURLY_USD`, and `CRON_SECRET` — spend policy and authenticated reconciliation
 
 Migrations only:
 
@@ -68,12 +98,11 @@ Migrations only:
 
 Not read by the Next.js user runtime:
 
-- Supabase service-role key
 - Fastify `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `APP_ORIGINS`
 
 Optional tests:
 
-- `TEST_DATABASE_URL` and `ALLOW_TEST_DATABASE_RESET` — local loopback database named `general_ai_workspace_test` only
+- `TEST_DATABASE_URL` and `ALLOW_TEST_DATABASE_RESET` — local loopback database named `nibie_ai` only
 - `E2E_USER_EMAIL`, `E2E_USER_PASSWORD`, `E2E_BASE_URL`
 
 `NEXT_PUBLIC_APP_NAME` defaults to Nibie.
@@ -81,8 +110,8 @@ Optional tests:
 ## Supabase
 
 1. Use the Nibie project. Confirm the database is the intended one before migrating.
-2. When this release candidate is approved, apply migrations `0000` through `0010` in journal order. Until then, keep production at its current applied schema; this worktree has not applied either candidate migration.
-3. Verify RLS is enabled and forced on `users`, `conversations`, `messages`, `user_preferences`, `rooms`, `room_briefs`, `pins`, `room_files`, `workbench_documents`, `weekly_ai_usage`, and `weekly_usage_reservations`. Verify authenticated users can read only their own aggregate and cannot directly write quota rows or read the reservation ledger.
+2. Inspect the frozen main journal and the production migration workflow result. Apply approved migrations through that workflow in journal order; this document does not authorize a migration or shared-database change.
+3. Verify the ownership/RLS policies of all user-owned tables in the frozen journal, including thread summaries, Memory, citations, research, and attachments. Verify another account cannot read them, and authenticated clients cannot directly write quota/spend rows or read private reservation ledgers.
 4. Enable Email auth. Enable the Google provider with the Google client id and secret stored in Supabase, not in the Next.js bundle.
 5. Set the Site URL to `NEXT_PUBLIC_APP_URL`.
 6. Allow the auth callback: `https://<production-host>/auth/callback`. Add each Vercel preview host only if that preview should complete Google sign-in.
@@ -100,7 +129,7 @@ Optional tests:
 Do not skip the backup.
 
 1. Confirm the target database and take a backup.
-2. Confirm whether weekly usage is approved. Apply only the intended additive migration set in journal order; do not apply `0010` until its release is approved, its rollback/forward-fix plan is reviewed, and the local concurrency/RLS and pre-production checks pass. Migration `0009` is for chat attachments and must precede `0010`.
+2. Review only the intended additive migration set from the frozen journal and require the Production DB Migration workflow to pass before the application serves traffic. Do not include deferred migration `0028` or approve PR #102's shared-DB gate as part of this milestone.
 3. Verify RLS is still enabled and forced, and that a second user cannot read another user's rows.
 4. Deploy the Next.js app with the runtime environment above. Do not deploy `DATABASE_URL` or a service-role key to the browser.
 5. Smoke auth: email sign-in, Google sign-in, callback, and sign out.
@@ -126,7 +155,7 @@ Signed in:
 - Send a message and refresh; the reply is still there
 - Stop a long reply; the conversation is not left spinning after refresh, and the reply keeps the stopped text with a Stopped label (never the finished answer)
 - Retry and Regenerate only affect the latest turn
-- Change Fast / Balanced / High; the browser sends only the safe logical mode. If the weekly candidate is released: confirm a new provider generation charges once at 1 / 3 / 6 credits, a completed replay does not charge, a stopped established stream remains charged, and an exhausted allowance returns `WEEKLY_USAGE_LIMIT` without calling the provider
+- Change Fast / Balanced / High; the browser sends only the safe logical mode. Confirm a normal chat generation charges once at 1 / 3 / 6 credits, a completed replay does not charge, a stopped established stream remains charged, and an exhausted allowance returns `WEEKLY_USAGE_LIMIT` without calling the provider
 - Open Settings → General; verify the server-supplied remaining allowance/reset, then verify exhausted-state copy. No usage preflight occurs before Send
 - Context panel names profile, room, pinned context, file context, summary, and recent messages without quoting About you, the brief, pin text, or file text
 - Create a Room, put a thread in it, delete the Room, and open that thread from the general list
@@ -136,22 +165,21 @@ Signed in:
 ## Known limitations
 
 - Account deletion is not available. Sign-out and delete-all do not remove the Auth user.
-- Weekly weighted usage is a branch-only candidate; the current production build still has no account allowance. If approved and released, it remains a request-budget guard—not a dollar spend ceiling, IP/signup control, or per-minute rate limit. Existing protections include 20,000-character messages, a 16,384-token context budget, one streaming reply per conversation, a 120-second provider abort, and server-side logical mode names.
-- The provider request does not send `max_tokens`. A very long completion is not hard-cut before it is stored.
+- Weighted credits and estimated dollar reservations are implemented, but they do not replace provider billing verification or a general per-minute abuse limit. Existing protections include message-size validation, a 16,384-token planning budget, one streaming reply per conversation, bounded provider execution, and server-side logical mode names.
+- Fast sends an 8,192-token output cap. OpenAI chat requests do not send an explicit completion cap; the 2,048-token context-planning reserve is not a provider output limit.
 - The browser model picker displays only the Fast / Balanced / High product modes, descriptions, and usage weights. Provider names, ids, and routing stay server-side.
 - AI Room drafting runs only when some configured mode's model id is exactly `gpt-6-luna`. Otherwise the dialog tells the user to set the Room up manually.
-- Thread summaries are not generated.
+- Thread summaries are best-effort Fast calls after completed replies in sufficiently long threads. Their semantic accuracy and real-model continuity still require acceptance evidence.
 - Content-Security-Policy is not set. The theme script is inline. `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options`, and `Permissions-Policy` are set.
 - Cookie `SameSite=Lax` plus an Origin check cover browser CSRF. A missing `Origin` is still accepted when it matches this app's historical API tests.
 - `/preview` exists only outside production.
 
-## Deferred V1.x
+## Deferred work
 
-- Recall and any hidden memory
-- Actions, tools, and agents
-- RAG and web search
+- Autonomous agents and unrestricted cross-thread context
+- Workbench product availability, version history, and export (PR #102)
 - Account deletion
-- Shared rate-limit storage and a spend ceiling
+- General per-minute abuse controls and provider-invoice reconciliation
 - Fastify cutover of chat
 
-Repeat auth, chat, Rooms, Pins, Files, Workbench, Settings, privacy, RLS, and mobile QA before production. Staging migrations are not applied to production by this branch.
+Repeat auth, chat, Rooms, Memory, Files, research, Settings, privacy, RLS, and mobile QA at the exact deployed SHA before beta acceptance. Workbench remains hidden and outside this release gate.

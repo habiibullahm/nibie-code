@@ -2,7 +2,7 @@
 
 A release is done only when code is on `main`, production is Ready, signed-in smoke passes, the changelog and release note match that production SHA, stale product docs are corrected, known issues are current, and the version tag is created after those docs. Docs are not optional polish.
 
-Run this against a frozen SHA. Do not point production at a moving staging branch.
+Run this against a frozen release-candidate SHA from a reviewed PR targeting `main`.
 
 Application code that needs a new database schema must not receive production traffic before that migration is applied.
 
@@ -12,7 +12,7 @@ Copy [V1_RELEASE_TEMPLATE.md](V1_RELEASE_TEMPLATE.md) to `docs/releases/vX.Y.Z.m
 
 ## PRE-DEPLOY
 
-1. Freeze the staging SHA. Record it as `RC_SHA`. Do not keep pulling the staging branch after this.
+1. Freeze the reviewed PR head SHA and record it as `RC_SHA`. Repeat checks if that head changes.
 2. Confirm that checkout is clean: `git status` shows no staged, unstaged, or untracked files.
 3. Confirm the intended commits: `git log --oneline origin/main..RC_SHA`. The list should be only the release.
 4. Run the gates on that SHA:
@@ -43,19 +43,16 @@ Example record, filled from the real inventory, not from memory of a future feat
 
 ## APPLICATION DEPLOY
 
-9. Merge the exact frozen SHA into `main`. From an up-to-date `main`:
+9. Merge the approved PR into `main` through the repository's required checks and preferred squash-merge workflow. Confirm its reviewed head equals `RC_SHA`, then record the resulting main merge commit as `PRODUCTION_SHA`:
 
 ```text
-git fetch origin
-git switch main
-git pull --ff-only origin main
-git merge --ff-only RC_SHA
+gh pr view <PR_NUMBER> --json headRefOid,baseRefName,mergeCommit
 ```
 
-If `main` cannot fast-forward to `RC_SHA`, stop. Do not merge the staging branch by name.
+If the PR head changed or targets another branch, stop and re-review that exact head. Follow `docs/engineering/BRANCHING_STRATEGY.md`; a permanent staging branch is not part of this workflow.
 
-10. Push `main`: `git push origin main`. Do not force-push `main`.
-11. Wait until the Vercel production deployment for that commit is READY. Region for this project is `icn1` (`vercel.json`).
+10. Wait for the Production DB Migration workflow on `PRODUCTION_SHA` to pass; merging the reviewed PR is the production trigger.
+11. Wait until the Vercel production deployment for `PRODUCTION_SHA` is READY. Region for this project is `icn1` (`vercel.json`).
 
 ## POST-DEPLOY
 

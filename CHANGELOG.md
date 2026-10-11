@@ -29,6 +29,11 @@ What's new in Nibie.
 
 ### Fixed
 
+- Switching threads with Back, Forward, or a chat URL releases the previous reply so a delayed stream cannot block the next conversation.
+- Web and GitHub replies keep consistent usage accounting if an error occurs after the response starts.
+- Long chats preserve summaries and their recent updates before large source excerpts, and leave out stale history when newer corrections cannot fit.
+- Deep Research cites only evidence used in the reply and stays Incomplete when sources are omitted or only search snippets are available.
+- Web citations point to the page reached after redirects instead of an outdated search-result URL.
 - Long chats reserve space for their existing summary, keep recent history continuous when a message cannot fit, and report older context omitted by the history limit.
 - Saving a conversation's model shows “Saving…” on the Research control instead of incorrectly claiming a response is running.
 - Replies that use saved Memory can finish streaming without a false connection-recovery error.
@@ -36,6 +41,7 @@ What's new in Nibie.
 
 ### Changed
 
+- Getting-started guidance now explains how to continue work with Room briefs, files, explicit Memory, and research sources; attachment limits match the current uploads.
 - Workbench UI is hidden until product-ready: Edit in Workbench and `/workbench` routes are unavailable (backend and preview harness stay in place).
 - Workbench documents support Markdown Write and Preview (same rendering as chat replies).
 - Workbench side panel is a lighter editor: Write/Preview, Ask Nibie on selected text (inline apply, no suggestion review), Expand, and Close.

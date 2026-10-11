@@ -81,7 +81,7 @@ Today, Vercel Preview and Production share the same Supabase project (`NEXT_PUBL
 
 When a PR adds or changes `drizzle/**`, the **Preview App DB Migration** workflow (`.github/workflows/preview-app-db-migration.yml`) can apply those additive migrations to the shared app database before merge so Preview can exercise new tables. It uses the same `POSTGRES_URL_NON_POOLING` secret and the same concurrency group as Production DB Migration. PR Guard’s **Integration DB + RLS** job only migrates a local Docker Postgres for tests — it does not touch the Preview app DB.
 
-Shared DB writes from that workflow are **not** silent. After reviewing the SQL, a reviewer must either add the PR label `allow-shared-db-migrate` or run the workflow via `workflow_dispatch`. The job also refuses non-additive SQL (DROP TABLE/COLUMN, TRUNCATE, DELETE FROM, etc.). Prefer enabling required reviewers on the GitHub `production` environment as a second gate. Long-term: give Preview its own database and stop PR writes to production.
+Shared DB writes from that workflow are **not** silent. After reviewing the SQL, a reviewer must either add the PR label `allow-shared-db-migrate` or run the workflow via `workflow_dispatch`. The job also refuses non-additive SQL (DROP TABLE/COLUMN, TRUNCATE, DELETE FROM, etc.). Prefer enabling required reviewers on the GitHub `production` environment as a second gate. Preview isolation was explicitly excluded from the October 11 architecture delivery; PR #112 was closed. A future separate isolation decision may change this topology.
 
 Before merge:
 
@@ -199,6 +199,8 @@ npm run lint
 npm run typecheck
 npm test
 npm run release:check
+independent Fastify and contracts clean install/typecheck/build/tests
+local Docker Integration DB + RLS (when applicable)
 ```
 
 The Vercel Preview is responsible for the application production build for the proposed commit.
@@ -258,3 +260,19 @@ Migration rule:
 - Replace `feature/*` with the shorter `feat/*` convention for new work.
 
 The old `feature/staging-v1` pattern is considered retired after its release is merged to `main`.
+
+
+## Architecture refactors and release acceptance
+
+Persistence, lifecycle, stream and workspace-hook extractions are schema-free
+changes that can be reverted independently. Keep provider routing, output
+settings, charging and source authority separate from internal extraction PRs.
+The **Fastify and contracts** check passes in hosted CI; the repository owner
+still needs to add it to required branch checks because this integration cannot
+administer branch protection.
+
+Fixture/unit/DB checks and a successful Preview build validate implementation.
+They do not close Issue #80 or signed-in core/context acceptance. Those gates
+require dedicated QA access, verified pricing, a current hard spend ceiling,
+real provider outputs and independent human review. Workbench stays hidden and
+migration `0028` deferred until the separate product/release decision.

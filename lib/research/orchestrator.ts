@@ -328,10 +328,13 @@ export async function runDeepResearch(
   }
 
   progress("synthesizing");
+  const snippetOnly = evidence.every((chunk) => chunk.retrieval === "web_snippet_only");
   const incompleteNotice =
-    gathered.pagesFailed > 0 && evidence.length < 3
-      ? "Some sources could not be read; evidence is partial."
-      : null;
+    snippetOnly
+      ? "Only search snippets were available; source pages could not be verified. Evidence is partial."
+      : gathered.pagesFailed > 0 && evidence.length < 3
+        ? "Some sources could not be read; evidence is partial."
+        : null;
 
   return {
     status: incompleteNotice ? "incomplete" : "complete",

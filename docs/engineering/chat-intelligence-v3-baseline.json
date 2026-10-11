@@ -1,0 +1,1673 @@
+{
+  "schemaVersion": 1,
+  "milestone": "Chat Intelligence V3",
+  "baseline": {
+    "commit": "981f0c6f22b2f344edee2b86628443cc6d512ca7",
+    "branch": "main baseline (detached worktree)",
+    "source": "PR #94 merged",
+    "gitStatusAtFreeze": "clean",
+    "date": "2026-10-09",
+    "timezone": "Asia/Bangkok",
+    "issue": "https://github.com/habiibullahm/nibie-code/issues/80",
+    "immutableHash": "gitBlob",
+    "note": "worktreeSha256 includes checkout line endings; compare gitBlob across machines. No runtime secrets or environment values inspected."
+  },
+  "evidenceStatus": {
+    "fixtureAndPolicyFreeze": "complete",
+    "realProviderOutputs": "pending",
+    "humanRatings": "pending",
+    "providerSpendApproval": "approved_strict_usd_1_total_including_retries",
+    "qualityImprovement": "not_established",
+    "regressionChecks": "offline_scorer_11_passed_other_checks_pending",
+    "mergeEligibility": "pending_independent_review_and_quality_validation"
+  },
+  "sourceDefaults": {
+    "Fast": {
+      "provider": "sumopod",
+      "model": "deepseek-v4.1-flash:netra",
+      "reasoningEffort": "none",
+      "maxOutputTokens": 8192,
+      "modelOverrideVariable": "SUMOPOD_MODEL_FAST"
+    },
+    "Balanced": {
+      "provider": "openai",
+      "model": "gpt-6-luna",
+      "reasoningEffort": "provider_default",
+      "modelOverrideVariable": "OPENAI_MODEL_BALANCED",
+      "effortOverrideVariable": "OPENAI_BALANCED_REASONING_EFFORT"
+    },
+    "High": {
+      "provider": "openai",
+      "model": "gpt-6.1-sol",
+      "reasoningEffort": "high",
+      "modelOverrideVariable": "OPENAI_MODEL_HIGH",
+      "effortOverrideVariable": "OPENAI_HIGH_REASONING_EFFORT"
+    },
+    "note": "Repository defaults only; effective deployed routes must be recorded privately before comparable evaluation. These are not verified active provider capabilities."
+  },
+  "contextPlanning": {
+    "contextWindowTokens": 16384,
+    "maxOutputReserveTokens": 2048,
+    "source": "lib/ai/registry.ts",
+    "note": "Planning reserve is not the OpenAI provider output limit."
+  },
+  "fileHashes": [
+    {
+      "path": ".github/workflows/ai-quality-v2.yml",
+      "gitBlob": "2245089150bee7bf593607a4007d159693dc76de",
+      "worktreeSha256": "5b2f69ca5367b42b8c6172e29a57b3494c9af4649a63b30ba435e8d2eabf022f"
+    },
+    {
+      "path": ".github/workflows/changelog-guard.yml",
+      "gitBlob": "e41866d58deccab394eb43c3b377d4fc12ace74f",
+      "worktreeSha256": "aa39267d0786bc1152c332fac27b398cc8dbae9d2111900f2df301c496108dae"
+    },
+    {
+      "path": ".github/workflows/pr-guard.yml",
+      "gitBlob": "b7de9be886101608225dc5666cfbd0c124932ac0",
+      "worktreeSha256": "dba931e0cf939507e0f523bc4dbd0ca60319722cf552a43b246b7c25434e3e30"
+    },
+    {
+      "path": ".github/workflows/preview-app-db-migration.yml",
+      "gitBlob": "75aef586326e5e77f4949a66be0fc0910ab3ac85",
+      "worktreeSha256": "bddf36f4558275a116d806b399e647255ec34ffe68988efe2861e412f260df85"
+    },
+    {
+      "path": ".github/workflows/preview-smoke.yml",
+      "gitBlob": "b9c924236a556c5f6e9289d9003b07f4b4d7e979",
+      "worktreeSha256": "841643ee92eca48ed53f9f78a01cf706b02467a88e12162d403df1feb959e044"
+    },
+    {
+      "path": ".github/workflows/production-db-migration.yml",
+      "gitBlob": "9dc9e09e65fa01f062211413751dcdba40403bea",
+      "worktreeSha256": "c9be99c5d8b055003959b5be6cb2ead9d1a0590f1801a7d31e426740ba061b03"
+    },
+    {
+      "path": "app/api/chat/route.ts",
+      "gitBlob": "0e9f0e2e49233bcb6b877f9ab59bf1d435353e57",
+      "worktreeSha256": "a9f4399b4c67aade99844b2006194e9a879164bf05d6105ad01861c8c561d048"
+    },
+    {
+      "path": "components/chat-workspace.tsx",
+      "gitBlob": "d3ab5a88a87bb7e579bb88439c3910b4308e2e21",
+      "worktreeSha256": "bd05d2f5538ed4c5511714fae2bb7d97a564f830927d77f579e2ad2c1734aa0e"
+    },
+    {
+      "path": "docs/engineering/RESPONSE_QUALITY_V2.md",
+      "gitBlob": "52e6c43efa5a32258408c3f40472e613d8b526b0",
+      "worktreeSha256": "96b49ba893517fbb976aa634e034abce71f970ca0e2a58583d5e174819e39331"
+    },
+    {
+      "path": "lib/actions/audit.ts",
+      "gitBlob": "7e897cb15867d7ac81a2fc83e599b62fccb5fab7",
+      "worktreeSha256": "c44c5e68bdf308026602798a78fda6fc3cf03bcb973a604e4a297debeb6e1418"
+    },
+    {
+      "path": "lib/actions/auto-web-response.ts",
+      "gitBlob": "f09eafaee5d1aae937694da31282ddee8e65b02c",
+      "worktreeSha256": "065af027f00d4c75dba34d190fc5844112e3e97e6404a5b70c7cb12fa3b02586"
+    },
+    {
+      "path": "lib/actions/context.ts",
+      "gitBlob": "2c8b482cbe0642e6686a0a85f581d23684ca5799",
+      "worktreeSha256": "a4ff6b70c491803d8d1ee4397aa4aa143de87f9511905afca0671c64174fe6be"
+    },
+    {
+      "path": "lib/actions/ids.ts",
+      "gitBlob": "499c3c41823bd1d9a19ecea21711c7f7aae95b69",
+      "worktreeSha256": "06b2eb0c99bd1d9e3083f9e74ee6f105c1a8f4fcdafe5ed6c182122950fbe71c"
+    },
+    {
+      "path": "lib/actions/index.ts",
+      "gitBlob": "a894c97bcf3613ea5de1f1384325e984a6592838",
+      "worktreeSha256": "97fbc79640dfe0fd785bd5f35e9cb7f5fe70dc88a631d8b3b7dc0758ca18d8bc"
+    },
+    {
+      "path": "lib/actions/labels.ts",
+      "gitBlob": "acbd43f35039ef35ae69ba23fcaee74beebdb800",
+      "worktreeSha256": "36b89e0d376e468724baf0f3505e1ed3fefa9c0d0575f94563945b4ca0472464"
+    },
+    {
+      "path": "lib/actions/permissions.ts",
+      "gitBlob": "58476afb65a887c6b5a503ccc80a09e73c2701be",
+      "worktreeSha256": "d29c00bb7d32786925ddfb8867fae92d73ce216057665ee3161e6c853e8a25f4"
+    },
+    {
+      "path": "lib/actions/persist.ts",
+      "gitBlob": "beead7e858dc892d65c9b0bf616fe50de9da9436",
+      "worktreeSha256": "e88b429b8f7bdaa4ea01e9b5fb4d0f126afba08e27d2260c46935b982a63129a"
+    },
+    {
+      "path": "lib/actions/registry.ts",
+      "gitBlob": "dc674c3510af2bf38fee8390ce4396c9a4f65eb6",
+      "worktreeSha256": "33336b2bdc22968e29f7dba9d8aa700794217a2114cd1a99e8c731a7f52d6a34"
+    },
+    {
+      "path": "lib/actions/runtime.ts",
+      "gitBlob": "274d692bc0a879829e3ee748730977e63ce2638a",
+      "worktreeSha256": "9e0cf178d76a9f1163a52e5f98f1619ae23ecc27a51d117ccded1660e1fccd84"
+    },
+    {
+      "path": "lib/actions/tools/github-commits-list.ts",
+      "gitBlob": "f39a0b700679cde4f7b9c1a2ca165d4468802f79",
+      "worktreeSha256": "0dc51346b42f52034661bc1c833f5bbad0396a811a7cf7c79d189d651b3c2c3c"
+    },
+    {
+      "path": "lib/actions/tools/github-issues-list.ts",
+      "gitBlob": "10919da37557fa0e65839ffb575e9a67e1ef8904",
+      "worktreeSha256": "ed425bc2197bc5a825850a7c634144b58d8ec3e4b0ba3849bc5734761776bfdf"
+    },
+    {
+      "path": "lib/actions/tools/github-pull-request-get.ts",
+      "gitBlob": "9dda92a1b636cacd1a00e5b6da51015121898392",
+      "worktreeSha256": "3f647c2b6500a04f4ed970480c506003879166e422c74be4ddfb864abb515b2c"
+    },
+    {
+      "path": "lib/actions/tools/github-pull-requests-list.ts",
+      "gitBlob": "126efc47d09391ce9afa127ec683dcf7b76d5bb2",
+      "worktreeSha256": "018f8beeb0cd103b3cb5f62f3ba7bbb0387bf541ce40e738e714bb2c73bd3818"
+    },
+    {
+      "path": "lib/actions/tools/github-repo-get.ts",
+      "gitBlob": "c00989203fff6f4c1ec692f9f626129f8e6901f8",
+      "worktreeSha256": "194e9e0db935f56b5bdb13964d038fba7956559d7514939438df6b7c757ef9ef"
+    },
+    {
+      "path": "lib/actions/tools/github-shared.ts",
+      "gitBlob": "23982423a28e24ce6c7238a513a1c59914b651d0",
+      "worktreeSha256": "5ac55e9d44894487f9dbf8d8799c6837566cc35ee9a033a842314fe5b2cef54c"
+    },
+    {
+      "path": "lib/actions/tools/github-workflow-runs-list.ts",
+      "gitBlob": "21b75550a81d0eeadea1150ceeae65495253dca0",
+      "worktreeSha256": "0e1b2c4d07a0f840bf3fce64fb917698ae1c4a3bf98cc041da85359b2d4e41c7"
+    },
+    {
+      "path": "lib/actions/tools/web-search.ts",
+      "gitBlob": "2b3bf45cf48a850ee8f9218211c54d7b5e821634",
+      "worktreeSha256": "448da0a5a0cbbfd5ee13872a4ef36c80482094dd49db34c7f367f7017c2f0020"
+    },
+    {
+      "path": "lib/actions/types.ts",
+      "gitBlob": "dc1b856211078e9730b920844e833dc0fa84da05",
+      "worktreeSha256": "620be4472e9760b2ca4d2b785ae519d31bc78f3fdd19697bd88c0c8eaff5d5e9"
+    },
+    {
+      "path": "lib/ai/provider-messages.ts",
+      "gitBlob": "c079525f7f316bfc9ac8d5e5821363df1e7e07f5",
+      "worktreeSha256": "484b39e28c4c0a9e9237a9ac8b45b2ab214e952355992bd2e181210800010e5f"
+    },
+    {
+      "path": "lib/ai/provider.ts",
+      "gitBlob": "37fa6fbf1c8ad221270ba563e5cce5d619eed466",
+      "worktreeSha256": "c2690b6ff757086bbbaff7690e0d4284cdbcb2474ca707d31de13a12564eed21"
+    },
+    {
+      "path": "lib/ai/registry.ts",
+      "gitBlob": "051da73ce8a06ded4169e526e9e0a7702f3031cb",
+      "worktreeSha256": "c3e66deaf50e56b5784095dfe930f313897e1194360957bfa1b09a25867d3ee2"
+    },
+    {
+      "path": "lib/ai/response-quality.ts",
+      "gitBlob": "e1a4bd3a454c22eec62c8c6cbd6032608ec10aa1",
+      "worktreeSha256": "f6ca18378e903f4040a8b4a31787083c240f2bd2dc9be61b4dee6025606851e4"
+    },
+    {
+      "path": "lib/ai/sanitize-model-output.ts",
+      "gitBlob": "db725afe010101e4705fd5ffb24f5f4ac72aee8a",
+      "worktreeSha256": "54f36a7847678f9a09b08865bddd67349e03282828744705272de5abfc297b15"
+    },
+    {
+      "path": "lib/ai/sse.ts",
+      "gitBlob": "8419c039620a7d7ad254c5f9783de6fed986b497",
+      "worktreeSha256": "c3c7578bfa1787a5c2914cdb10e6c60b35107248721ce0967a05ee4e441307a6"
+    },
+    {
+      "path": "lib/citations/attach.ts",
+      "gitBlob": "af8a1810c3dccc8704346349b4198ca9032e89ac",
+      "worktreeSha256": "67c7c9bf973d0ac6565140421ac1ba05e29580abb2821086e9097aba42bd560d"
+    },
+    {
+      "path": "lib/citations/handles.ts",
+      "gitBlob": "d809fe0e04f35cfd7a876d82e914e73855d8d2d6",
+      "worktreeSha256": "1e8696d08e9e51dd33dc838b3ea1b6d48bc690f9874b6d9ee54ede32228c4a3d"
+    },
+    {
+      "path": "lib/citations/included.ts",
+      "gitBlob": "b7924cde5b39f73870cc05418fbd457551f4dca4",
+      "worktreeSha256": "2f17169e8eae240bae8131df1fe7098d1b92f4ac7f9aee011564043d61c4bac0"
+    },
+    {
+      "path": "lib/citations/parse.ts",
+      "gitBlob": "f8ef36d3b42e091903a1b4a42a2f24b315a0dfcd",
+      "worktreeSha256": "e80c98ebd89aa97966455a8632cc27ba2d3d20e4f245b0ad6eaa5e411ec11e2a"
+    },
+    {
+      "path": "lib/citations/persist.ts",
+      "gitBlob": "13c02f54dd7e7b763f6ac131d624e89946ad04ca",
+      "worktreeSha256": "cb8214a5660e182c3417c0cbcb44e0d7c03c7aee3a9f9d8e0fcd499bc9d7667b"
+    },
+    {
+      "path": "lib/citations/prepare.ts",
+      "gitBlob": "c9f6bdd4a2e32c4136748c625959074226d1f50e",
+      "worktreeSha256": "0a8f683fd696e42d1fd3f33f0c00eaa8deb39d750964e81eb3209293b7302fa2"
+    },
+    {
+      "path": "lib/citations/sanitize.ts",
+      "gitBlob": "89013b319ceb656410f5444d040304a938cfe17d",
+      "worktreeSha256": "a0a1c9a2b884e8bf26f92667b8d51cf9115358b5503324b6a680daa6db094b4a"
+    },
+    {
+      "path": "lib/citations/types.ts",
+      "gitBlob": "405c9f68ef97fa2b3237fcdebc271f8e8cc9bafe",
+      "worktreeSha256": "2de84d9c272e316e55cbdc377b1a4e2e624763a25e0bf08b00d3543f854d7f57"
+    },
+    {
+      "path": "lib/context/attachment-context.ts",
+      "gitBlob": "e78eced0d642201263c67ba2251971967717e959",
+      "worktreeSha256": "af3fa73754b4c69f1ac525c4f539c5c3525a8e154e12a5e95879e39cac92ec2a"
+    },
+    {
+      "path": "lib/context/build-context.ts",
+      "gitBlob": "4fbb798ab5a89fbe95f5ea86db106d73520b7c93",
+      "worktreeSha256": "9079b1b3a879bcc1c4497a6f8e6218b092ec821df1df23c9888337e5d5a21218"
+    },
+    {
+      "path": "lib/context/context-policy.ts",
+      "gitBlob": "8f8b1d31dacb1afb7bb4b35ce85add1a63ca4b6a",
+      "worktreeSha256": "67eb7c2072ed9e561a0b7e4c1d8b6b4b022060d4fae860dc0606b4cc87dc317e"
+    },
+    {
+      "path": "lib/context/context-types.ts",
+      "gitBlob": "8185b4cf9a40b2d87815d7fca15b68e87428f8ae",
+      "worktreeSha256": "389a0c07bb6aab89182eca1edf13868892ecdb23a5747412a1ff1db285933433"
+    },
+    {
+      "path": "lib/context/file-context.ts",
+      "gitBlob": "e650f68a19055c9f26dd4d5ac50105026c200dd1",
+      "worktreeSha256": "6f9ad1b8d4ab4245557bd6c904dc5e38631c0e42b0ceeca9f08859832b510658"
+    },
+    {
+      "path": "lib/context/pin-context.ts",
+      "gitBlob": "ce8680f423b4fc64b0e457408505f0fe29d80894",
+      "worktreeSha256": "9d742fa3c70b1667c0b79ec06512c95c48b01a05dfffc84c25d44883bc4cb2af"
+    },
+    {
+      "path": "lib/context/profile-context.ts",
+      "gitBlob": "da2c51f198f9b71609f3e5fe638614ff1e94eb3b",
+      "worktreeSha256": "906a5f99e04fd747638a99579b7a70b4e1925ef372df389efd02dfc9b12c1380"
+    },
+    {
+      "path": "lib/context/recall-context.ts",
+      "gitBlob": "26f602242c8af3d8c98bba22ae6a55b68adb70aa",
+      "worktreeSha256": "4897eca764ced4b626cebf6c300678cf01925af8783da5085dbf4675649a130c"
+    },
+    {
+      "path": "lib/context/room-context.ts",
+      "gitBlob": "0d71b3ace1c3377a58ee23e6b9884c3828b77724",
+      "worktreeSha256": "38bad10f8f849b78259754057cc3bcb692293930aa06ff32d81ec9cb01f5d78f"
+    },
+    {
+      "path": "lib/context/thread-context.ts",
+      "gitBlob": "a40b8c55b2d294e355efe5e3c507ad04be44f841",
+      "worktreeSha256": "7606089d8e7a48419cefd0a701408aba9dc51ef28b4e2cb326d0035284de6a6a"
+    },
+    {
+      "path": "lib/context/thread-summary-generation.ts",
+      "gitBlob": "eb48b97b430d7bafbb48097ff90c20e32071c8e1",
+      "worktreeSha256": "54e2158c94b9aa95ee46ae70f3e25021987ccf4ff117eaeffdbd23efcba04be5"
+    },
+    {
+      "path": "lib/context/thread-summary-lifecycle.ts",
+      "gitBlob": "ea0c2c88f13a17136a2636f0e3f058a718ff703f",
+      "worktreeSha256": "8c52a98c871a908fcba1819b757e158624fedfad6edfeca00790b30bb476b6c3"
+    },
+    {
+      "path": "lib/context/thread-summary-store.ts",
+      "gitBlob": "ec335323aeee76459f30f71161a3b607c2dad2e8",
+      "worktreeSha256": "c167a5bab6788424b6cbe5fc9f334869ce244b8b5e961361ef3411546c636e73"
+    },
+    {
+      "path": "lib/context/token-budget.ts",
+      "gitBlob": "7983888e51dfd4f53f73304699e3f4331fc49e10",
+      "worktreeSha256": "a68ac3cd840209055c59b86c9ff4d5f78fc92e9333c0c3c35db1f6cc02890793"
+    },
+    {
+      "path": "lib/context/web-context.ts",
+      "gitBlob": "4ce130e4438ee1a8528b42636dba4508bc18b14e",
+      "worktreeSha256": "28f816074948cfce06604626ea8fcd13f0f680d889018412656441a7e5eeae71"
+    },
+    {
+      "path": "lib/preferences/instructions.ts",
+      "gitBlob": "4c541274a126cfbe65836ed707829797a8a4c608",
+      "worktreeSha256": "55f6660d298f61b111a6234590328f15f0614500ab042cfb50e87995f36d5293"
+    },
+    {
+      "path": "lib/preferences/model.ts",
+      "gitBlob": "d62bb44686ee82a27db57ac95e54febdf95e09ef",
+      "worktreeSha256": "97b507b0b47ec6dc890a7287b866254203dda230a07bb8c754c8a249e4cc514a"
+    },
+    {
+      "path": "lib/preferences/store.ts",
+      "gitBlob": "92bc066a03b1679b1ccb04e23ee14c200f7117e9",
+      "worktreeSha256": "93bd3eac0e84c0841ac319890780c6e26a7fec76bfc3f3b91c57f435aae46540"
+    },
+    {
+      "path": "lib/preferences/types.ts",
+      "gitBlob": "9282299fbea0ac9765e59328f6f99ad96ea4b5b9",
+      "worktreeSha256": "9ce80390ce6df297931fdba1c2feea03ae1a2b004044885cb7cc9e2268e09c29"
+    },
+    {
+      "path": "lib/preferences/validation.ts",
+      "gitBlob": "e6616e82b1f07cc306819ecfd67c23a0e7540078",
+      "worktreeSha256": "0f70edce9ae706a9019e12aa6018283fdb6e18a42f42341e82e50203f0477f29"
+    },
+    {
+      "path": "lib/recall/handle.ts",
+      "gitBlob": "0a535fee1b7f48177fb38fe2bcee118f8ea095e9",
+      "worktreeSha256": "20a3460f7c8413d1f49904c6e348e6f6a4559ab56df0bc904ee5750a56a4b0a1"
+    },
+    {
+      "path": "lib/recall/intent.ts",
+      "gitBlob": "fd6617c3fc54646113f26aa959b0644b7d2dde41",
+      "worktreeSha256": "3afceb1cb18ed0e4376a8ad2183b1603cd3c256cdf1237f40d310e390f3d694b"
+    },
+    {
+      "path": "lib/recall/normalize.ts",
+      "gitBlob": "9206a8989e2be715e0e48b8b529c9986f56dd930",
+      "worktreeSha256": "fa5c4ea36152dc6c82721b65009b713286ef47b4c17198d6b9e8e0427abbabd6"
+    },
+    {
+      "path": "lib/recall/rank.ts",
+      "gitBlob": "55558ad3451d302f3f3a65d29f76aca26d0f4502",
+      "worktreeSha256": "28354c8f4480c65ef93363f08d1bdd0f39a4b907516ced9ae66e668963dde42f"
+    },
+    {
+      "path": "lib/recall/retrieve.ts",
+      "gitBlob": "d2f8ab121e95961d33e1052ebb3be23a219d1dfd",
+      "worktreeSha256": "87003b7401685d0ce40a90ad035eb9d87552debc168167bcb5b4d39b73779114"
+    },
+    {
+      "path": "lib/recall/store.ts",
+      "gitBlob": "edb1fe0e1e6adebe83df65a1fbdf61808837b7ed",
+      "worktreeSha256": "da1c7f320cbc7c5fb0385a6d022e9ca6b0f8e9f7896dce0df7fe906337a0d15d"
+    },
+    {
+      "path": "lib/recall/topic.ts",
+      "gitBlob": "f677379c775d0080d6079875920ae514d7142d84",
+      "worktreeSha256": "46ab0aef1b7b6540b086cf6f92e4b81a9a41a52ee19b290041493cd037a97151"
+    },
+    {
+      "path": "lib/recall/types.ts",
+      "gitBlob": "78dd05e6284b44d00c99b4580773a150d30f2df5",
+      "worktreeSha256": "e24dac3a5f2bc3e368fe268c56309855ae64328cdd24d1cfb0fe3a04a2526422"
+    },
+    {
+      "path": "lib/research/budgets.ts",
+      "gitBlob": "7033aa40ba8a591d7cd5543571b4bebb2e3d786f",
+      "worktreeSha256": "853aff4a3fdb22d4f1e2227209e7ec4bf8983f2dd59024b519e07a0e0d0ed202"
+    },
+    {
+      "path": "lib/research/chat-stream.ts",
+      "gitBlob": "04fea0978cecea279f3ad9a91547e9f382ddeb42",
+      "worktreeSha256": "cec0e7fbccdb67ee78adb4fa01d1c3b13d00ae3b02cdd0663a044b7178ab1e0f"
+    },
+    {
+      "path": "lib/research/evidence.ts",
+      "gitBlob": "f2c80d14d343ee16fe5819d53f0f6d4871f554ef",
+      "worktreeSha256": "02741900f47b9258523a42d285ea57b38378886ce759d1110073f350dc8e7e83"
+    },
+    {
+      "path": "lib/research/gap.ts",
+      "gitBlob": "eaa8a086a885c01d10ffa4285955443c71693c74",
+      "worktreeSha256": "6a7584f69e1addb1baa4b93b6f2a11676ad09c8d1758c44995a3a3e21e3d9dba"
+    },
+    {
+      "path": "lib/research/gather.ts",
+      "gitBlob": "4132953857be3a2b70b7e14bd43f8812ef17d51a",
+      "worktreeSha256": "be77eb5df1a0f95f5dd26390b1229cce5baad3395da4dc6cefa47c92564f7cb3"
+    },
+    {
+      "path": "lib/research/orchestrator.ts",
+      "gitBlob": "5059434a10996a92e147b07141b9f4ee052c5c14",
+      "worktreeSha256": "fa55485b74bfc098eda6d52cc278c90779cb80a2d0ea9998551b981cf1a9f8b5"
+    },
+    {
+      "path": "lib/research/persist.ts",
+      "gitBlob": "8099d6419dd2a0a240f4654e1b1497b698a4dda2",
+      "worktreeSha256": "70ac43d53119bdb05e10962beded7963959dea66accc4d01d4c584dc0a6a425f"
+    },
+    {
+      "path": "lib/research/plan.ts",
+      "gitBlob": "0fed67a7a1daa27b52657680cdb49b65218d59b5",
+      "worktreeSha256": "e727db38ee6fb0d41fe00e19ad49a0cf8ca98be1f303ee86e962ad43b9578b22"
+    },
+    {
+      "path": "lib/research/select.ts",
+      "gitBlob": "3e15997c70db7416997076b515479a3a7ff25099",
+      "worktreeSha256": "8dc5e0e5bd007714b8eed1aab39240d78b87af7f1806576cd1c5225b57fef4c6"
+    },
+    {
+      "path": "lib/research/stages.ts",
+      "gitBlob": "d20e3b2388c0dad822ae78f4e1f8aa75daf2db91",
+      "worktreeSha256": "7d5e79e44951110c171472f1cbcc0a049a313858ae8d8d213d35e15ef5138686"
+    },
+    {
+      "path": "lib/research/synthesize.ts",
+      "gitBlob": "8c088f386048f406bf83e16f382e59eab7d2f73d",
+      "worktreeSha256": "55ea38fef5cc6a0effefbf21ab78d00ac8f568f3de314a30c22f62800bce31ea"
+    },
+    {
+      "path": "lib/research/types.ts",
+      "gitBlob": "834961a7e9f4f09f5a4b62bdd1ef978d227a6438",
+      "worktreeSha256": "e8879dee7aaea3363dfd27220a6419a43d30bad62392f5441ae1c37809c5b60c"
+    },
+    {
+      "path": "lib/research/usage-policy.ts",
+      "gitBlob": "11557acbd70c02ab379ef4b5a67d19e5bede013a",
+      "worktreeSha256": "efcbd99a3d60f3b4b92bff395caf2f92d46924ec5af7a879e918d62053df205f"
+    },
+    {
+      "path": "lib/usage/format.ts",
+      "gitBlob": "25e748025d1f5ceeadd6457f61979f23ceb20d77",
+      "worktreeSha256": "3a58ce24a879f447278583f15e7ad7dee4486e9b7cfb2191289c3cf96f6ea7b6"
+    },
+    {
+      "path": "lib/usage/guards.ts",
+      "gitBlob": "e218f1bc848e0b4b7355acc54afbecf708458be9",
+      "worktreeSha256": "6da536b4cea593afb0870753eed57820d8651ff41626dc5b1dc9d0e03ffb077c"
+    },
+    {
+      "path": "lib/usage/policy.ts",
+      "gitBlob": "716b8015830d1b529a2711a95a0aad46b5226a04",
+      "worktreeSha256": "a69daa47db41fb31b8437a016cd18d30e65d45a972b524ae8e6ed1a84f5f6567"
+    },
+    {
+      "path": "lib/usage/pricing.ts",
+      "gitBlob": "439a68b3ab9b4add72ecb7ff02d24ac78f486c96",
+      "worktreeSha256": "d1a08b88a991ada66e540598a444d9ee0c5860a6aa0545e6899eb9b450c954a7"
+    },
+    {
+      "path": "lib/usage/provider-usage.ts",
+      "gitBlob": "eb6fcadb162c6359d36479e4a854dfcfd2548780",
+      "worktreeSha256": "1bc39f115f2a60e0660c8b55992dab8a1e38d7d8a913f98827a3f8cfb1927a61"
+    },
+    {
+      "path": "lib/usage/research-spend.ts",
+      "gitBlob": "62f341b7c70be6ce4a731b71a91dcd2c493fabd4",
+      "worktreeSha256": "ce6fddf4942c82238a005eab9620b0898d675f1cedbb35f3e094d3f4a0e72aff"
+    },
+    {
+      "path": "lib/usage/spend-policy.ts",
+      "gitBlob": "5bb09a9d59daddfe697c7ab76bf85a57f3546f64",
+      "worktreeSha256": "f1cce946124ae31da9abae043af285ac8514ad08def816f0bea74e171607687b"
+    },
+    {
+      "path": "lib/usage/spend.ts",
+      "gitBlob": "71b37b448c76a5e9fb507fbe10686379d82a3e41",
+      "worktreeSha256": "542f592dafb53b9fd490ac1a0ac34548d2dddf2225cff8b8b34d3d8c0f17a0c4"
+    },
+    {
+      "path": "lib/usage/telemetry.ts",
+      "gitBlob": "adae7fdf36c007e683af2835831d16150a11b246",
+      "worktreeSha256": "864311cca504c65976995d4b7b136aaad95e66245fc13b2997455f2271dea32e"
+    },
+    {
+      "path": "lib/web/config.ts",
+      "gitBlob": "fd332ccefbec2f0ee92c40cfd1ce4d95fc9c9e02",
+      "worktreeSha256": "88f6fc52d392c6e0eff71d97d3c45cda26174dad9125919581577df3e942be51"
+    },
+    {
+      "path": "lib/web/degrade.ts",
+      "gitBlob": "a5e3dbc8beb5525b84ffee1d24f2b46dcc865441",
+      "worktreeSha256": "630c54b925dc5c412b108237349faa7aa2afbfca2cda9d849e1d642e0a633dec"
+    },
+    {
+      "path": "lib/web/extract.ts",
+      "gitBlob": "0098c50781eadb850d8afec5d500632eaa6b81bf",
+      "worktreeSha256": "87e6cc7a06ef3e820c3e7da3dd4078f39058009d7ba5949a2ffe62d011fbbbf9"
+    },
+    {
+      "path": "lib/web/fetch-page.ts",
+      "gitBlob": "b94ef3e78c7013b3f78b051eb57db5bceda6d223",
+      "worktreeSha256": "2dbdb0e4cea6dcf20c9a3322dd74395ebf6cbf146b7fc4a6f87f79a6670760b8"
+    },
+    {
+      "path": "lib/web/pipeline.ts",
+      "gitBlob": "bb66c99657e7949cc154a252b58aa8a85fcf5b03",
+      "worktreeSha256": "e4cceaa9a0e35451057cf02a37551435b8905ae6853c177cc9f613dbf843ce80"
+    },
+    {
+      "path": "lib/web/provider.ts",
+      "gitBlob": "2a6e1cf04f8a7d12c644282b952337aec5380ddb",
+      "worktreeSha256": "776154ed4a3fde6744b53cf240523f20d8d9bb95385472f9c8ec661adef48ba6"
+    },
+    {
+      "path": "lib/web/providers/tavily.ts",
+      "gitBlob": "9dabbee0315d898b4e56ac98a8f4a16d9fbb5db5",
+      "worktreeSha256": "58533249cd42879ba0e2c53af10acbe0b43e367d227dbfb1de5c7b71039d4846"
+    },
+    {
+      "path": "lib/web/routing.ts",
+      "gitBlob": "b566f22fa9952a2453bb8092c9b91012bea69ab0",
+      "worktreeSha256": "bec3cab2fdde800b888325c95e2449a3e5b469e310f65b4e1bc92bfc425e5c2b"
+    },
+    {
+      "path": "lib/web/select.ts",
+      "gitBlob": "c55afee3a7785af7109e24b9ada1ad0770139d55",
+      "worktreeSha256": "e140dfeb4ab1fdf18fd63adefa4c0d0f73974b75c811c708f4b852d6dff8b105"
+    },
+    {
+      "path": "lib/web/ssrf.ts",
+      "gitBlob": "23d7d3c79965ac4fd5d324711d0c72753a4ad7a6",
+      "worktreeSha256": "5294ce575e4e861d0bb71ec6c9cd60cd15b150e1980fb96718e1d58987118184"
+    },
+    {
+      "path": "lib/web/types.ts",
+      "gitBlob": "e3a04ee46595505b1ee43dc1f97899562798e911",
+      "worktreeSha256": "c7417a908d8887c09f157e97cf9fbf8f13f7bde26485c121f41a2c3baca881a5"
+    },
+    {
+      "path": "package-lock.json",
+      "gitBlob": "1d899fd2acf1b1fca733a53c2678f0dbec2ca225",
+      "worktreeSha256": "ac17a333c714cd9fbe53a3780a2416efbb6c72a8c6cbe392dca65fcaf5c93a22"
+    },
+    {
+      "path": "package.json",
+      "gitBlob": "b123983363f96d127f942e7263a6898f3c747887",
+      "worktreeSha256": "e6c08946eba2e031a8fb7598716738e6ff4d3715aa10c7729d13a38465b6a264"
+    },
+    {
+      "path": "playwright.config.ts",
+      "gitBlob": "a42c0ea210c3a3f47a5610481a9d47975856f557",
+      "worktreeSha256": "e0946192faf7e22dae4a08fc94ed5ecf84837f85d0903e1db46efd144d5f0075"
+    },
+    {
+      "path": "scripts/response-quality-eval.mjs",
+      "gitBlob": "27b48d8500b4851ee805118162f321ece78eed64",
+      "worktreeSha256": "472d87921f53a26668aa66c54f511cdea8d9c129ed6e8fedc3f7d7e5c2f921ac"
+    },
+    {
+      "path": "tests/fixtures/attachments/attachment-a.txt",
+      "gitBlob": "4360916329df9ae658ae1c50e083925bc93029da",
+      "worktreeSha256": "d3b2598871c2bfbd709438e7350486f01c3595c70e68908bce2c618c1dde23f9"
+    },
+    {
+      "path": "tests/fixtures/attachments/attachment-b.md",
+      "gitBlob": "a4b76f510aade086880e18af15291ccb1972caee",
+      "worktreeSha256": "8ac46f7808e2d70eda99cb399b0bd2e017909584483a9b3ef856b22baed2ba6c"
+    },
+    {
+      "path": "tests/fixtures/attachments/pdf.ts",
+      "gitBlob": "8d1aeee73e88b7ae5753e0d063dbfe531aa8c654",
+      "worktreeSha256": "3e475f9c547d6d189f6dce999e96dab43e71c92ad1c75984528d7afcd98a3232"
+    },
+    {
+      "path": "tests/fixtures/chat-core-composer.tsx",
+      "gitBlob": "2cc1cd0c318a8bc6981924838bccb78a6d80786e",
+      "worktreeSha256": "14f064d4a04eb762f95066d3ed0e4dab985619d382e735e90731f3b5d218d0dd"
+    },
+    {
+      "path": "tests/fixtures/deep-research.ts",
+      "gitBlob": "dde0c159df4402ef33e1fafb45a55a53751b5233",
+      "worktreeSha256": "5525b5936c6a53c82f7d2640ffeb2348a88917d7d6e1303adfa738f5cadc242e"
+    },
+    {
+      "path": "tests/fixtures/files-v3.ts",
+      "gitBlob": "a57872b99c5f16276bd09e4b5634b0d0e31252ef",
+      "worktreeSha256": "95d2bab4cbdb73e1c91c60fe201b0b7f11f6bc3ab6f3e8730228c213bba60a7c"
+    },
+    {
+      "path": "tests/fixtures/formatting-sample.ts",
+      "gitBlob": "189f718bc8532a62281461071d25a9143360040f",
+      "worktreeSha256": "bb0cfdce9910407ef86c54a328b481d3081f71cd6333be1e145156808822d0c6"
+    },
+    {
+      "path": "tests/fixtures/github/commits.json",
+      "gitBlob": "aa0fbbbebf8ac23e0b172599afa231404a96a804",
+      "worktreeSha256": "20ed657cd3cd18424ec059e3263630d3e36d85b266f514838405d86bc700b945"
+    },
+    {
+      "path": "tests/fixtures/github/issues.json",
+      "gitBlob": "3fa0c2b90157da33ab2d29b501f37be670f38fff",
+      "worktreeSha256": "4fc55359ba103bb8dfd519965757a0aac98ce806aea20d5243c7985be280c588"
+    },
+    {
+      "path": "tests/fixtures/github/pull.json",
+      "gitBlob": "139fd48396784a6f4e328910e2c12743cc88be39",
+      "worktreeSha256": "dc79dfa0f5f3a1aafc0cd3b21a8bd28987e1659e3e728cea2841ff186feab0dc"
+    },
+    {
+      "path": "tests/fixtures/github/pulls.json",
+      "gitBlob": "66763a8e2e829eee4e91a50ec44c05dadd36e499",
+      "worktreeSha256": "aa16b7e8aac18c37a12b69a595b57be015cee912087a0324e367d8b1af9089c9"
+    },
+    {
+      "path": "tests/fixtures/github/repo-private.json",
+      "gitBlob": "709146b557ee69867c8e2db2cf2ce030abfa97ed",
+      "worktreeSha256": "c3a33802f43bd8eb236b0524c796eed72142f5302946569a2c6df1da0369f929"
+    },
+    {
+      "path": "tests/fixtures/github/repo.json",
+      "gitBlob": "c2a8a59bcc2bb566ab9808f49cdd6838e2e8f0b9",
+      "worktreeSha256": "b9255aedaf1bffc2c40723d54bcce62d2431467f784aa4d4910974186d4e168a"
+    },
+    {
+      "path": "tests/fixtures/github/workflow-runs.json",
+      "gitBlob": "6a24e652c8727bb79b55083cca8fedc8217f94f9",
+      "worktreeSha256": "93daf5230d592ae704b46984d7fcc14c32660ce3caa527d27774e2320493ab55"
+    },
+    {
+      "path": "tests/fixtures/long-reply.ts",
+      "gitBlob": "1581acc8e3c042befbbee95cbecc59d87e65370d",
+      "worktreeSha256": "f7d354a767e56b60d1c41084638af1d3716ea0530e1e86ecfed037d8cf7ac8ff"
+    },
+    {
+      "path": "tests/fixtures/response-quality-cases.ts",
+      "gitBlob": "03fa82ece6ffdcf5d7a0882ac3f733770b39e69e",
+      "worktreeSha256": "3eabfbc40bd872be6a723bd3fb42e5aee9f226a6c915c34fbe03e46edebfe7d9"
+    },
+    {
+      "path": "tests/fixtures/response-quality-v2.json",
+      "gitBlob": "0f114b558e7c4e1a7eb447713feca3dc82933ef8",
+      "worktreeSha256": "b9f7183852254949e59e9f18380818bd2a363ef57e49ca6582ba09a30bcbdc20"
+    },
+    {
+      "path": "tests/fixtures/web-search.ts",
+      "gitBlob": "c244b1b8dd16e67393530fa1b203e4684e95075d",
+      "worktreeSha256": "0025483802e0633e77f2fcea68d0b27d42c63eede64fc1891820f8a1d2792601"
+    },
+    {
+      "path": "tests/fixtures/workbench-v2-preview.tsx",
+      "gitBlob": "0dfcdb3a0777ac70ba9e6762451c549d47879516",
+      "worktreeSha256": "06bb087d07ccbaa655820c5bff91d612462ab186d99f2597060656dc22abcd9c"
+    },
+    {
+      "path": "vitest.config.mts",
+      "gitBlob": "db15f3ab4ae11c9057362e702dfeef4420198f8f",
+      "worktreeSha256": "3ea9b19979f08863fcc4f0e066428b1db7a064ecb402ac63313dec106f519454"
+    },
+    {
+      "path": "vitest.integration.config.mts",
+      "gitBlob": "5af3f2968c8f6241d27d467b9708921c0d382d2b",
+      "worktreeSha256": "484e0bc3e65e823f46c06eeaaea3b700bd8fad6a7fb05ddd0f4e676bd8064888"
+    }
+  ],
+  "availableVerificationCommands": [
+    {
+      "command": "npm run lint",
+      "purpose": "Repository lint",
+      "status": "pending_dependency_install",
+      "writes": "eslint cache"
+    },
+    {
+      "command": "npm run typecheck",
+      "purpose": "TypeScript contracts",
+      "status": "pending_dependency_install",
+      "writes": "tsbuild cache if enabled"
+    },
+    {
+      "command": "npm test",
+      "purpose": "Unit regression suite",
+      "status": "pending_dependency_install",
+      "paidProviderCalls": false
+    },
+    {
+      "command": "npm run test:quality:v2",
+      "purpose": "Offline scoring harness correctness; synthetic arithmetic does not establish model quality",
+      "status": "passed_11_synthetic_scorer_tests",
+      "paidProviderCalls": false
+    },
+    {
+      "command": "npm run release:check",
+      "purpose": "Repository release invariants",
+      "status": "not_run_at_freeze"
+    },
+    {
+      "command": "npm run test:integration:local",
+      "purpose": "Isolated local Postgres RLS and usage limits",
+      "status": "pending_local_database",
+      "note": "Inspect database target safety; tests drop/recreate test schema."
+    },
+    {
+      "command": "npm run test:e2e",
+      "purpose": "Mock/browser regressions; inspect test target before run",
+      "status": "pending_dependencies_browser_and_app"
+    },
+    {
+      "command": "npm run eval:response-quality -- --baseline <private-baseline.json> --after <private-candidate.json> --out <private-report.md>",
+      "purpose": "Offline human-scored actual output comparison",
+      "status": "pending_actual_outputs_and_human_ratings",
+      "paidProviderCalls": false
+    }
+  ],
+  "comparisonProtocol": {
+    "providerCallsMade": 0,
+    "humanRatingsRecorded": 0,
+    "automaticFullMatrixExecutionAuthorized": false,
+    "modes": [
+      "Fast",
+      "Balanced",
+      "High"
+    ],
+    "minimumFairPairsPerMode": 5,
+    "minimumFairPairsTotal": 15,
+    "categoryFloors": [
+      "technical",
+      "debugging",
+      "architecture",
+      "follow-up",
+      "grounding"
+    ],
+    "languages": [
+      "id",
+      "en"
+    ],
+    "requiredMatch": [
+      "provider",
+      "model",
+      "reasoningEffort",
+      "contextTruncated",
+      "finishReason",
+      "responseDepth",
+      "fixtureId",
+      "historyFingerprint",
+      "roomFingerprint",
+      "filesFingerprint",
+      "toolsFingerprint"
+    ],
+    "completeFinishReasons": [
+      "stop"
+    ],
+    "acceptance": [
+      "strict score improvement over baseline",
+      "candidate comparable score >= 0.8",
+      "zero accuracy or completeness regressions",
+      "zero critical factual/security errors",
+      "zero explicit brevity failures or regressions",
+      "human-reviewed source fidelity on every run"
+    ],
+    "procedure": [
+      "Keep baseline and candidate SHAs immutable; evaluate each worker against baseline independently.",
+      "Keep all real calls and retries under strict approved USD1 total; estimate first and use a dedicated evaluation account. Record effective model/effort and redacted context fingerprints.",
+      "Seed identical sanitized prompt, complete ordered history, Room facts, files and deterministic evidence/tool fixtures for baseline and candidate. Live search changes require frozen source snapshots and timestamps.",
+      "Run only an explicitly budgeted subset. Record actual response, finish reason, token usage, latency, spend and truncation diagnostics privately. Stop at the approved spend ceiling.",
+      "An independent HUMAN reviews source fidelity and rubric dimensions. Do not substitute synthetic unit outputs or agent ratings for required human scoring.",
+      "Use the existing offline scorer; separate changed-route/truncation/incomplete pairs from fair comparisons. Pending or unavailable modes cannot support a PASS claim."
+    ],
+    "approvedMaximumUsd": 1,
+    "spendNote": "Root reports user approval with conflicting USD1 initial/USD5 condition; strict USD1 total including retries applies. Estimate costs before real calls; approval does not supply required independent HUMAN ratings."
+  },
+  "evaluationMatrix": [
+    {
+      "caseId": "simple-fact-en",
+      "category": "simple",
+      "language": "en",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "simple-fact-en",
+        "language": "en",
+        "category": "simple",
+        "prompt": "What is the capital of Japan?",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "brevity"
+        ]
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "room-definition-id",
+      "category": "simple",
+      "language": "id",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "room-definition-id",
+        "language": "id",
+        "category": "simple",
+        "prompt": "Apa beda Room dan Thread di Nibie?",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "brevity"
+        ]
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "rest-explanation-en",
+      "category": "explanation",
+      "language": "en",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "rest-explanation-en",
+        "language": "en",
+        "category": "explanation",
+        "prompt": "Explain REST APIs with a concrete endpoint example and why statelessness matters.",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "whyHow",
+          "example"
+        ]
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "jwt-explanation-id",
+      "category": "explanation",
+      "language": "id",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "jwt-explanation-id",
+        "language": "id",
+        "category": "explanation",
+        "prompt": "Jelaskan cara kerja JWT pada proses login, termasuk validasi dan risikonya.",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "whyHow",
+          "example"
+        ]
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "database-index-en",
+      "category": "explanation",
+      "language": "en",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "database-index-en",
+        "language": "en",
+        "category": "explanation",
+        "prompt": "How do PostgreSQL B-tree indexes speed up queries, and what do they cost?",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "whyHow",
+          "example",
+          "tradeoffs"
+        ]
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "react-render-id",
+      "category": "explanation",
+      "language": "id",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "react-render-id",
+        "language": "id",
+        "category": "explanation",
+        "prompt": "Kenapa React component bisa re-render dan gimana cara mengurangi render yang nggak perlu?",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "whyHow",
+          "example"
+        ]
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "debug-api-en",
+      "category": "debugging",
+      "language": "en",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "debug-api-en",
+        "language": "en",
+        "category": "debugging",
+        "prompt": "My API returns 500 after a database migration but I have no stack trace. Diagnose safely.",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "whyHow",
+          "tradeoffs"
+        ]
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "debug-stream-id",
+      "category": "debugging",
+      "language": "id",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "debug-stream-id",
+        "language": "id",
+        "category": "debugging",
+        "prompt": "Context build 2ms, tapi token pertama keluar 4 detik. Apa penyebabnya dan bagaimana memverifikasi?",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "whyHow"
+        ]
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "debug-rls-en",
+      "category": "debugging",
+      "language": "en",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "debug-rls-en",
+        "language": "en",
+        "category": "debugging",
+        "prompt": "My Supabase query returns zero rows for one signed-in user. Explain a useful debugging sequence.",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "whyHow",
+          "example"
+        ]
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "compare-orm-id",
+      "category": "comparison",
+      "language": "id",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "compare-orm-id",
+        "language": "id",
+        "category": "comparison",
+        "prompt": "Bandingkan Prisma dan Drizzle untuk Next.js + Supabase, pilih salah satu beserta trade-off.",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "tradeoffs"
+        ]
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "compare-storage-en",
+      "category": "comparison",
+      "language": "en",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "compare-storage-en",
+        "language": "en",
+        "category": "comparison",
+        "prompt": "Choose PostgreSQL versus SQLite for an early SaaS product with concurrent users.",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "tradeoffs"
+        ]
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "architecture-rag-id",
+      "category": "architecture",
+      "language": "id",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "architecture-rag-id",
+        "language": "id",
+        "category": "architecture",
+        "prompt": "Rancang RAG assistant untuk dokumen klinik, jelaskan retrieval, evaluasi, keamanan, dan biaya.",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "whyHow",
+          "tradeoffs",
+          "grounding"
+        ]
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "architecture-caching-en",
+      "category": "architecture",
+      "language": "en",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "architecture-caching-en",
+        "language": "en",
+        "category": "architecture",
+        "prompt": "Design caching for a high-traffic product catalog API, including invalidation and trade-offs.",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "whyHow",
+          "tradeoffs",
+          "example"
+        ]
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "architecture-ai-routing-id",
+      "category": "architecture",
+      "language": "id",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "architecture-ai-routing-id",
+        "language": "id",
+        "category": "architecture",
+        "prompt": "Bagaimana merancang router Fast, Balanced, High dengan fallback yang aman untuk streaming?",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "whyHow",
+          "tradeoffs"
+        ]
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "coding-debounce-en",
+      "category": "coding",
+      "language": "en",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "coding-debounce-en",
+        "language": "en",
+        "category": "coding",
+        "prompt": "Implement a typed TypeScript debounce function and show one usage example.",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "example"
+        ]
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "spring-transaction-id",
+      "category": "coding",
+      "language": "id",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "spring-transaction-id",
+        "language": "id",
+        "category": "coding",
+        "prompt": "Contoh penggunaan @Transactional di Spring Boot, kapan rollback terjadi dan jebakannya.",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "whyHow",
+          "example"
+        ]
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "howto-env-en",
+      "category": "how-to",
+      "language": "en",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "howto-env-en",
+        "language": "en",
+        "category": "how-to",
+        "prompt": "How should I configure private environment variables in a Next.js Vercel deployment and verify them?",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "whyHow",
+          "example"
+        ]
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "planning-migration-id",
+      "category": "planning",
+      "language": "id",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "planning-migration-id",
+        "language": "id",
+        "category": "planning",
+        "prompt": "Susun langkah migrasi PostgreSQL zero-downtime untuk tabel besar dengan rollback plan.",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "tradeoffs"
+        ]
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "followup-interview-id",
+      "category": "follow-up",
+      "language": "id",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "followup-interview-id",
+        "language": "id",
+        "category": "follow-up",
+        "prompt": "Oke, apa yang harus aku pelajari dulu?",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "continuity",
+          "tradeoffs"
+        ],
+        "context": {
+          "history": [
+            {
+              "role": "user",
+              "content": "Persiapan interview backend engineer di PT DANS Multi Pro"
+            },
+            {
+              "role": "assistant",
+              "content": "Siapkan Java, Spring Boot, SQL, API design dan testing."
+            },
+            {
+              "role": "user",
+              "content": "Stack utama Java Spring Boot"
+            }
+          ]
+        }
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "followup-stack-en",
+      "category": "follow-up",
+      "language": "en",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "followup-stack-en",
+        "language": "en",
+        "category": "follow-up",
+        "prompt": "And what changes if I use Java instead?",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "continuity"
+        ],
+        "context": {
+          "history": [
+            {
+              "role": "user",
+              "content": "Design an API backend with Node.js and PostgreSQL."
+            },
+            {
+              "role": "assistant",
+              "content": "A Node.js REST API can use TypeScript and PostgreSQL with a transaction boundary."
+            }
+          ]
+        }
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "room-facts-id",
+      "category": "room",
+      "language": "id",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "room-facts-id",
+        "language": "id",
+        "category": "room",
+        "prompt": "Dari catatan Room ini, apa scope yang sudah disepakati dan apa yang masih usulan?",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "grounding"
+        ],
+        "context": {
+          "room": "Project clinic assistant: confirmed scope is informational clinic FAQ grounded in official pages; appointment booking and WhatsApp are only proposals."
+        }
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "file-noanswer-en",
+      "category": "file",
+      "language": "en",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "file-noanswer-en",
+        "language": "en",
+        "category": "file",
+        "prompt": "Using only the supplied clinic-hours file, what is the exact consultation price?",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "grounding"
+        ],
+        "context": {
+          "file": "Clinic is open Monday-Friday 09:00-17:00. No consultation prices listed."
+        }
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "web-sources-id",
+      "category": "web",
+      "language": "id",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "web-sources-id",
+        "language": "id",
+        "category": "web",
+        "prompt": "Rangkum perbedaan dua sumber web yang tidak sepakat, tanpa menebak mana yang benar.",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "grounding",
+          "tradeoffs"
+        ],
+        "context": {
+          "web": "Two simulated source excerpts for evaluation: Source A states 12% growth, Source B states 8%; neither independently verified."
+        }
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "research-citations-en",
+      "category": "research",
+      "language": "en",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "research-citations-en",
+        "language": "en",
+        "category": "research",
+        "prompt": "Assess a current market claim using supplied cited evidence. Separate facts from inference.",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "grounding",
+          "tradeoffs"
+        ],
+        "context": {
+          "web": "Two simulated, explicitly attributed market reports with different methodologies; do not treat as live market data."
+        }
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "brevity-sentence-id",
+      "category": "brevity",
+      "language": "id",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "brevity-sentence-id",
+        "language": "id",
+        "category": "brevity",
+        "prompt": "Dalam satu kalimat, apa itu database index?",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "brevity"
+        ]
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "brevity-command-en",
+      "category": "brevity",
+      "language": "en",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "brevity-command-en",
+        "language": "en",
+        "category": "brevity",
+        "prompt": "Only the command to undo my last git commit and keep staged changes.",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "brevity"
+        ]
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "concise-setting-id",
+      "category": "brevity",
+      "language": "id",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "concise-setting-id",
+        "language": "id",
+        "category": "brevity",
+        "prompt": "Jelaskan secara ringkas kenapa perlu index SQL.",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "brevity"
+        ]
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "detailed-setting-en",
+      "category": "detailed",
+      "language": "en",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "detailed-setting-en",
+        "language": "en",
+        "category": "detailed",
+        "prompt": "Explain database indexes in depth with examples, EXPLAIN, write costs and index trade-offs.",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "whyHow",
+          "example",
+          "tradeoffs"
+        ]
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "no-fabrication-id",
+      "category": "grounding",
+      "language": "id",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "no-fabrication-id",
+        "language": "id",
+        "category": "grounding",
+        "prompt": "Berapa tarif dokter tepatnya di Klinik Fiktif Melati hari ini? Jangan mengarang.",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "grounding"
+        ]
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    },
+    {
+      "caseId": "ideation-three-en",
+      "category": "ideation",
+      "language": "en",
+      "modes": [
+        "Fast",
+        "Balanced",
+        "High"
+      ],
+      "responseDepth": "balanced",
+      "fixtureInput": {
+        "id": "ideation-three-en",
+        "language": "en",
+        "category": "ideation",
+        "prompt": "Suggest exactly three useful, different AI assistant concepts for small businesses with pros and cons.",
+        "dimensions": [
+          "accuracy",
+          "completeness",
+          "tradeoffs"
+        ]
+      },
+      "baselineStatus": "pending_approved_spend_and_human_scoring",
+      "candidateStatus": "pending_implementation_and_independent_review"
+    }
+  ],
+  "v3AdditionalMatrix": [
+    {
+      "id": "saved-fast-new-chat-room",
+      "input": "Save Fast; create General chat and Room thread; refresh and sign out/in; change existing chat to High",
+      "expected": "All new conversations inherit Fast; existing chat retains High",
+      "status": "pending_candidate_browser_validation",
+      "type": "preference_lifecycle"
+    },
+    {
+      "id": "long-thread-summary-continuity",
+      "input": "Use a sanitized >32-turn history with an early architecture decision, later correction and final follow-up",
+      "expected": "Retain current corrected decision; summary supplements recent messages without replacing them",
+      "status": "pending_frozen_extended_fixture",
+      "type": "context"
+    },
+    {
+      "id": "cross-conversation-room-isolation",
+      "input": "Seed two owned conversations and two Rooms plus another account; ask an explicit recall follow-up",
+      "expected": "Only authorized relevant memories/Room facts included; no foreign-account or foreign-Room evidence",
+      "status": "pending_frozen_extended_fixture",
+      "type": "context"
+    },
+    {
+      "id": "research-conflicting-missing-evidence",
+      "input": "Freeze reputable conflicting sources and a failed/missing source",
+      "expected": "Explicit conflict or uncertainty; every citation references retained supporting evidence; no invented source",
+      "status": "pending_frozen_extended_fixture",
+      "type": "research"
+    }
+  ],
+  "regressionCoverage": [
+    {
+      "area": "streaming and incomplete finish",
+      "files": [
+        "tests/unit/ai-sse.test.ts",
+        "tests/unit/ai-provider.test.ts",
+        "tests/unit/chat-route.test.ts",
+        "tests/e2e/response-quality.spec.ts"
+      ],
+      "limitation": "Browser responses/provider outputs mocked; does not validate real provider"
+    },
+    {
+      "area": "Stop and persistence",
+      "files": [
+        "tests/unit/user-stop-integration.test.ts",
+        "tests/unit/chat-actions.test.ts",
+        "tests/unit/chat-recovery.test.ts",
+        "tests/unit/new-chat-room.test.ts"
+      ],
+      "limitation": "Unit database adapters mocked; real persistence needs signed-in browser and isolated DB checks"
+    },
+    {
+      "area": "RLS and usage limits",
+      "files": [
+        "tests/integration/rls.test.ts",
+        "tests/unit/usage-guards.test.ts",
+        "tests/unit/research-spend.test.ts",
+        "tests/unit/weekly-usage-policy.test.ts"
+      ],
+      "limitation": "Requires isolated target; actual deployment migration/config parity remains separate"
+    },
+    {
+      "area": "model preferences",
+      "files": [
+        "tests/unit/preferences-model.test.ts",
+        "tests/unit/preferences-actions.test.ts",
+        "tests/e2e/model-picker.spec.ts"
+      ],
+      "limitation": "Saved default lifecycle across refresh/sign-in and new Room threads needs dedicated candidate validation"
+    },
+    {
+      "area": "context and research",
+      "files": [
+        "tests/unit/context-engine.test.ts",
+        "tests/unit/thread-summary-lifecycle.test.ts",
+        "tests/unit/recall-context.test.ts",
+        "tests/unit/web-search-eval.test.ts",
+        "tests/unit/deep-research-eval.test.ts",
+        "tests/unit/citations.test.ts"
+      ],
+      "limitation": "Deterministic fixtures validate mechanics, not actual model follow-up accuracy or source fidelity"
+    }
+  ],
+  "checkResults": [
+    {
+      "command": "node --test tests/quality/response-quality-eval.test.mjs",
+      "result": "pass",
+      "tests": 11,
+      "note": "Synthetic scorer correctness only; zero actual model quality evidence"
+    }
+  ]
+}

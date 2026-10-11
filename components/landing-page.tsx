@@ -139,7 +139,7 @@ export function LandingPage() {
       <section className="landing-hero landing-shell" aria-labelledby="landing-hero-title">
         <p className="landing-kicker">Personal AI workspace</p>
         <h1 id="landing-hero-title">A quieter place to think with AI.</h1>
-        <p className="landing-lede">Nibie is your personal AI workspace for thinking, writing, coding, exploring ideas, and getting work done — without the clutter.</p>
+        <p className="landing-lede">Nibie is a personal AI workspace that helps you think, research, and continue your work—with less repetition.</p>
         <div className="landing-actions">
           <Link className="landing-button" href={chatPath}>Try Nibie</Link>
           <a className="landing-button landing-button-secondary" href="#product">See how it works</a>

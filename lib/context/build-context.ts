@@ -78,6 +78,8 @@ export function buildContext(input: BuildContextInput): ContextPlan {
       remaining.value -= tokens;
     } else summaryDroppedForBudget = true;
   }
+  const coveredThrough = summaryIncluded && summary ? summary.coversThroughPosition : 0;
+  const uncoveredOlder = olderMessages.filter((message) => message.position > coveredThrough);
   const includedPieces: ProfilePiece[] = [];
   const droppedPieces: ProfilePiece[] = [];
   for (const piece of pieces) {
@@ -116,6 +118,8 @@ export function buildContext(input: BuildContextInput): ContextPlan {
     } else droppedPins.push(piece);
   }
 
+  // Keep Room/profile guidance ahead of raw history, then reserve the summary's bridge before excerpts.
+  const reservedOlderFit = summaryIncluded && !protectedFit.dropped.length ? takeNewest(uncoveredOlder, remaining) : null;
   // Explicitly selected files only. They never become a search over the room.
   const requestedFiles = input.files?.length ? input.files : null;
   const renderedFiles = requestedFiles ? renderFileContext(requestedFiles, Math.min(FILE_TOKEN_CAP, remaining.value)) : null;
@@ -140,19 +144,22 @@ export function buildContext(input: BuildContextInput): ContextPlan {
   if (renderedMemories?.text) remaining.value -= estimateTokens(renderedMemories.text);
 
   // The summary replaces only positions it covers. Uncovered older history can bridge to recent turns, but never cross a budget gap.
-  const coveredThrough = summaryIncluded && summary ? summary.coversThroughPosition : 0;
-  const uncoveredOlder = olderMessages.filter((message) => message.position > coveredThrough);
-  const olderFit = protectedFit.dropped.length
+  const olderFit = reservedOlderFit ?? (protectedFit.dropped.length
     ? { included: [], dropped: uncoveredOlder }
-    : takeNewest(uncoveredOlder, remaining);
+    : takeNewest(uncoveredOlder, remaining));
   const dialogue = [...olderFit.included, ...protectedFit.included, current];
-  const droppedMessages = [...olderFit.dropped, ...protectedFit.dropped];
-  const selectedMessages = new Set(selected);
-  const historyCapped = input.messages.some((message) =>
-    Number.isInteger(message.position) && message.position > coveredThrough && message.position <= input.currentPosition
-    && (message.role === "user" || message.role === "assistant") && !selectedMessages.has(message));
-  const historyTruncated = historyCapped || droppedMessages.length > 0;
-  const truncated = historyTruncated || droppedPieces.length > 0 || droppedRoom.length > 0 || droppedPins.length > 0 || Boolean(renderedFiles?.truncated) || Boolean(renderedAttachments?.truncated) || Boolean(renderedWeb?.truncated) || Boolean(renderedMemories?.truncated) || summaryDroppedForBudget;
+  const selectedSet = new Set(selected);
+  const droppedAtFetchCap = input.messages.filter((message) => Number.isInteger(message.position)
+    && message.position <= input.currentPosition && message.position > coveredThrough
+    && (message.role === "user" || message.role === "assistant") && !selectedSet.has(message));
+  const droppedMessages = [...droppedAtFetchCap, ...olderFit.dropped, ...protectedFit.dropped];
+  // An omitted correction can invalidate facts in the earlier summary too.
+  const summaryHasGap = summaryIncluded && droppedMessages.some((message) => message.position > coveredThrough);
+  if (summaryHasGap) {
+    summaryText = "";
+    summaryIncluded = false;
+  }
+  const truncated = droppedMessages.length > 0 || droppedPieces.length > 0 || droppedRoom.length > 0 || droppedPins.length > 0 || Boolean(renderedFiles?.truncated) || Boolean(renderedAttachments?.truncated) || Boolean(renderedWeb?.truncated) || Boolean(renderedMemories?.truncated) || summaryDroppedForBudget;
 
   const profileText = includedPieces.map((piece) => piece.text).join("\n");
   const roomText = includedRoom.map((piece) => piece.text).join("\n\n");
@@ -181,7 +188,7 @@ export function buildContext(input: BuildContextInput): ContextPlan {
   if (requestedMemories) {
     blocks.push(block({ id: "memory", authority: "untrusted_data", priority: 6, required: false, text: memoryText, tokenEstimate: memoryText ? estimateTokens(memoryText) : 0, included: Boolean(memoryText), exclusionReason: memoryText ? null : "budget" }));
   }
-  blocks.push(block({ id: "thread_summary", authority: "untrusted_data", priority: 6, required: false, text: summaryText, tokenEstimate: summaryText ? estimateTokens(summaryText) : 0, included: summaryIncluded, exclusionReason: summaryIncluded ? null : summaryDroppedForBudget ? "budget" : resolved.exclusionReason }));
+  blocks.push(block({ id: "thread_summary", authority: "untrusted_data", priority: 6, required: false, text: summaryText, tokenEstimate: summaryText ? estimateTokens(summaryText) : 0, included: summaryIncluded, exclusionReason: summaryIncluded ? null : summaryHasGap ? "stale" : summaryDroppedForBudget ? "budget" : resolved.exclusionReason }));
   for (const message of dialogue) {
     const isCurrent = message === current;
     blocks.push(block({
@@ -201,12 +208,12 @@ export function buildContext(input: BuildContextInput): ContextPlan {
     ? { type: "profile", label: "Your profile", state: "included", reason: profileReason(includedPieces.flatMap((piece) => piece.categories)) }
     : { type: "profile", label: "Your profile", state: "not_used", reason: input.preferenceReadFailed ? "Preferences couldn't be loaded, so Nibie used defaults." : "No extra profile details are set." };
   const earlierIncluded = dialogue.length - 1;
-  const recentDiagnostic: ContextSourceDiagnostic = earlierIncluded > 0 || historyTruncated
-    ? { type: "recent_messages", label: "Recent conversation", state: earlierIncluded > 0 ? "included" : "not_used", reason: historyTruncated ? "Older messages left out so this reply stays focused." : "The latest messages in this thread." }
+  const recentDiagnostic: ContextSourceDiagnostic = earlierIncluded > 0 || droppedMessages.length > 0
+    ? { type: "recent_messages", label: "Recent conversation", state: earlierIncluded > 0 ? "included" : "not_used", reason: droppedMessages.length ? "Older messages left out so this reply stays focused." : "The latest messages in this thread." }
     : { type: "recent_messages", label: "Recent conversation", state: "not_used", reason: "No earlier messages yet." };
   const summaryDiagnostic: ContextSourceDiagnostic = summaryIncluded
     ? { type: "thread_summary", label: "Thread summary", state: "included", reason: "Older parts of this conversation." }
-    : { type: "thread_summary", label: "Thread summary", state: "not_used", reason: summaryDroppedForBudget ? "Not used for this reply." : "Not needed yet." };
+    : { type: "thread_summary", label: "Thread summary", state: "not_used", reason: summaryHasGap ? "Not used because newer conversation context was left out." : summaryDroppedForBudget ? "Not used for this reply." : "Not needed yet." };
   const roomDiagnostic: ContextSourceDiagnostic | null = hasRoom
     ? roomText
       ? { type: "room", label: "This room", state: "included", reason: roomReason(includedRoom.flatMap((piece) => piece.categories)) }
