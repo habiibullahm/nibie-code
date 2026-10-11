@@ -562,9 +562,10 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   spendReservedMicros = gate.spendReservedMicros;
 
   if (lifecycle.clientCancelled || request.signal.aborted) {
-    await releaseReservation();
-    try { await persist("Response stopped.", "interrupted"); }
-    finally { lifecycle.cleanup(); }
+    try {
+      await releaseReservation();
+      await persist("Response stopped.", "interrupted");
+    } finally { lifecycle.cleanup(); }
     return new Response(null, { status: 499 });
   }
 
@@ -579,21 +580,23 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   try { responseStream = await chatProvider.stream(mode, prompt, lifecycle.signal); }
   catch (error) {
     lifecycle.stopWatching();
-    const interrupted = lifecycle.userStopped || lifecycle.clientCancelled || request.signal.aborted;
-    if (interrupted) logWarn("chat.response.interrupted", { requestId, stage: "provider", status: "interrupted", durationMs: durationMs() });
-    else logError("chat.response.failed", { requestId, durationMs: durationMs(), ...providerFailureFields(error) });
-    if (!interrupted) await releaseReservation();
-    try { if (!lifecycle.userStopped) await persist(lifecycle.clientCancelled ? stoppedPlaceholder : "Response unavailable.", lifecycle.clientCancelled ? "interrupted" : "error"); }
-    finally { lifecycle.cleanup(); }
-    return NextResponse.json({ error: lifecycle.providerTimedOut ? timeoutError : safeError }, { status: lifecycle.providerTimedOut ? 504 : 502 });
+    try {
+      const interrupted = lifecycle.userStopped || lifecycle.clientCancelled || request.signal.aborted;
+      if (interrupted) logWarn("chat.response.interrupted", { requestId, stage: "provider", status: "interrupted", durationMs: durationMs() });
+      else logError("chat.response.failed", { requestId, durationMs: durationMs(), ...providerFailureFields(error) });
+      if (!interrupted) await releaseReservation();
+      if (!lifecycle.userStopped) await persist(lifecycle.clientCancelled ? stoppedPlaceholder : "Response unavailable.", lifecycle.clientCancelled ? "interrupted" : "error");
+      return NextResponse.json({ error: lifecycle.providerTimedOut ? timeoutError : safeError }, { status: lifecycle.providerTimedOut ? 504 : 502 });
+    } finally { lifecycle.cleanup(); }
   }
 
   const usageStarted = await lifecycle.startUsage();
   if (!usageStarted) {
     lifecycle.abortProvider();
-    await releaseReservation();
-    try { await persist(lifecycle.clientCancelled ? "Response stopped." : "Response unavailable.", lifecycle.clientCancelled ? "interrupted" : "error"); }
-    finally { lifecycle.cleanup(); }
+    try {
+      await releaseReservation();
+      await persist(lifecycle.clientCancelled ? "Response stopped." : "Response unavailable.", lifecycle.clientCancelled ? "interrupted" : "error");
+    } finally { lifecycle.cleanup(); }
     if (lifecycle.clientCancelled || request.signal.aborted) return new Response(null, { status: 499 });
     return NextResponse.json({ error: safeError }, { status: 503 });
   }

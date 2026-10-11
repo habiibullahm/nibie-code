@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as telemetry from "@/lib/usage/telemetry";
+import * as usageGuards from "@/lib/usage/guards";
 
 const { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc, spendOk, modelOptions, contextCapabilities, withoutAttachments, attachmentState, stopState, messageSourceInserts } = vi.hoisted(() => {
   const createClient = vi.fn(); const stream = vi.fn(); const claim = vi.fn(); const usageReserve = vi.fn(); const usageStart = vi.fn(); const usageRelease = vi.fn();
@@ -290,6 +291,19 @@ describe("POST /api/chat", () => {
     expect(usageRelease).toHaveBeenCalledOnce();
     expect(writes).toContainEqual(expect.objectContaining({ content: "Response unavailable.", status: "error" }));
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("cleans up the usage-start failure even if its release adapter unexpectedly throws", async () => {
+    vi.useFakeTimers();
+    readyClient([]);
+    stream.mockResolvedValue(sseBody("must not be delivered"));
+    usageStart.mockReturnValue(query({ data: false, error: null }));
+    const release = vi.spyOn(usageGuards, "releaseUsageHold").mockRejectedValue(new Error("release unavailable"));
+    try {
+      expect((await POST(validRequest())).status).toBe(503);
+      expect(vi.getTimerCount()).toBe(0);
+      expect(stream.mock.calls[0][2].aborted).toBe(true);
+    } finally { release.mockRestore(); }
   });
 
   it.each([["Fast", 1], ["Balanced", 3], ["High", 6]] as const)("reserves the server weight for %s (%i credits)", async (model, cost) => {

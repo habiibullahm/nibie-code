@@ -23,7 +23,8 @@ retains its specialized orchestration.
 and aborts upstream. Consumer cancellation calls it immediately. Ordinary chat
 also calls it on usage-start failure, fixing the previously surviving Stop
 interval. Its stream finalizer guarantees cleanup even when settlement or
-telemetry fails.
+telemetry fails. Pre-start provider, disconnect, and usage-start exits also
+guarantee cleanup if the release adapter unexpectedly throws.
 
 ## Usage coordination
 
