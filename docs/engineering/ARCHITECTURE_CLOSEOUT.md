@@ -90,5 +90,16 @@ Docker database and hosted PR CI; it never uses the shared app database for test
 
 The closeout branch passed 1,349 unit tests (including 20 allocation cases),
 standalone typecheck, lint (zero errors; three existing warnings), release
-consistency and production build. Changed-document local links resolve. Final
-combined regression evidence is recorded after integration verification.
+consistency and production build. Changed-document local links resolve. The combined candidate `a7e0f86bde0443a382a150cabbd333c46d25ede7`
+(cherry-picks of PRs #115/#116/#117 onto main `1f7191d`) passed 1,361 unit tests,
+typecheck, lint, release consistency and the complete browser suite: 182 passed,
+12 credential-dependent skips. Two new navigation cases pass on desktop/mobile.
+All Stop and copy cases passed; this does not establish the root cause of prior
+intermittent failures. Production build and clean-SHA release consistency also passed on that candidate.
+
+Earlier local full-browser attempts were invalidated by fixture hot reload and
+concurrent artifact-directory use, then by a dev-server termination while the
+cgroup recorded an out-of-memory kill during parallel builds. They are not
+passed gates. Final verification used one frozen combined tree, a dedicated
+artifact directory, two browser workers and sequential browser/build checks.
+No assertion, timeout or skip was relaxed.
