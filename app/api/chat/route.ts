@@ -15,8 +15,9 @@ import { createCitationStreamFilter } from "@/lib/citations/parse";
 import { citationViewsFromPrepared } from "@/lib/citations/persist";
 import { citationInstructionFor } from "@/lib/citations/prepare";
 import type { SourceReference } from "@/lib/citations/types";
-import { stopPollMs, stoppedPlaceholder } from "@/lib/chat/stop";
+import { stoppedPlaceholder } from "@/lib/chat/stop";
 import { createGenerationPersistence } from "@/lib/chat/orchestration/persist-result";
+import { createGenerationLifecycle } from "@/lib/chat/orchestration/generation-lifecycle";
 import { buildContext } from "@/lib/context/build-context";
 import { CONTEXT_POLICY_VERSION } from "@/lib/context/context-policy";
 import type { FileContextInput } from "@/lib/context/context-types";
@@ -35,7 +36,7 @@ import type { MemoryRecord, RecallOperationStatus } from "@/lib/recall/types";
 import { operationalCodes } from "@/lib/observability/codes";
 import { logError, logInfo, logWarn } from "@/lib/observability/logger";
 import { requestIdFrom } from "@/lib/observability/request-id";
-import { finalizeGenerationSpend, releaseUsageHold, reserveUsageBeforeGeneration, startWeeklyUsage } from "@/lib/usage/guards";
+import { reserveUsageBeforeGeneration } from "@/lib/usage/guards";
 import type { UsageKind } from "@/lib/usage/policy";
 import { estimateUsageFromText, withCostEstimate, type GenerationCostEstimate, type ProviderTokenUsage } from "@/lib/usage/provider-usage";
 import { failureCategoryFrom, logGenerationTelemetry } from "@/lib/usage/telemetry";
@@ -506,13 +507,18 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   }
   if (!prompt || !context) return NextResponse.json({ error: safeError }, { status: 503 });
 
-  const aborter = new AbortController();
-  let clientCancelled = false;
-  const onRequestAbort = () => { clientCancelled = true; aborter.abort(); };
-  request.signal.addEventListener("abort", onRequestAbort, { once: true });
-  if (request.signal.aborted) onRequestAbort();
-  if (clientCancelled) {
-    request.signal.removeEventListener("abort", onRequestAbort);
+  const lifecycle = createGenerationLifecycle({
+    requestSignal: request.signal,
+    supabase,
+    userId: user.id,
+    generationId: assistant.id,
+    requestId,
+    mode,
+    stopStage: "generation",
+    durationMs,
+  });
+  if (lifecycle.clientCancelled) {
+    lifecycle.cleanup();
     await persist("Response stopped.", "interrupted");
     return new Response(null, { status: 499 });
   }
@@ -521,9 +527,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   const usageKind: UsageKind = "chat";
   let usageReservationMs = 0;
   let spendReservedMicros = 0;
-  const releaseReservation = async () => {
-    await releaseUsageHold({ supabase, userId: user.id, generationId: assistant.id, requestId, logicalMode: mode });
-  };
+  const releaseReservation = lifecycle.releaseBeforeStart;
   const gate = await reserveUsageBeforeGeneration({
     supabase,
     userId: user.id,
@@ -539,11 +543,11 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
           ? "Weekly usage limit reached."
           : gate.code === operationalCodes.aiSpendLimitRejected
             ? "AI spend budget reached."
-            : clientCancelled ? "Response stopped." : "Response unavailable.",
-        gate.status === 429 ? "error" : clientCancelled ? "interrupted" : "error",
+            : lifecycle.clientCancelled ? "Response stopped." : "Response unavailable.",
+        gate.status === 429 ? "error" : lifecycle.clientCancelled ? "interrupted" : "error",
       );
-    } finally { request.signal.removeEventListener("abort", onRequestAbort); }
-    if (clientCancelled || request.signal.aborted) return new Response(null, { status: 499 });
+    } finally { lifecycle.cleanup(); }
+    if (lifecycle.clientCancelled || request.signal.aborted) return new Response(null, { status: 499 });
     if (gate.status === 429) {
       return NextResponse.json({
         code: gate.code,
@@ -557,54 +561,43 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   usageReservationMs = gate.usageReservationMs;
   spendReservedMicros = gate.spendReservedMicros;
 
-  if (clientCancelled || request.signal.aborted) {
-    await releaseReservation();
-    try { await persist("Response stopped.", "interrupted"); }
-    finally { request.signal.removeEventListener("abort", onRequestAbort); }
+  if (lifecycle.clientCancelled || request.signal.aborted) {
+    try {
+      await releaseReservation();
+      await persist("Response stopped.", "interrupted");
+    } finally { lifecycle.cleanup(); }
     return new Response(null, { status: 499 });
   }
 
-  // A browser disconnect does not always reach request.signal (it does not on every host), so Stop is also read from the
-  // reply row: once Stop marks it interrupted (from any instance), the provider stream is aborted here.
-  let userStopped = false;
-  let stopCheck: Promise<void> | null = null;
-  const checkStopped = async () => {
-    try {
-      const { data, error } = await supabase.from("messages").select("status").eq("id", assistant.id).maybeSingle();
-      if (error || data?.status === "streaming" || userStopped || aborter.signal.aborted) return;
-      userStopped = true;
-      clearInterval(stopWatch);
-      logInfo("chat.response.user_stopped", { requestId, reason: "user_stopped", stage: "generation", status: data?.status ?? "missing", durationMs: durationMs() });
-      aborter.abort();
-    } catch { /* a failed check is retried on the next tick */ } finally { stopCheck = null; }
-  };
-  const stopWatch = setInterval(() => { stopCheck ??= checkStopped(); }, stopPollMs);
-  let providerTimedOut = false;
-  const timeout = setTimeout(() => { providerTimedOut = true; aborter.abort(); }, 120_000);
+  // Stop is also observed from the row because browser disconnects do not reach request.signal on every host.
+  lifecycle.watchForStop();
+  lifecycle.startProviderTimeout();
   const providerStartedAt = Date.now();
   let providerTtftMs: number | null = null;
   let finishReason = "unspecified";
   const timeoutError = "The provider took too long to finish this response. Please try again.";
   let responseStream: ReadableStream<Uint8Array>;
-  try { responseStream = await chatProvider.stream(mode, prompt, aborter.signal); }
+  try { responseStream = await chatProvider.stream(mode, prompt, lifecycle.signal); }
   catch (error) {
-    clearInterval(stopWatch);
-    const interrupted = userStopped || clientCancelled || request.signal.aborted;
-    if (interrupted) logWarn("chat.response.interrupted", { requestId, stage: "provider", status: "interrupted", durationMs: durationMs() });
-    else logError("chat.response.failed", { requestId, durationMs: durationMs(), ...providerFailureFields(error) });
-    if (!interrupted) await releaseReservation();
-    try { if (!userStopped) await persist(clientCancelled ? stoppedPlaceholder : "Response unavailable.", clientCancelled ? "interrupted" : "error"); }
-    finally { clearTimeout(timeout); request.signal.removeEventListener("abort", onRequestAbort); }
-    return NextResponse.json({ error: providerTimedOut ? timeoutError : safeError }, { status: providerTimedOut ? 504 : 502 });
+    lifecycle.stopWatching();
+    try {
+      const interrupted = lifecycle.userStopped || lifecycle.clientCancelled || request.signal.aborted;
+      if (interrupted) logWarn("chat.response.interrupted", { requestId, stage: "provider", status: "interrupted", durationMs: durationMs() });
+      else logError("chat.response.failed", { requestId, durationMs: durationMs(), ...providerFailureFields(error) });
+      if (!interrupted) await releaseReservation();
+      if (!lifecycle.userStopped) await persist(lifecycle.clientCancelled ? stoppedPlaceholder : "Response unavailable.", lifecycle.clientCancelled ? "interrupted" : "error");
+      return NextResponse.json({ error: lifecycle.providerTimedOut ? timeoutError : safeError }, { status: lifecycle.providerTimedOut ? 504 : 502 });
+    } finally { lifecycle.cleanup(); }
   }
 
-  const usageStarted = await startWeeklyUsage({ supabase, generationId: assistant.id, requestId, logicalMode: mode });
+  const usageStarted = await lifecycle.startUsage();
   if (!usageStarted) {
-    aborter.abort();
-    await releaseReservation();
-    try { await persist(clientCancelled ? "Response stopped." : "Response unavailable.", clientCancelled ? "interrupted" : "error"); }
-    finally { clearTimeout(timeout); request.signal.removeEventListener("abort", onRequestAbort); }
-    if (clientCancelled || request.signal.aborted) return new Response(null, { status: 499 });
+    lifecycle.abortProvider();
+    try {
+      await releaseReservation();
+      await persist(lifecycle.clientCancelled ? "Response stopped." : "Response unavailable.", lifecycle.clientCancelled ? "interrupted" : "error");
+    } finally { lifecycle.cleanup(); }
+    if (lifecycle.clientCancelled || request.signal.aborted) return new Response(null, { status: 499 });
     return NextResponse.json({ error: safeError }, { status: 503 });
   }
 
@@ -625,7 +618,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
         if (!text) return;
         if (providerTtftMs === null) providerTtftMs = Date.now() - providerStartedAt;
         output += text;
-        if (!clientCancelled) controller.enqueue(encoder.encode(event("delta", { text })));
+        if (!lifecycle.clientCancelled) controller.enqueue(encoder.encode(event("delta", { text })));
       };
       const feedModelText = (chunk: string) => {
         if (!chunk) return;
@@ -663,7 +656,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       const save = async (status: "complete" | "interrupted" | "error") => {
         seal();
         // An explicit Stop already saved the text its user saw; the generation's own output is never written over it.
-        if (userStopped) {
+        if (lifecycle.userStopped) {
           await persistCitationSourcesForKeptReply(output);
           return "stopped" as const;
         }
@@ -673,17 +666,17 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       };
       const reportStopped = () => {
         logWarn("chat.response.interrupted", { requestId, status: "interrupted", reason: "user_stopped", durationMs: durationMs() });
-        if (!clientCancelled) controller.enqueue(encoder.encode(event("status", { status: "interrupted" })));
+        if (!lifecycle.clientCancelled) controller.enqueue(encoder.encode(event("status", { status: "interrupted" })));
       };
       try {
-        if (clientCancelled) throw new Error("Response aborted.");
+        if (lifecycle.clientCancelled) throw new Error("Response aborted.");
         controller.enqueue(encoder.encode(event("start", {
           id: assistant.id,
           position: assistant.position,
           context,
           ...(citationViews.length ? { sources: citationViews } : {}),
         })));
-        for await (const item of readOpenAiSse(responseStream, aborter.signal)) {
+        for await (const item of readOpenAiSse(responseStream, lifecycle.signal)) {
           if (item.type === "done") {
             completed = true;
             finishReason = item.finishReason ?? "unspecified";
@@ -693,11 +686,11 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
           feedModelText(item.text);
         }
         seal();
-        if (userStopped || clientCancelled || request.signal.aborted) {
+        if (lifecycle.userStopped || lifecycle.clientCancelled || request.signal.aborted) {
           const saved = await save("interrupted");
           failureCategory = failureCategoryFrom({ interrupted: true });
           logWarn("chat.response.interrupted", { requestId, status: "interrupted", durationMs: durationMs() });
-          if (!clientCancelled) controller.enqueue(encoder.encode(saved !== "failed" ? event("status", { status: "interrupted" }) : event("error", { error: safeError })));
+          if (!lifecycle.clientCancelled) controller.enqueue(encoder.encode(saved !== "failed" ? event("status", { status: "interrupted" }) : event("error", { error: safeError })));
         } else if (completed && output.length > 0) {
           const saved = await save("complete");
           if (saved === "saved") {
@@ -724,10 +717,10 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
         }
       } catch (error) {
         if (error instanceof ProviderStreamError) finishReason = error.finishReason;
-        else if (providerTimedOut) finishReason = "timeout";
+        else if (lifecycle.providerTimedOut) finishReason = "timeout";
         let saved: "saved" | "stopped" | "failed" = "failed";
-        try { saved = await save(userStopped || clientCancelled || request.signal.aborted ? "interrupted" : "error"); } catch { logError("chat.persistence.failed", { requestId, code: operationalCodes.assistantPersistFailed, stage: "persist" }); }
-        const interrupted = saved === "stopped" || userStopped || clientCancelled || request.signal.aborted;
+        try { saved = await save(lifecycle.userStopped || lifecycle.clientCancelled || request.signal.aborted ? "interrupted" : "error"); } catch { logError("chat.persistence.failed", { requestId, code: operationalCodes.assistantPersistFailed, stage: "persist" }); }
+        const interrupted = saved === "stopped" || lifecycle.userStopped || lifecycle.clientCancelled || request.signal.aborted;
         failureCategory = failureCategoryFrom({
           interrupted,
           finishReason,
@@ -735,47 +728,42 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
         });
         if (interrupted) logWarn("chat.response.interrupted", { requestId, status: "interrupted", durationMs: durationMs() });
         else logError("chat.response.failed", { requestId, stage: "stream", code: operationalCodes.aiProviderFailed, status: "error", durationMs: durationMs() });
-        if (!interrupted) controller.enqueue(encoder.encode(event("error", { error: error instanceof ProviderStreamError ? error.message : providerTimedOut ? timeoutError : safeError })));
-        else if (!clientCancelled) controller.enqueue(encoder.encode(saved !== "failed" ? event("status", { status: "interrupted" }) : event("error", { error: safeError })));
+        if (!interrupted) controller.enqueue(encoder.encode(event("error", { error: error instanceof ProviderStreamError ? error.message : lifecycle.providerTimedOut ? timeoutError : safeError })));
+        else if (!lifecycle.clientCancelled) controller.enqueue(encoder.encode(saved !== "failed" ? event("status", { status: "interrupted" }) : event("error", { error: safeError })));
       } finally {
-        costEstimate = withCostEstimate(
-          mode,
-          providerUsage ?? estimateUsageFromText({ promptChars, outputChars: output.length }),
-        );
-        await finalizeGenerationSpend({
-          supabase,
-          userId: user.id,
-          generationId: assistant.id,
-          actualMicros: costEstimate.estimatedUsdMicros,
-          requestId,
-        });
-        logGenerationTelemetry({
-          requestId,
-          logicalMode: mode,
-          provider: providerFor(mode),
-          model: configuredModelLabel(mode),
-          usageKind,
-          usage: costEstimate,
-          providerTtftMs,
-          generationDurationMs: Date.now() - providerStartedAt,
-          totalDurationMs: Date.now() - requestStartedAt,
-          finishReason,
-          failureCategory,
-          streamCompleted: completed,
-          outputChars: output.length,
-          usageReservationMs,
-          spendReservedMicros,
-          spendAccepted: true,
-        });
-        clearTimeout(timeout);
-        clearInterval(stopWatch);
-        aborter.abort();
-        request.signal.removeEventListener("abort", onRequestAbort);
-        try { summaryMaintenance.finish(); } catch { /* best effort */ }
-        if (!clientCancelled) { controller.enqueue(encoder.encode(event("done", {}))); controller.close(); }
+        lifecycle.clearProviderTimeout();
+        try {
+          costEstimate = withCostEstimate(
+            mode,
+            providerUsage ?? estimateUsageFromText({ promptChars, outputChars: output.length }),
+          );
+          await lifecycle.settleSpend(costEstimate.estimatedUsdMicros);
+          logGenerationTelemetry({
+            requestId,
+            logicalMode: mode,
+            provider: providerFor(mode),
+            model: configuredModelLabel(mode),
+            usageKind,
+            usage: costEstimate,
+            providerTtftMs,
+            generationDurationMs: Date.now() - providerStartedAt,
+            totalDurationMs: Date.now() - requestStartedAt,
+            finishReason,
+            failureCategory,
+            streamCompleted: completed,
+            outputChars: output.length,
+            usageReservationMs,
+            spendReservedMicros,
+            spendAccepted: true,
+          });
+        } finally {
+          lifecycle.cleanup();
+          try { summaryMaintenance.finish(); } catch { /* best effort */ }
+          if (!lifecycle.clientCancelled) { controller.enqueue(encoder.encode(event("done", {}))); controller.close(); }
+        }
       }
     },
-    cancel() { clientCancelled = true; clearInterval(stopWatch); aborter.abort(); },
+    cancel() { lifecycle.cancel(); },
   });
   return new Response(stream, { headers });
 }

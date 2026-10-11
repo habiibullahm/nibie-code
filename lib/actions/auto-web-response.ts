@@ -7,8 +7,9 @@ import { contextCapabilitiesFor, providerFor } from "@/lib/ai/registry";
 import { createReasoningStreamFilter } from "@/lib/ai/sanitize-model-output";
 import { ProviderStreamError, readOpenAiSse } from "@/lib/ai/sse";
 import type { ChatModel } from "@/lib/chat/validation";
-import { stopPollMs, stoppedPlaceholder } from "@/lib/chat/stop";
+import { stoppedPlaceholder } from "@/lib/chat/stop";
 import { createGenerationPersistence } from "@/lib/chat/orchestration/persist-result";
+import { createGenerationLifecycle } from "@/lib/chat/orchestration/generation-lifecycle";
 import { attachWebCitationHandles } from "@/lib/citations/attach";
 import { citationSourcesIncludedInContext } from "@/lib/citations/included";
 import { createCitationStreamFilter } from "@/lib/citations/parse";
@@ -36,7 +37,7 @@ import { operationalCodes } from "@/lib/observability/codes";
 import { logError, logInfo, logWarn } from "@/lib/observability/logger";
 import type { UserPreferences } from "@/lib/preferences/types";
 import type { MemoryRecord, RecallOperationStatus } from "@/lib/recall/types";
-import { finalizeGenerationSpend, releaseUsageHold, reserveUsageBeforeGeneration, startWeeklyUsage } from "@/lib/usage/guards";
+import { reserveUsageBeforeGeneration } from "@/lib/usage/guards";
 import { estimateUsageFromText, withCostEstimate, type ProviderTokenUsage } from "@/lib/usage/provider-usage";
 import { failureCategoryFrom, logGenerationTelemetry } from "@/lib/usage/telemetry";
 import type { WebContextInput } from "@/lib/web/types";
@@ -156,40 +157,17 @@ async function createAutoActionChatResponse(input: ResolvedActionChat): Promise<
   const responseStartedAt = Date.now();
   const durationMs = () => Date.now() - responseStartedAt;
 
-  const aborter = new AbortController();
-  let clientCancelled = false;
-  let userStopped = false;
-  const onRequestAbort = () => {
-    clientCancelled = true;
-    aborter.abort();
-  };
-  request.signal.addEventListener("abort", onRequestAbort, { once: true });
-  if (request.signal.aborted) onRequestAbort();
-
-  let stopCheck: Promise<void> | null = null;
-  const checkStopped = async () => {
-    try {
-      const { data, error } = await supabase.from("messages").select("status").eq("id", assistant.id).maybeSingle();
-      if (error || data?.status === "streaming" || userStopped || aborter.signal.aborted) return;
-      userStopped = true;
-      clearInterval(stopWatch);
-      logInfo("chat.response.user_stopped", {
-        requestId,
-        reason: "user_stopped",
-        stage: "action",
-        status: data?.status ?? "missing",
-        durationMs: durationMs(),
-      });
-      aborter.abort();
-    } catch {
-      /* retry next tick */
-    } finally {
-      stopCheck = null;
-    }
-  };
-  const stopWatch = setInterval(() => {
-    stopCheck ??= checkStopped();
-  }, stopPollMs);
+  const lifecycle = createGenerationLifecycle({
+    requestSignal: request.signal,
+    supabase,
+    userId,
+    generationId: assistant.id,
+    requestId,
+    mode,
+    stopStage: "action",
+    durationMs,
+  });
+  lifecycle.watchForStop();
 
   let citationSources: SourceReference[] = [];
   let citationViews: ReturnType<typeof citationViewsFromPrepared> = [];
@@ -202,9 +180,7 @@ async function createAutoActionChatResponse(input: ResolvedActionChat): Promise<
     citationSources: () => citationSources,
   });
 
-  const releaseReservation = async () => {
-    await releaseUsageHold({ supabase, userId, generationId: assistant.id, requestId, logicalMode: mode });
-  };
+  const releaseReservation = lifecycle.releaseBeforeStart;
 
   const summaryMaintenance = deferThreadSummaryMaintenance({ supabase, conversationId, requestId });
   let usageReservationMs = 0;
@@ -212,14 +188,13 @@ async function createAutoActionChatResponse(input: ResolvedActionChat): Promise<
   let providerStartedAt = Date.now();
   let providerTtftMs: number | null = null;
   let finishReason = "unspecified";
-  let providerTimedOut = false;
   let providerUsage: ProviderTokenUsage | null = null;
   const timeoutError = "The provider took too long to finish this response. Please try again.";
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const enqueue = (type: string, data: unknown) => {
-        if (!clientCancelled) controller.enqueue(encoder.encode(event(type, data)));
+        if (!lifecycle.clientCancelled) controller.enqueue(encoder.encode(event(type, data)));
       };
 
       // Early start so the client can show Action status while the Action runs.
@@ -231,7 +206,7 @@ async function createAutoActionChatResponse(input: ResolvedActionChat): Promise<
       });
 
       try {
-        if (clientCancelled || aborter.signal.aborted) {
+        if (lifecycle.clientCancelled || lifecycle.signal.aborted) {
           await releaseReservation();
           await persist("Response stopped.", "interrupted");
           enqueue("status", { status: "interrupted" });
@@ -255,7 +230,7 @@ async function createAutoActionChatResponse(input: ResolvedActionChat): Promise<
             roomId,
             messageId: assistant.id,
             requestId,
-            signal: aborter.signal,
+            signal: lifecycle.signal,
           },
           supabase,
           generationActionCount,
@@ -267,7 +242,7 @@ async function createAutoActionChatResponse(input: ResolvedActionChat): Promise<
         }
 
         const actionDurationMs = Date.now() - actionStartedAt;
-        if (outcome.status === "cancelled" || aborter.signal.aborted || userStopped || clientCancelled) {
+        if (outcome.status === "cancelled" || lifecycle.signal.aborted || lifecycle.userStopped || lifecycle.clientCancelled) {
           logInfo("action.cancelled", { requestId, actionId, durationMs: actionDurationMs });
           enqueue("action_error", {
             actionId,
@@ -441,7 +416,7 @@ async function createAutoActionChatResponse(input: ResolvedActionChat): Promise<
           return;
         }
 
-        if (clientCancelled || aborter.signal.aborted || userStopped) {
+        if (lifecycle.clientCancelled || lifecycle.signal.aborted || lifecycle.userStopped) {
           await releaseReservation();
           await persist(stoppedPlaceholder, "interrupted");
           enqueue("status", { status: "interrupted" });
@@ -464,8 +439,8 @@ async function createAutoActionChatResponse(input: ResolvedActionChat): Promise<
                 ? "Weekly usage limit reached."
                 : gate.code === operationalCodes.aiSpendLimitRejected
                   ? "AI spend budget reached."
-                  : clientCancelled ? "Response stopped." : "Response unavailable.",
-              gate.status === 429 || !clientCancelled ? "error" : "interrupted",
+                  : lifecycle.clientCancelled ? "Response stopped." : "Response unavailable.",
+              gate.status === 429 || !lifecycle.clientCancelled ? "error" : "interrupted",
             );
             enqueue("error", { error: gate.error });
             return;
@@ -474,41 +449,38 @@ async function createAutoActionChatResponse(input: ResolvedActionChat): Promise<
           spendReservedMicros = gate.spendReservedMicros;
         }
 
-        if (clientCancelled || aborter.signal.aborted || userStopped) {
+        if (lifecycle.clientCancelled || lifecycle.signal.aborted || lifecycle.userStopped) {
           await releaseReservation();
           await persist(stoppedPlaceholder, "interrupted");
           enqueue("status", { status: "interrupted" });
           return;
         }
 
-        const timeout = setTimeout(() => {
-          providerTimedOut = true;
-          aborter.abort();
-        }, 120_000);
+        lifecycle.startProviderTimeout();
         providerStartedAt = Date.now();
         let responseStream: ReadableStream<Uint8Array>;
         try {
-          responseStream = await chatProvider.stream(mode, prompt, aborter.signal);
+          responseStream = await chatProvider.stream(mode, prompt, lifecycle.signal);
         } catch {
-          clearTimeout(timeout);
-          const interrupted = userStopped || clientCancelled || aborter.signal.aborted;
+          lifecycle.clearProviderTimeout();
+          const interrupted = lifecycle.userStopped || lifecycle.clientCancelled || lifecycle.signal.aborted;
           if (interrupted) logWarn("chat.response.interrupted", { requestId, stage: "provider", status: "interrupted", durationMs: durationMs() });
           else logError("chat.response.failed", { requestId, durationMs: durationMs(), stage: "provider", code: operationalCodes.aiProviderFailed });
           if (!interrupted) await releaseReservation();
-          if (!userStopped) {
-            await persist(clientCancelled ? stoppedPlaceholder : "Response unavailable.", clientCancelled ? "interrupted" : "error");
+          if (!lifecycle.userStopped) {
+            await persist(lifecycle.clientCancelled ? stoppedPlaceholder : "Response unavailable.", lifecycle.clientCancelled ? "interrupted" : "error");
           }
           if (interrupted) enqueue("status", { status: "interrupted" });
-          else enqueue("error", { error: providerTimedOut ? timeoutError : safeError });
+          else enqueue("error", { error: lifecycle.providerTimedOut ? timeoutError : safeError });
           return;
         }
 
-        const usageStarted = await startWeeklyUsage({ supabase, generationId: assistant.id, requestId, logicalMode: mode });
+        const usageStarted = await lifecycle.startUsage();
         if (!usageStarted) {
-          clearTimeout(timeout);
-          aborter.abort();
+          lifecycle.clearProviderTimeout();
+          lifecycle.abortProvider();
           await releaseReservation();
-          await persist(clientCancelled ? "Response stopped." : "Response unavailable.", clientCancelled ? "interrupted" : "error");
+          await persist(lifecycle.clientCancelled ? "Response stopped." : "Response unavailable.", lifecycle.clientCancelled ? "interrupted" : "error");
           enqueue("error", { error: safeError });
           return;
         }
@@ -526,7 +498,7 @@ async function createAutoActionChatResponse(input: ResolvedActionChat): Promise<
           if (!text) return;
           if (providerTtftMs === null) providerTtftMs = Date.now() - providerStartedAt;
           output += text;
-          if (!clientCancelled) controller.enqueue(encoder.encode(event("delta", { text })));
+          if (!lifecycle.clientCancelled) controller.enqueue(encoder.encode(event("delta", { text })));
         };
         const feedModelText = (chunk: string) => {
           if (!chunk) return;
@@ -556,7 +528,7 @@ async function createAutoActionChatResponse(input: ResolvedActionChat): Promise<
         };
         const save = async (status: "complete" | "interrupted" | "error") => {
           seal();
-          if (userStopped) {
+          if (lifecycle.userStopped) {
             await persistCitationSourcesForKeptReply(output);
             return "stopped" as const;
           }
@@ -566,7 +538,7 @@ async function createAutoActionChatResponse(input: ResolvedActionChat): Promise<
         };
 
         try {
-          for await (const item of readOpenAiSse(responseStream, aborter.signal)) {
+          for await (const item of readOpenAiSse(responseStream, lifecycle.signal)) {
             if (item.type === "done") {
               completed = true;
               finishReason = item.finishReason ?? "unspecified";
@@ -576,10 +548,10 @@ async function createAutoActionChatResponse(input: ResolvedActionChat): Promise<
             feedModelText(item.text);
           }
           seal();
-          if (userStopped || clientCancelled || aborter.signal.aborted) {
+          if (lifecycle.userStopped || lifecycle.clientCancelled || lifecycle.signal.aborted) {
             const saved = await save("interrupted");
             logWarn("chat.response.interrupted", { requestId, status: "interrupted", durationMs: durationMs() });
-            if (!clientCancelled) {
+            if (!lifecycle.clientCancelled) {
               enqueue(saved !== "failed" ? "status" : "error", saved !== "failed" ? { status: "interrupted" } : { error: safeError });
             }
           } else if (completed && output.length > 0) {
@@ -605,23 +577,23 @@ async function createAutoActionChatResponse(input: ResolvedActionChat): Promise<
           }
         } catch (error) {
           if (error instanceof ProviderStreamError) finishReason = error.finishReason;
-          else if (providerTimedOut) finishReason = "timeout";
+          else if (lifecycle.providerTimedOut) finishReason = "timeout";
           let saved: "saved" | "stopped" | "failed" = "failed";
           try {
-            saved = await save(userStopped || clientCancelled || aborter.signal.aborted ? "interrupted" : "error");
+            saved = await save(lifecycle.userStopped || lifecycle.clientCancelled || lifecycle.signal.aborted ? "interrupted" : "error");
           } catch {
             logError("chat.persistence.failed", { requestId, code: operationalCodes.assistantPersistFailed, stage: "persist" });
           }
-          const interrupted = saved === "stopped" || userStopped || clientCancelled || aborter.signal.aborted;
+          const interrupted = saved === "stopped" || lifecycle.userStopped || lifecycle.clientCancelled || lifecycle.signal.aborted;
           if (interrupted) {
-            if (!clientCancelled) enqueue(saved !== "failed" ? "status" : "error", saved !== "failed" ? { status: "interrupted" } : { error: safeError });
+            if (!lifecycle.clientCancelled) enqueue(saved !== "failed" ? "status" : "error", saved !== "failed" ? { status: "interrupted" } : { error: safeError });
           } else {
             enqueue("error", {
-              error: error instanceof ProviderStreamError ? error.message : providerTimedOut ? timeoutError : safeError,
+              error: error instanceof ProviderStreamError ? error.message : lifecycle.providerTimedOut ? timeoutError : safeError,
             });
           }
         } finally {
-          clearTimeout(timeout);
+          lifecycle.clearProviderTimeout();
           const costEstimate = withCostEstimate(
             mode,
             providerUsage ?? estimateUsageFromText({
@@ -629,13 +601,7 @@ async function createAutoActionChatResponse(input: ResolvedActionChat): Promise<
               outputChars: output.length,
             }),
           );
-          await finalizeGenerationSpend({
-            supabase,
-            userId,
-            generationId: assistant.id,
-            actualMicros: costEstimate.estimatedUsdMicros,
-            requestId,
-          });
+          await lifecycle.settleSpend(costEstimate.estimatedUsdMicros);
           logGenerationTelemetry({
             requestId,
             logicalMode: mode,
@@ -670,24 +636,20 @@ async function createAutoActionChatResponse(input: ResolvedActionChat): Promise<
         }
         enqueue("error", { error: safeError });
       } finally {
-        clearInterval(stopWatch);
-        aborter.abort();
-        request.signal.removeEventListener("abort", onRequestAbort);
+        lifecycle.cleanup();
         try {
           summaryMaintenance.finish();
         } catch {
           /* best effort */
         }
-        if (!clientCancelled) {
+        if (!lifecycle.clientCancelled) {
           controller.enqueue(encoder.encode(event("done", {})));
           controller.close();
         }
       }
     },
     cancel() {
-      clientCancelled = true;
-      clearInterval(stopWatch);
-      aborter.abort();
+      lifecycle.cancel();
     },
   });
 

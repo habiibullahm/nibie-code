@@ -7,8 +7,9 @@ extraction in the architecture implementation plan.
 
 The authenticated route still supplies the Supabase client, owner, conversation,
 and claimed assistant id. Authentication, turn claiming, intent routing, provider
-streaming, SSE events, Stop polling, timeout cleanup, and usage accounting retain
-their existing owners.
+streaming, and SSE events retain their existing owners. Stop polling, timeout
+cleanup, and usage start/release/settlement now use the shared
+[generation lifecycle](CHAT_GENERATION_LIFECYCLE.md).
 
 ## Save contract
 
@@ -41,6 +42,5 @@ Action citations and Stop/Send races. GitHub Action and usage guard tests remain
 part of the focused regression set.
 
 This extraction has no schema, provider, pricing, or hosted environment changes.
-Deep Research retains its specialized persistence implementation. Session,
-terminal-state coordination, and shared streaming-runner extraction remain
-subsequent work.
+Deep Research retains its specialized persistence implementation. Session and
+shared streaming-runner extraction remain subsequent work.
