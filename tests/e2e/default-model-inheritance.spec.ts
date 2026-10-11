@@ -6,7 +6,7 @@ const newChat = (page: Page) => page.getByRole("button", { name: "New chat", exa
 async function openModelSettings(page: Page) {
   await page.getByRole("button", { name: "Settings", exact: true }).filter({ visible: true }).first().click();
   const settings = page.getByRole("dialog", { name: "Settings", exact: true });
-  await settings.getByRole("tab", { name: "Nibie", exact: true }).click();
+  await settings.getByRole("tab", { name: "AI & Models", exact: true }).click();
   const defaults = settings.getByRole("radiogroup", { name: "Default model" });
   await expect(defaults.getByRole("radio", { checked: true })).toBeEnabled();
   await expect(settings.getByRole("alert")).toHaveCount(0);

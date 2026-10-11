@@ -11,7 +11,7 @@ Nibie can already sign a person out of every device and delete that person's con
 - `public.users.id` references `auth.users.id` with `ON DELETE CASCADE`.
 - `conversations.user_id` and `messages.user_id` reference `public.users` with `ON DELETE CASCADE`.
 - Messages also cascade when their conversation row is deleted. That is the mechanism delete-all uses today.
-- `user_preferences` is the planned account-settings table. It does not exist yet. When it does, it must reference `public.users` with `ON DELETE CASCADE` and must not be writable with a client-supplied `user_id`.
+- `user_preferences` stores account settings and references `public.users` with `ON DELETE CASCADE`. Its actions derive the owner from the session and reject client-supplied owner identifiers.
 - `supabase.auth.signOut({ scope: "global" })` revokes sessions. It does not delete `auth.users`.
 
 Deleting `auth.users` is an Auth admin operation. The signed-in user's JWT cannot do it, and the running app must not gain the service role in order to offer a button.
@@ -24,7 +24,7 @@ Deleting `auth.users` is an Auth admin operation. The signed-in user's JWT canno
 4. Delete the Auth user with the service role, in a server-only environment that is not the Next.js request runtime today. A dedicated admin function, Edge Function, or other boundary that holds the service role is required. The browser and the public-key server client never see that credential.
 5. Let the existing foreign keys finish the cleanup after `auth.users` is removed:
    - `public.users`
-   - `user_preferences`, once that table exists and cascades from `public.users`
+   - `user_preferences`
    - `conversations`
    - `messages`
 6. Revoke every session as part of the Auth deletion, then send the browser to the signed-out login screen and clear `nibie-last-conversation`.
