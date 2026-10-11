@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 const dialog = (page: Page) => page.getByRole("dialog", { name: "Settings" });
 
-test("keeps weekly usage quiet in General settings and the picker shows safe mode weights", async ({ page }) => {
+test("keeps weekly usage in Usage & Plan settings and the picker shows safe mode weights", async ({ page }) => {
   await page.goto("/preview");
   await page.getByRole("button", { name: "Model: Balanced", exact: true }).click();
   const picker = page.getByRole("menu", { name: "Select model", exact: true });
@@ -14,7 +14,9 @@ test("keeps weekly usage quiet in General settings and the picker shows safe mod
 
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   const settings = dialog(page);
-  await expect(settings.getByRole("heading", { name: "Weekly AI usage" })).toBeVisible();
+  if (await settings.getByRole("combobox", { name: "Settings section" }).isVisible()) await settings.getByRole("combobox", { name: "Settings section" }).selectOption("usage");
+  else await settings.getByRole("tab", { name: "Usage & Plan" }).click();
+  await expect(settings.getByRole("heading", { name: "Usage & Plan" })).toBeVisible();
   await expect(settings.getByText("Free usage resets weekly. There’s no paid plan or billing yet.")).toBeVisible();
   await expect(settings.getByText("Weekly usage is available in your signed-in account.")).toBeVisible();
   await expect(settings.getByText(/Upgrade|Buy credits|Subscribe/i)).toHaveCount(0);
@@ -26,7 +28,9 @@ test("weekly usage settings fit a mobile viewport without horizontal overflow", 
   await page.getByRole("button", { name: "Open conversation menu" }).click();
   await page.locator(".mobile-sidebar").getByRole("button", { name: "Settings", exact: true }).click();
   const settings = dialog(page);
-  await expect(settings.getByRole("heading", { name: "Weekly AI usage" })).toBeVisible();
+  if (await settings.getByRole("combobox", { name: "Settings section" }).isVisible()) await settings.getByRole("combobox", { name: "Settings section" }).selectOption("usage");
+  else await settings.getByRole("tab", { name: "Usage & Plan" }).click();
+  await expect(settings.getByRole("heading", { name: "Usage & Plan" })).toBeVisible();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
   expect(overflow).toBe(false);
 });

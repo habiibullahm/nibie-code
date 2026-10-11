@@ -12,7 +12,7 @@ test.describe("settings shell", () => {
     await page.goto("/preview");
     await openSettings(page);
     await expect(dialog(page).getByRole("heading", { name: "General" })).toBeVisible();
-    for (const name of ["Nibie", "Chat", "Personalization", "Data & Privacy"]) {
+    for (const name of ["AI & Models", "Chat", "Personalization", "Memory & Context", "Usage & Plan", "Data & Privacy"]) {
       await dialog(page).getByRole("tab", { name, exact: true }).click();
       await expect(dialog(page).getByRole("heading", { name, exact: true })).toBeVisible();
     }
@@ -32,7 +32,7 @@ test.describe("settings shell", () => {
     await expect(page.getByRole("button", { name: "Model: High", exact: true })).toBeEnabled();
 
     await openSettings(page);
-    await dialog(page).getByRole("tab", { name: "Nibie", exact: true }).click();
+    await dialog(page).getByRole("tab", { name: "AI & Models", exact: true }).click();
     await dialog(page).getByRole("radio", { name: "Fast", exact: true }).click();
     await expect(dialog(page).getByRole("status")).toHaveText("Saved");
     await page.keyboard.press("Escape");
@@ -48,7 +48,7 @@ test.describe("settings shell", () => {
     await page.getByRole("button", { name: "Model: Fast", exact: true }).click();
     await page.getByRole("menuitemradio", { name: /^High/ }).click();
     await openSettings(page);
-    await dialog(page).getByRole("tab", { name: "Nibie", exact: true }).click();
+    await dialog(page).getByRole("tab", { name: "AI & Models", exact: true }).click();
     await expect(dialog(page).getByRole("radiogroup", { name: "Default model" }).getByRole("radio", { name: "Fast", exact: true })).toBeChecked();
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "New chat", exact: true }).first().click();
@@ -58,7 +58,7 @@ test.describe("settings shell", () => {
   test("offers Concise, Default, and Detailed response depth, with Default selected", async ({ page }) => {
     await page.goto("/preview");
     await openSettings(page);
-    await dialog(page).getByRole("tab", { name: "Nibie", exact: true }).click();
+    await dialog(page).getByRole("tab", { name: "AI & Models", exact: true }).click();
     const depth = dialog(page).getByRole("radiogroup", { name: "Response depth" });
     await expect(depth.getByRole("radio")).toHaveText(["Concise", "Default", "Detailed"]);
     await expect(depth.getByRole("radio", { name: "Default", exact: true })).toBeChecked();

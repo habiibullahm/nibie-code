@@ -789,18 +789,20 @@ a.message-source-title:hover { text-decoration: underline; text-decoration-thick
 }
 
 /* Settings dialog */
-.settings-layer { position: fixed; z-index: 30; inset: 0; display: grid; place-items: center; padding: 24px; }
-.settings-scrim { position: absolute; inset: 0; width: 100%; border: 0; background: var(--scrim); cursor: pointer; }
-.settings-dialog { position: relative; display: grid; grid-template-rows: auto minmax(0, 1fr); width: min(680px, 100%); height: min(540px, 100%); border: 1px solid var(--border); border-radius: 16px; background: var(--bg-raised); box-shadow: var(--shadow-menu); overflow: hidden; }
+.settings-dialog[open] { display: grid; }
+.settings-dialog::backdrop { background: var(--scrim); }
+.settings-dialog .settings-header .icon-button { width: 44px; height: 44px; }
+.settings-mobile-nav { display: none; }
+.settings-dialog { position: fixed; margin: auto; padding: 0; color: var(--text); display: none; grid-template-rows: auto minmax(0, 1fr) auto; width: min(800px, calc(100% - 48px)); height: min(620px, calc(100dvh - 48px)); max-width: none; max-height: none; border: 1px solid var(--border); border-radius: 16px; background: var(--bg-raised); box-shadow: var(--shadow-menu); overflow: hidden; }
 .settings-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 14px 14px 18px; border-bottom: 1px solid var(--border); }
 .settings-header h1 { margin: 0; color: var(--text); font-size: 16px; font-weight: 600; letter-spacing: -.02em; }
-.settings-body { display: grid; grid-template-columns: 168px minmax(0, 1fr); min-height: 0; }
+.settings-body { display: grid; grid-template-columns: 190px minmax(0, 1fr); min-height: 0; }
 .settings-nav { display: flex; flex-direction: column; gap: 2px; padding: 10px; border-right: 1px solid var(--border); background: var(--bg-subtle); overflow: auto; }
-.settings-nav button { min-height: 34px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--text-3); text-align: left; font-size: 13px; cursor: pointer; }
+.settings-nav button { min-height: 44px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--text-3); text-align: left; font-size: 13px; cursor: pointer; }
 .settings-nav button:hover { background: var(--hover); color: var(--text); }
 .settings-nav button[aria-selected="true"] { background: var(--active); color: var(--text); font-weight: 600; }
-.settings-content { min-width: 0; overflow: auto; padding: 18px 18px 16px; }
-.weekly-usage { display: flex; flex-direction: column; gap: 6px; padding-top: 16px; border-top: 1px solid var(--border-soft); }
+.settings-content { min-width: 0; overflow: auto; overscroll-behavior: contain; padding: 26px 28px; }
+.weekly-usage { display: flex; flex-direction: column; gap: 6px; padding-top: 0; }
 .weekly-usage h3 { margin: 0; color: var(--text-2); font-size: 13px; font-weight: 600; }
 .weekly-usage-summary { display: flex; flex-direction: column; gap: 3px; min-width: 0; overflow-wrap: anywhere; color: var(--text-2); font-size: 12px; line-height: 1.55; }
 .weekly-usage-summary p { margin: 0; }
@@ -808,12 +810,14 @@ a.message-source-title:hover { text-decoration: underline; text-decoration-thick
 .settings-section > p { margin: 8px 0 0; color: var(--text-3); font-size: 13px; line-height: 1.6; }
 .settings-fields { display: flex; flex-direction: column; gap: 18px; margin-top: 18px; }
 .settings-theme-label { color: var(--text-2); font-size: 13px; font-weight: 600; }
+.settings-theme .theme-switcher { gap: 6px; }
+.settings-theme .theme-switcher button { display: inline-flex; align-items: center; gap: 6px; width: auto; min-height: 44px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; }
 .settings-theme p { margin: 4px 0 8px; color: var(--text-4); font-size: 12px; line-height: 1.5; }
 .settings-choice { margin: 0; padding: 0; border: 0; min-inline-size: 0; }
 .settings-choice legend { padding: 0; color: var(--text-2); font-size: 13px; font-weight: 600; }
 .settings-choice p, .settings-field p { margin: 4px 0 0; color: var(--text-4); font-size: 12px; line-height: 1.5; }
 .settings-choice-options { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.settings-choice-options button { min-height: 32px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--text-3); font-size: 12px; cursor: pointer; }
+.settings-choice-options button { min-height: 44px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--text-3); font-size: 12px; cursor: pointer; }
 .settings-choice-options button:hover:not(:disabled) { background: var(--hover); color: var(--text); }
 .settings-choice-options button[aria-checked="true"] { background: var(--active); border-color: color-mix(in srgb, var(--emphasis) 48%, var(--border-strong)); color: var(--text); }
 .settings-choice-options button:disabled { opacity: .55; cursor: default; }
@@ -827,27 +831,38 @@ a.message-source-title:hover { text-decoration: underline; text-decoration-thick
 .chat-settings-copy { min-width: 0; }
 .chat-settings-label { color: var(--text); font-size: 13px; font-weight: 550; }
 .chat-settings-detail { margin: 3px 0 0; color: var(--text-3); font-size: 11.5px; line-height: 1.45; }
-.chat-settings-switch { position: relative; flex: none; width: 40px; height: 24px; margin-top: 1px; padding: 0; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--bg-muted); cursor: pointer; }
-.chat-settings-switch span { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: var(--bg-raised); box-shadow: var(--shadow-sm); }
-.chat-settings-switch[aria-checked="true"] { border-color: var(--emphasis); background: var(--emphasis); }
+.chat-settings-switch { position: relative; flex: none; width: 44px; height: 44px; padding: 0; border: 0; background: transparent; cursor: pointer; }
+.chat-settings-switch::before { content: ""; position: absolute; top: 10px; left: 2px; width: 40px; height: 24px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--bg-muted); }
+.chat-settings-switch span { position: absolute; top: 13px; left: 5px; width: 18px; height: 18px; border-radius: 50%; background: var(--bg-raised); box-shadow: var(--shadow-sm); }
+.chat-settings-switch[aria-checked="true"]::before { border-color: var(--emphasis); background: var(--emphasis); }
 .chat-settings-switch[aria-checked="true"] span { transform: translateX(16px); background: var(--primary-fg); }
+.chat-settings-switch:disabled { opacity: .55; cursor: default; }
 .memory-group { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
 .memory-row { display: flex; flex-direction: column; gap: 8px; padding: 10px 0; border-top: 1px solid var(--border-soft); }
 .memory-row[data-inactive="true"] { opacity: .7; }
 .memory-row-text { width: 100%; min-height: 64px; max-height: 140px; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg-app); color: var(--text); font: inherit; font-size: 13px; resize: vertical; }
 .memory-row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-.memory-row-actions button { padding: 0; border: 0; background: transparent; color: var(--text-2); font: inherit; font-size: 12px; text-decoration: underline; cursor: pointer; }
+.memory-row-actions button { min-height: 44px; padding: 0 8px; border: 0; background: transparent; color: var(--text-2); font: inherit; font-size: 12px; text-decoration: underline; cursor: pointer; }
 .memory-row-actions button:disabled { opacity: .55; cursor: default; }
-.settings-status { min-height: 18px; margin: 16px 0 0; color: var(--text-4); font-size: 12px; }
-.settings-error { margin: 0 0 12px; color: var(--danger); font-size: 12px; line-height: 1.5; }
-.settings-error button { margin-left: 8px; padding: 0; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 12px; text-decoration: underline; cursor: pointer; }
-@media (max-width: 760px) {
-  .settings-layer { padding: 0; }
-  .settings-dialog { width: 100%; height: 100%; border: 0; border-radius: 0; }
+.settings-save { align-self: flex-start; min-height: 44px; padding: 0 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-subtle); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
+.settings-save:disabled { opacity: .5; cursor: default; }
+.settings-feedback { padding: 10px 18px; border-top: 1px solid var(--border-soft); }
+.settings-status { min-height: 18px; margin: 0; color: var(--text-3); font-size: 12px; line-height: 1.5; }
+.settings-error { margin: 0 0 6px; color: var(--danger); font-size: 12px; line-height: 1.5; }
+.settings-error button { min-height: 44px; margin-left: 8px; padding: 0 8px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 12px; text-decoration: underline; cursor: pointer; }
+.settings-dialog :is(button, input, textarea, select, [tabindex]):focus-visible { outline: 2px solid var(--emphasis); outline-offset: 3px; }
+.settings-dialog .privacy-button, .settings-dialog .privacy-confirm input { min-height: 44px; }
+.settings-dialog .privacy-section { min-width: 0; overflow-wrap: anywhere; }
+.settings-dialog .privacy-panel { margin-top: 0; }
+.weekly-usage-summary progress { width: 100%; height: 6px; accent-color: var(--emphasis); }
+@media (max-width: 640px) {
+  .settings-dialog { width: 100%; height: 100dvh; border: 0; border-radius: 0; }
   .settings-body { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
-  .settings-nav { flex-direction: row; gap: 4px; border-right: 0; border-bottom: 1px solid var(--border); overflow-x: auto; }
-  .settings-nav button { flex: none; }
-  .settings-content { padding: 16px 14px 14px; }
+  .settings-nav { display: none; }
+  .settings-mobile-nav { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border-soft); color: var(--text-3); font-size: 12px; }
+  .settings-mobile-nav select { min-width: 0; flex: 1; min-height: 44px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-raised); color: var(--text); font: inherit; font-size: 13px; }
+  .settings-content { padding: 22px 16px; }
+  .settings-feedback { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
 }
 
 .workbench-shell { display: flex; flex-direction: column; min-height: 100dvh; background: var(--bg-app); color: var(--text); }
