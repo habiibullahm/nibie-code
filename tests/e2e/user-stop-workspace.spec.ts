@@ -17,7 +17,7 @@ declare global {
 }
 const conversation = "5e9bdcca-9205-4fea-a773-13952bb78c44";
 
-async function workspace(page: Page, mode: string, stopFailure = false, holdModelSave = false) {
+async function workspace(page: Page, mode: string, stopFailure = false, holdModelSave = false, navigation = false) {
   let releaseModelSave!: () => void;
   const modelSaveGate = new Promise<void>((resolve) => { releaseModelSave = resolve; });
   let releaseStop!: () => void;
@@ -87,7 +87,7 @@ async function workspace(page: Page, mode: string, stopFailure = false, holdMode
       return new Response(body, { headers: { "content-type": "text/event-stream" } });
     };
   });
-  await page.goto("/preview/chat-core?workspace=1&mode=" + mode + "&conversation=" + conversation);
+  await page.goto("/preview/chat-core?workspace=1&mode=" + mode + "&conversation=" + conversation + (navigation ? "&navigation=1" : ""));
   return { actions, stops, releaseStop, releaseModelSave };
 }
 
@@ -278,3 +278,35 @@ test("diagnostics retain the stream evidence when a document reload removes Stop
   expect(artifact).not.toContain("First synthetic prompt");
   expect(artifact).not.toContain("Partial first response");
 });
+
+for (const width of [1440, 390]) {
+  test(`URL navigation at ${width}px releases the old reader and ignores its late cleanup`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const server = await workspace(page, "Balanced", false, false, true);
+    const input = page.getByRole("textbox", { name: "Message Nibie" });
+    await input.fill("First synthetic prompt");
+    await page.getByRole("button", { name: "Send message" }).click();
+    await expect(page.locator(".message-row.assistant")).toContainText("Partial first response");
+    // Native history changes use the same search-param path as Back/Forward, bypassing sidebar callbacks.
+    await page.evaluate(() => {
+      const url = new URL(window.location.href);
+      url.searchParams.set("conversation", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+      window.history.pushState(null, "", url);
+    });
+    await expect(page.getByRole("button", { name: "Stop response" })).toHaveCount(0);
+    expect(await page.evaluate(() => window.userStopHarness!.requests[0].signal.aborted)).toBe(true);
+    await input.fill("New thread prompt");
+    await page.getByRole("button", { name: "Send message" }).click();
+    await expect(page.locator(".message-row.assistant")).toContainText("Second response");
+    await page.evaluate(() => window.userStopHarness!.releaseOldReader());
+    await expect(page.getByRole("button", { name: "Stop response" })).toBeVisible();
+    expect(await page.evaluate(() => window.userStopHarness!.requests[1].signal.aborted)).toBe(false);
+    await expect(page.locator(".message-row.assistant")).toHaveCount(1);
+    await expect(page.locator(".message-row.assistant")).not.toContainText("Partial first response");
+    await input.fill("Next draft");
+    await page.evaluate(() => window.userStopHarness!.completeSecond());
+    await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();
+    expect(server.stops).toEqual([]);
+    server.releaseStop();
+  });
+}
