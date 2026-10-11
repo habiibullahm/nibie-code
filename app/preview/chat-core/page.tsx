@@ -13,7 +13,7 @@ import { requestTime } from "@/lib/chat/groups";
 // Dev-only harness: all three modes, independent of which providers this machine has configured.
 const workspaceModels: ModelOption[] = (["Fast", "Balanced", "High"] as const).map((id) => ({ id, ...modelPickerCopy[id], credits: weeklyCreditCost[id] }));
 
-export default async function ChatCorePreview({ searchParams }: { searchParams: Promise<{ workspace?: string; mode?: string }> }) {
+export default async function ChatCorePreview({ searchParams }: { searchParams: Promise<{ workspace?: string; mode?: string; navigation?: string }> }) {
   if (process.env.NODE_ENV === "production") notFound();
   const query = await searchParams;
   if (query.workspace === "1") {
@@ -47,7 +47,7 @@ export default async function ChatCorePreview({ searchParams }: { searchParams: 
       }
     }
     return <ChatWorkspace email="acceptance@nibie.local" models={workspaceModels} renderedAt={requestTime()}
-      initialData={{ conversations: [conversation], archivedConversations: [], rooms: [], messages, activeId: conversation.id, error: null }} />;
+      initialData={{ conversations: query.navigation === "1" ? [conversation, { ...conversation, id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", title: "Other thread" }] : [conversation], archivedConversations: [], rooms: [], messages, activeId: conversation.id, error: null }} />;
   }
   return <ChatCoreComposerFixture />;
 }
