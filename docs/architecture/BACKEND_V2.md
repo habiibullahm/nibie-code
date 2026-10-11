@@ -369,6 +369,28 @@ The foundation does not add a Vercel rewrite, a DNS name, or a public URL. Produ
 
 ## 17. Testing strategy using Fastify inject()
 
+PR Guard also runs a separate **Fastify and contracts** check on every PR to
+`main` or `release/**`. It installs and typechecks `packages/contracts`, builds
+its exported `dist` files, then installs, typechecks, and tests `apps/api` using
+each package's own lockfile. Building contracts before the API install makes the
+local file dependency work from a clean checkout. These checks use mocked
+authentication and `inject()`; no hosted credentials or database are required.
+
+Add **Fastify and contracts** to the protected branch's required checks after
+its first successful hosted run. Root checks alone do not validate these two
+independent packages.
+
+Run the same package checks locally:
+
+```sh
+npm ci --prefix packages/contracts
+npm run typecheck --prefix packages/contracts
+npm run build --prefix packages/contracts
+npm ci --prefix apps/api
+npm run typecheck --prefix apps/api
+npm test --prefix apps/api
+```
+
 `apps/api` has its own Vitest config. Tests call `buildApp()` and `app.inject()`. They do not bind a port. Root `npm test`, `npm run test:integration`, and Playwright stay as they are and do not import Fastify.
 
 | Test file | Asserts |
