@@ -15,6 +15,34 @@ npm run dev
 
 Available checks: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, and `npm run test:e2e`.
 
+Copy `.env.example` to `.env.local` and fill the existing Supabase public URL/key
+and server-only provider variables for authenticated generation. Without those,
+`/preview` and the development-only `/preview/chat-core` exercise synthetic UI
+flows. They do not establish signed-in or live-provider acceptance. Keep private
+keys out of browser variables and version control.
+
+For the existing local Supabase setup, use `npm run dev:local` and
+`npm run local:down`; see [local setup script](scripts/dev-local.mjs) and
+[branching/migration guidance](docs/engineering/BRANCHING_STRATEGY.md). Root DB/RLS
+checks use a dedicated Docker database through `npm run test:integration:local`.
+
+The independent Fastify/contracts packages use their own lockfiles:
+
+```sh
+npm ci --prefix packages/contracts
+npm run typecheck --prefix packages/contracts
+npm run build --prefix packages/contracts
+npm ci --prefix apps/api
+npm run typecheck --prefix apps/api
+npm test --prefix apps/api
+```
+
+Build contracts before installing the API's local file dependency. Next.js still
+serves production traffic; implemented Fastify preference/account routes do not
+imply a production cutover. See [current architecture](docs/architecture/BACKEND_V2.md)
+and [architecture delivery status](docs/engineering/ARCHITECTURE_CLOSEOUT.md).
+
+
 ## Development workflow
 
 Nibie uses lightweight trunk-based development: `main` stays production-ready, normal work uses short-lived `feat/*`, `fix/*`, `refactor/*`, `chore/*`, and similar branches, and pull requests use Vercel Preview instead of a permanent staging branch. Large coordinated releases may temporarily use `release/vX.Y.Z` and delete it after release.

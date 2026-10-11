@@ -53,3 +53,18 @@ Capture one row per task: participant pseudonym, mode, task category, completion
 ## Deferred backlog
 
 PR #102 remains draft, Workbench UI remains disabled, and migration `0028`/`allow-shared-db-migrate` remains outside this milestone. Revisit it only after chat acceptance and an explicit scope/migration decision. No ticket, remote label, merge, or migration approval is created by this acceptance plan.
+
+
+## Architecture follow-up, October 11
+
+Package CI, shared persistence and cancellation/usage coordination are merged
+through PR #114. Stream and workspace-hook extractions plus the offline budget
+report are separate review changes. Subsequent deterministic fixture passes do
+not replace the live/human gates above or explain the historical Fast Stop
+failure. See [architecture delivery and remaining acceptance](ARCHITECTURE_CLOSEOUT.md).
+
+The historical USD1 ceiling and consumed token accounting above belong to the
+prior collection. This architecture run made no paid calls and requires a
+current hard budget, verified prices, QA access and human reviewer before new
+collection. Preview isolation was excluded by the user; no new environment is
+provisioned by this delivery.
