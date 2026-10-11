@@ -27,6 +27,7 @@ What's new in Nibie.
 
 ### Fixed
 
+- Web and GitHub replies keep consistent usage accounting if an error occurs after the response starts.
 - Long chats preserve summaries and their recent updates before large source excerpts, and leave out stale history when newer corrections cannot fit.
 - Deep Research cites only evidence used in the reply and stays Incomplete when sources are omitted or only search snippets are available.
 - Web citations point to the page reached after redirects instead of an outdated search-result URL.

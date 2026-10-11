@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as telemetry from "@/lib/usage/telemetry";
 
 const { createClient, stream, claim, usageReserve, usageStart, usageRelease, rpc, spendOk, modelOptions, contextCapabilities, withoutAttachments, attachmentState, stopState, messageSourceInserts } = vi.hoisted(() => {
   const createClient = vi.fn(); const stream = vi.fn(); const claim = vi.fn(); const usageReserve = vi.fn(); const usageStart = vi.fn(); const usageRelease = vi.fn();
@@ -278,6 +279,7 @@ describe("POST /api/chat", () => {
   });
 
   it("does not expose a provider stream when the reservation cannot be marked started", async () => {
+    vi.useFakeTimers();
     const writes: unknown[] = [];
     readyClient(writes);
     stream.mockResolvedValue(sseBody("must not be delivered"));
@@ -287,6 +289,7 @@ describe("POST /api/chat", () => {
     expect(stream).toHaveBeenCalledOnce();
     expect(usageRelease).toHaveBeenCalledOnce();
     expect(writes).toContainEqual(expect.objectContaining({ content: "Response unavailable.", status: "error" }));
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it.each([["Fast", 1], ["Balanced", 3], ["High", 6]] as const)("reserves the server weight for %s (%i credits)", async (model, cost) => {
@@ -1289,6 +1292,27 @@ describe("POST /api/chat", () => {
       expect(usageReserve).toHaveBeenCalledOnce();
       expect(usageRelease).toHaveBeenCalledOnce();
       expect(usageStart).not.toHaveBeenCalled();
+    });
+
+    it.each([true, false])("a post-start Action error never refunds started usage (spend settlement: %s)", async (settled) => {
+      readyClient([]);
+      webMocks.decideWebSearch.mockReturnValue({ search: true, reason: "news" });
+      stream.mockResolvedValue(providerChunks(["General answer."], "stop"));
+      const originalRpc = rpc.getMockImplementation()!;
+      rpc.mockImplementation((name: string, args: unknown) => name === "finalize_ai_spend"
+        ? query({ data: settled, error: null }) : originalRpc(name, args));
+      const emit = vi.spyOn(telemetry, "logGenerationTelemetry").mockImplementation(() => { throw new Error("telemetry unavailable"); });
+      try {
+        const response = await POST(validRequest());
+        await response.text();
+        expect(usageStart).toHaveBeenCalledOnce();
+        expect(rpc.mock.calls.filter(([name]) => name === "finalize_ai_spend")).toHaveLength(1);
+        expect(usageRelease).not.toHaveBeenCalled();
+        expect(rpc.mock.calls.some(([name]) => name === "release_ai_spend")).toBe(false);
+      } finally {
+        emit.mockRestore();
+        rpc.mockImplementation(originalRpc);
+      }
     });
 
     it("transforms citation handles in the stream and rejects unknown ids", async () => {
