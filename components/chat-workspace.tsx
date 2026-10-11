@@ -992,7 +992,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const openRoomSetup = useStableCallback(() => { setDrawerOpen(false); setCreatingRoom(true); });
   const closeRoomSetup = useStableCallback(() => setCreatingRoom(false));
   const openSettings = useStableCallback(() => { setDrawerOpen(false); setSettingsSection("general"); setSettingsOpen(true); });
-  const editProfile = useStableCallback(() => { setDrawerOpen(false); setSettingsSection("profile"); setSettingsOpen(true); });
+  const editProfile = useStableCallback(() => { setDrawerOpen(false); setSettingsSection("personalization"); setSettingsOpen(true); });
   const closeSettings = useStableCallback(() => setSettingsOpen(false));
   const changeModel = useStableCallback(async (choice: ModelChoice) => {
     if (busy.current || recovery || movePending.current) return;
@@ -1091,7 +1091,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
       </form>
     </dialog>}
     {creatingRoom ? <RoomCreateDialog preview={preview} onClose={closeRoomSetup} onCreate={createRoom} /> : null}
-    {settingsOpen ? <SettingsDialog initialSection={settingsSection} email={email} preview={preview} busy={controlsDisabled} models={models} initialPreferences={savedPreferences} initialError={preferencesError} onClose={closeSettings} onSaved={setSavedPreferences} onConversationsDeleted={conversationsDeleted} /> : null}
+    {settingsOpen ? <SettingsDialog fallbackFocusRef={menuButtonRef} initialSection={settingsSection} email={email} preview={preview} busy={controlsDisabled} models={models} initialPreferences={savedPreferences} initialError={preferencesError} onClose={closeSettings} onSaved={setSavedPreferences} onConversationsDeleted={conversationsDeleted} /> : null}
     {WORKBENCH_UI_ENABLED && workbenchDocumentId ? <WorkbenchPanel key={workbenchDocumentId} documentId={workbenchDocumentId} onClose={closeWorkbenchPanel} /> : null}
   </main>;
 }

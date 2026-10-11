@@ -8,9 +8,12 @@ The QA smoke signs into Nibie with a dedicated test account, sends one real Fast
 | --- | --- |
 | `npm run test:qa:smoke` | Low-level Playwright smoke. Requires credentials. Uses `E2E_BASE_URL` when set (otherwise Playwright’s local default). |
 | `npm run test:qa:preview` | Auto-resolves the **exact** Vercel Preview for `git rev-parse HEAD`, waits until READY, then runs `test:qa:smoke` with `E2E_BASE_URL` set **only in the child process**. |
+| `npm run test:qa:preview -- --settings` | Uses the same exact-HEAD resolver and signed-in fixture for Settings only. Blocks chat endpoints, verifies draft protection and two asynchronous keyboard saves, and captures the compact picker at 320/390px in dark/light themes. Restores the account's original response depth. Makes no model requests. |
 | `npm run test:e2e` | General browser suite. Credential specs (including QA smoke) **skip** when credentials are absent. |
 
 Do **not** wire `test:qa:preview` into PR Guard unless QA secrets are intentionally available for that job.
+
+In Actions → Preview Smoke, choose the PR branch and `suite: settings` for Settings acceptance. The default `chat` suite still sends a real Fast request. Settings screenshots and test results are uploaded as an artifact named for the tested commit SHA. Narrow desktop Chromium captures do not replace physical-device or VoiceOver/TalkBack checks.
 
 ## Env contract
 

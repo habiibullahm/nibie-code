@@ -48,7 +48,7 @@ export function ThemeSync() {
   return null;
 }
 
-export function ThemeSwitcher() {
+export function ThemeSwitcher({ showLabels = false }: { showLabels?: boolean }) {
   const preference = useThemePreference();
 
   function choose(next: ThemePreference) {
@@ -58,6 +58,6 @@ export function ThemeSwitcher() {
   }
 
   return <div className="theme-switcher" role="group" aria-label="Theme">
-    {options.map(({ value, label, Icon }) => <button key={value} type="button" aria-label={`${label} theme`} title={`${label} theme`} aria-pressed={preference === value} onClick={() => choose(value)}><Icon size={14} aria-hidden="true" /></button>)}
+    {options.map(({ value, label, Icon }) => <button key={value} type="button" aria-label={`${label} theme`} title={`${label} theme`} aria-pressed={preference === value} onClick={() => choose(value)}><Icon size={14} aria-hidden="true" />{showLabels ? <span>{label}</span> : null}</button>)}
   </div>;
 }

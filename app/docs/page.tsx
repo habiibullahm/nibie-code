@@ -113,7 +113,7 @@ export default function DocsPage() {
             </tbody></table>
           </div>
           <p>The mode chooses how capable the model is, not how long the answer is. Ask for a short answer or a detailed one in your message and Nibie follows that in any mode; deeper modes can take longer to start answering.</p>
-          <p>Set your default in <strong>Settings → Nibie</strong>. It applies to new chats; existing conversations keep their own model.</p>
+          <p>Set your default in <strong>Settings → AI &amp; Models</strong>. It applies to new chats; existing conversations keep their own model.</p>
         </section>
 
         <section id="rooms" className="docs-section" aria-labelledby="rooms-title">
@@ -137,7 +137,7 @@ export default function DocsPage() {
           <p>Select <strong>Context</strong> above the composer to see what Nibie is using in the conversation. The panel reports your profile, Room context when relevant, a thread summary when available, and recent conversation messages.</p>
           <p>Room instructions and the Brief apply to threads in that Room. Profile context comes from the preferences you choose to save. A Room does not automatically bring every other thread into a reply.</p>
           <p>For ongoing work, keep the goal, decisions, current focus, and next step in the Room Brief. Add Room files when the work needs reference material; Nibie can retrieve relevant excerpts rather than include every file.</p>
-          <p>Ask Nibie to <strong>remember</strong> a reusable preference or project fact. When Memory is enabled, relevant saved facts can help across conversations. Review, edit, or forget them in <strong>Settings → Memory</strong>. Your current request takes priority over saved context.</p>
+          <p>Ask Nibie to <strong>remember</strong> a reusable preference or project fact. When Memory is enabled, relevant saved facts can help across conversations. Review, edit, or forget them in <strong>Settings → Memory &amp; Context</strong>. Your current request takes priority over saved context.</p>
           <p>For current public facts, Nibie can use Web Search when available. Choose <strong>Deep Research</strong> for a question that needs several sources. Open the citations to check what supports the answer; an <strong>Incomplete</strong> result means some evidence could not be verified or included.</p>
           <p>Long conversations have limited space for context. Some older messages or optional context may be left out; the Context panel explains what was included. Restate an important detail in your current message if Nibie needs it.</p>
         </section>
@@ -147,11 +147,12 @@ export default function DocsPage() {
           <h2 id="personalization-title">Personalization</h2>
           <p>Open <strong>Settings</strong> using the gear beside your account in the sidebar. These choices are saved to your account:</p>
           <dl>
-            <div><dt>Profile</dt><dd>Set the name shown on your account. Leave it blank to use your sign-in name.</dd></div>
             <div><dt>General</dt><dd>Choose Auto, English, or Bahasa Indonesia. Auto follows the language you are using.</dd></div>
-            <div><dt>Nibie</dt><dd>Choose a default model, response depth (Concise, Default, Detailed), and response style (Natural, Professional, Direct).</dd></div>
-            <div><dt>Personalization</dt><dd>Add an <strong>About you</strong> note with your role, goals, or working context. Leave it blank to clear it.</dd></div>
+            <div><dt>AI &amp; Models</dt><dd>Choose a default model, response depth (Concise, Default, Detailed), and response style (Natural, Professional, Direct).</dd></div>
+            <div><dt>Memory &amp; Context</dt><dd>Enable or disable saved memories, then review, edit, forget, or delete individual facts.</dd></div>
+            <div><dt>Personalization</dt><dd>Set your preferred name and add an <strong>About you</strong> note with your role, goals, or working context. Leave it blank to clear it. Choose Save for each field.</dd></div>
           </dl>
+          <p><strong>Settings → Usage &amp; Plan</strong> shows your remaining weekly credits and reset time. Free usage resets weekly; there is no paid plan or billing yet.</p>
           <p>You can ask for a different language, depth, or tone in an individual message. These are preferences, and personalization comes from the details you explicitly save.</p>
         </section>
 

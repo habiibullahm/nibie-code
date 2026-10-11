@@ -27,6 +27,8 @@ What's new in Nibie.
 
 ### Fixed
 
+- Settings keeps unsaved personalization drafts between sections, asks before discarding them, and preserves keyboard focus while choices save.
+
 - Long chats preserve summaries and their recent updates before large source excerpts, and leave out stale history when newer corrections cannot fit.
 - Deep Research cites only evidence used in the reply and stays Incomplete when sources are omitted or only search snippets are available.
 - Web citations point to the page reached after redirects instead of an outdated search-result URL.
@@ -36,6 +38,8 @@ What's new in Nibie.
 - Workbench Ask Nibie shows a clear message when the feature is not ready on this environment yet, instead of a generic “couldn't improve that document” error.
 
 ### Changed
+
+- Settings now groups appearance, AI defaults, chat behavior, personalization, memory, usage, and privacy in a clearer dialog, with a full-height mobile layout and keyboard navigation.
 
 - Getting-started guidance now explains how to continue work with Room briefs, files, explicit Memory, and research sources; attachment limits match the current uploads.
 - Workbench UI is hidden until product-ready: Edit in Workbench and `/workbench` routes are unavailable (backend and preview harness stay in place).
