@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { startTransition, useRef, useState } from "react";
 import { signOutAction } from "@/app/actions/auth";
 import { deleteAllConversationsAction } from "@/app/actions/privacy";
 import { DELETE_ALL_CONFIRMATION, isDeleteAllConfirmed } from "@/lib/privacy/confirmation";
@@ -16,6 +16,7 @@ export function DataPrivacyPanel({ preview, busy, onDeleted }: Props) {
   const [phrase, setPhrase] = useState("");
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const deletePending = useRef(false);
   const [error, setError] = useState("");
   const confirmed = isDeleteAllConfirmed(phrase);
   const locked = preview || busy || deleting;
@@ -48,18 +49,27 @@ export function DataPrivacyPanel({ preview, busy, onDeleted }: Props) {
     }
   }
 
-  async function deleteAll() {
-    if (!confirmed || locked) return;
+  function deleteAll() {
+    if (!confirmed || locked || deletePending.current) return;
+    deletePending.current = true;
     setDeleting(true);
     setError("");
-    const result = await deleteAllConversationsAction(phrase.trim());
-    setDeleting(false);
-    if (result.error || result.deletedCount === undefined) {
-      setError(result.error ?? "Conversations couldn't be deleted. Please try again.");
-      return;
-    }
-    setPhrase("");
-    onDeleted();
+    startTransition(async () => {
+      try {
+        const result = await deleteAllConversationsAction(phrase.trim());
+        if (result.error || result.deletedCount === undefined) {
+          setError(result.error ?? "Conversations couldn't be deleted. Please try again.");
+          return;
+        }
+        setPhrase("");
+        onDeleted();
+      } catch {
+        setError("Conversations couldn't be deleted. Please try again.");
+      } finally {
+        deletePending.current = false;
+        setDeleting(false);
+      }
+    });
   }
 
   return <div className="privacy-panel">
