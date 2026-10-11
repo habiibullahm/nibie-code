@@ -2,6 +2,8 @@
 
 Decision: **NOT READY for private-beta acceptance**. Local docs/onboarding work is verified, but human-reviewed mode quality, signed-in real-generation/context acceptance, and an unexplained full-suite Stop timeout remain open. No participant was invited, no provider was called in this run, and no production deployment or shared-database migration was initiated.
 
+Follow-up: [Issue #104 investigation](./CHAT_RELIABILITY_104_QA.md) records a later clean full-suite baseline and adds failure diagnostics. The historical timeout's root cause remains unconfirmed; authenticated acceptance is still blocked.
+
 ## Baseline and scope
 
 - Code baseline: main `88bd23b54ac767a4611eeedc061102b2a9cf2a94`, after PR #101.
