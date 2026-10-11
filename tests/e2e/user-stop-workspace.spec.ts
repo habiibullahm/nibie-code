@@ -1,4 +1,8 @@
-import { expect, test, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { clickStop, expect, test } from "./stop-diagnostics";
+
+// This spec only visits the synthetic dev harness; retain artifacts when a failure occurs.
+test.use({ trace: "retain-on-failure" });
 
 declare global {
   interface Window {
@@ -43,6 +47,10 @@ async function workspace(page: Page, mode: string, stopFailure = false, holdMode
     await route.fulfill({ contentType: "text/x-component", body: '0:{"a":"$@1","f":[],"b":"development"}\n1:' + JSON.stringify(result) + "\n" });
   });
   await page.addInitScript(() => {
+    const emit = (kind: string, metadata: Record<string, string | number | boolean | null> = {}) => {
+      void window.recordStopDiagnostic(kind, { browserAt: Date.now(), ...metadata }).catch(() => {});
+    };
+    emit("harness-installed", { timeOrigin: performance.timeOrigin });
     const original = window.fetch;
     const encoder = new TextEncoder();
     const frame = (type: string, data: unknown) => encoder.encode("event: " + type + "\ndata: " + JSON.stringify(data) + "\n\n");
@@ -53,18 +61,23 @@ async function workspace(page: Page, mode: string, stopFailure = false, holdMode
       const record = { body: JSON.parse(options!.body as string), signal: options!.signal!, aborted: false };
       state.requests.push(record);
       const count = state.requests.length;
+      emit("stream-request", { requestIndex: count, userMessageId: record.body.userMessageId, model: record.body.model });
       const id = count === 1 ? "e3b624e6-d792-47a8-8ff2-46724452c1ca" : "22222222-2222-4222-8222-222222222222";
       const body = new ReadableStream<Uint8Array>({
         start(controller) {
           controller.enqueue(frame("start", { id, position: count * 2 }));
+          emit("frame-queued", { requestIndex: count, assistantId: id, type: "start" });
           controller.enqueue(frame("delta", { text: count === 1 ? "Partial first response" : "Second response" }));
+          emit("frame-queued", { requestIndex: count, type: "delta" });
           record.signal.addEventListener("abort", () => {
             record.aborted = true;
+            emit("stream-abort", { requestIndex: count, reason: record.signal.reason === "user_stopped" ? "user_stopped" : "other" });
             // Deliberately late reader cleanup and partial-save confirmation.
-            state.releaseOldReader = () => controller.error(new DOMException("Stopped", "AbortError"));
-            state.confirmPartial = () => { if (!state.partialSaves) state.partialSaves++; };
+            state.releaseOldReader = () => { emit("reader-release", { requestIndex: count }); controller.error(new DOMException("Stopped", "AbortError")); };
+            state.confirmPartial = () => { if (!state.partialSaves) state.partialSaves++; emit("partial-save", { count: state.partialSaves }); };
           }, { once: true });
           if (count === 2) state.completeSecond = () => {
+            emit("stream-complete", { requestIndex: count });
             controller.enqueue(frame("delta", { text: " completed." }));
             controller.enqueue(frame("status", { status: "complete" }));
             controller.enqueue(frame("done", {})); controller.close();
@@ -78,8 +91,9 @@ async function workspace(page: Page, mode: string, stopFailure = false, holdMode
   return { actions, stops, releaseStop, releaseModelSave };
 }
 
-for (const mode of ["Fast", "Balanced", "High"]) {
-  test(mode + ": main workspace Stop allows Send before old persistence acknowledges", async ({ page }) => {
+for (const width of [1440, 390]) for (const mode of ["Fast", "Balanced", "High"]) {
+  test(mode + " at " + width + "px: main workspace Stop allows Send before old persistence acknowledges", async ({ page, stopDiagnostics }) => {
+    await page.setViewportSize({ width, height: 900 });
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
@@ -89,7 +103,7 @@ for (const mode of ["Fast", "Balanced", "High"]) {
     await page.getByRole("button", { name: "Send message" }).click();
     await expect(page.locator(".message-row.assistant")).toContainText("Partial first response");
     await input.fill("Next before persistence confirmation");
-    await page.getByRole("button", { name: "Stop response" }).click();
+    await clickStop(page, stopDiagnostics);
     await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();
     await expect(page.locator(".message-row.assistant")).toContainText("Stopped");
     await expect(page.locator(".message-row.assistant")).toContainText("Partial first response");
@@ -143,12 +157,12 @@ for (const mode of ["Fast", "Balanced", "High"]) {
   });
 }
 
-test("a completed answer saved before Stop landed never replaces the stopped reply on screen (issue #12)", async ({ page }) => {
+test("a completed answer saved before Stop landed never replaces the stopped reply on screen (issue #12)", async ({ page, stopDiagnostics }) => {
   const server = await workspace(page, "High");
   const input = page.getByRole("textbox", { name: "Message Nibie" });
   await input.fill("First synthetic prompt"); await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.locator(".message-row.assistant")).toContainText("Partial first response");
-  await input.fill("Next before persistence confirmation"); await page.getByRole("button", { name: "Stop response" }).click();
+  await input.fill("Next before persistence confirmation"); await clickStop(page, stopDiagnostics);
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.locator(".message-row.assistant")).toHaveCount(2);
   server.releaseStop();
@@ -172,12 +186,12 @@ test("a completed answer saved before Stop landed never replaces the stopped rep
   await expect(first).not.toContainText("the rest of the finished answer");
 });
 
-test("failed background Stop acknowledgement preserves the partial and never re-locks the main composer", async ({ page }) => {
+test("failed background Stop acknowledgement preserves the partial and never re-locks the main composer", async ({ page, stopDiagnostics }) => {
   const server = await workspace(page, "Fast", true);
   const input = page.getByRole("textbox", { name: "Message Nibie" });
   await input.fill("First"); await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.locator(".message-row.assistant")).toContainText("Partial first response");
-  await input.fill("Second"); await page.getByRole("button", { name: "Stop response" }).click();
+  await input.fill("Second"); await clickStop(page, stopDiagnostics);
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.locator(".message-row.assistant")).toHaveCount(2);
   server.releaseStop();
@@ -189,7 +203,7 @@ test("failed background Stop acknowledgement preserves the partial and never re-
   await expect(page.locator(".message-row.assistant").first()).toContainText("Partial first response");
 });
 
-test("the single picker sends the chosen mode and never a reasoning field", async ({ page }) => {
+test("the single picker sends the chosen mode and never a reasoning field", async ({ page, stopDiagnostics }) => {
   const server = await workspace(page, "Balanced");
   const input = page.getByRole("textbox", { name: "Message Nibie" });
   await expect(page.getByRole("button", { name: "Model: Balanced", exact: true })).toBeVisible();
@@ -198,7 +212,7 @@ test("the single picker sends the chosen mode and never a reasoning field", asyn
   await page.getByRole("menuitemradio", { name: /^High/ }).click();
   await input.fill("First"); await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.locator(".message-row.assistant")).toContainText("Partial first response");
-  await page.getByRole("button", { name: "Stop response" }).click();
+  await clickStop(page, stopDiagnostics);
   await page.getByRole("button", { name: "Model: High", exact: true }).click();
   await page.getByRole("menuitemradio", { name: /^Fast/ }).click();
   await input.fill("Second"); await page.getByRole("button", { name: "Send message" }).click();
@@ -220,4 +234,47 @@ test("while a mode change saves, the picker says Saving… and never claims a re
   await expect(page.getByRole("button", { name: /no models are configured/ })).toHaveCount(0);
   server.releaseModelSave();
   await expect(page.getByRole("button", { name: "Model: Fast", exact: true })).toBeEnabled();
+});
+
+test("rapid repeated Stop is idempotent while its acknowledgement is pending", async ({ page, stopDiagnostics }) => {
+  const server = await workspace(page, "Fast");
+  const input = page.getByRole("textbox", { name: "Message Nibie" });
+  await input.fill("First");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.locator(".message-row.assistant")).toContainText("Partial first response");
+  await input.fill("Next");
+  await stopDiagnostics.capture("before-repeated-stop");
+  // Two activations in the same browser task, before React removes the Stop button.
+  await page.getByRole("button", { name: "Stop response" }).evaluate((button: HTMLButtonElement) => { button.click(); button.click(); });
+  await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();
+  await expect.poll(() => server.stops.length).toBe(1);
+  await expect(page.locator(".message-row.assistant")).toContainText("Stopped");
+  expect(await page.evaluate(() => window.userStopHarness!.requests.length)).toBe(1);
+  expect(await page.evaluate(() => window.userStopHarness!.requests[0].signal.reason)).toBe("user_stopped");
+  server.releaseStop();
+  await page.evaluate(() => window.userStopHarness!.releaseOldReader());
+  await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();
+});
+
+test("diagnostics retain the stream evidence when a document reload removes Stop", async ({ page, stopDiagnostics }) => {
+  await workspace(page, "Fast");
+  await page.getByRole("textbox", { name: "Message Nibie" }).fill("First synthetic prompt");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.locator(".message-row.assistant")).toContainText("Partial first response");
+  const before = await stopDiagnostics.capture("before-forced-reload");
+  expect(before).toMatchObject({ stopVisible: true, requests: [{ model: "Fast", signalAborted: false }] });
+  // A controlled diagnostic scenario, not a reproduction or classification of the original timeout.
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Stop response" })).toHaveCount(0);
+  const after = await stopDiagnostics.capture("after-forced-reload");
+  expect(after).toMatchObject({ stopVisible: false, requests: [] });
+  expect(after!.timeOrigin).not.toBe(before!.timeOrigin);
+  // Next's URL updates can also emit framenavigated without replacing the document.
+  expect(stopDiagnostics.timeline.filter((entry) => entry.kind === "navigation").length).toBeGreaterThanOrEqual(2);
+  expect(stopDiagnostics.timeline.some((entry) => entry.kind === "stream-request")).toBe(true);
+  expect(stopDiagnostics.timeline.some((entry) => entry.kind === "frame-queued" && entry.metadata.type === "delta")).toBe(true);
+  expect(stopDiagnostics.snapshots[0]).toMatchObject({ label: "before-forced-reload", state: before });
+  const artifact = JSON.stringify(stopDiagnostics);
+  expect(artifact).not.toContain("First synthetic prompt");
+  expect(artifact).not.toContain("Partial first response");
 });

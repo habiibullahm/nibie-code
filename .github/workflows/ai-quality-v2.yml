@@ -4,6 +4,9 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - 'app/api/chat/**'
+      - 'app/actions/chat.ts'
+      - 'lib/chat/**'
       - 'lib/context/**'
       - 'lib/ai/**'
       - 'lib/preferences/**'
@@ -19,6 +22,8 @@ on:
       - 'tests/e2e/high-stream.spec.ts'
       - 'tests/e2e/default-model-inheritance.spec.ts'
       - 'tests/e2e/recall-stream.spec.ts'
+      - 'tests/e2e/user-stop-workspace.spec.ts'
+      - 'tests/e2e/stop-diagnostics.ts'
       - 'tests/fixtures/response-quality-v2.json'
       - 'scripts/response-quality-eval.mjs'
       - 'package.json'
@@ -45,4 +50,12 @@ jobs:
       - name: Install browser
         run: npx playwright install --with-deps chromium
       - name: Mocked streaming, Stop, recovery, model picker, and response-quality UX E2E
-        run: npx playwright test tests/e2e/chat-core.spec.ts tests/e2e/high-stream.spec.ts tests/e2e/response-quality.spec.ts tests/e2e/default-model-inheritance.spec.ts tests/e2e/recall-stream.spec.ts --workers=2
+        run: npx playwright test tests/e2e/chat-core.spec.ts tests/e2e/high-stream.spec.ts tests/e2e/response-quality.spec.ts tests/e2e/default-model-inheritance.spec.ts tests/e2e/recall-stream.spec.ts tests/e2e/user-stop-workspace.spec.ts --workers=2
+      - name: Preserve failed Stop diagnostics and traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chat-reliability-failures
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
