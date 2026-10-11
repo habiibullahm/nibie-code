@@ -41,9 +41,7 @@ import {
   succeedWorkbenchSave,
 } from "../../lib/workbench/save-state";
 import { workbenchTitleFromContent } from "../../lib/workbench/title";
-import { workbenchVersionLimit } from "../../lib/workbench/types";
 import { parseWorkbenchCreate, parseWorkbenchWrite } from "../../lib/workbench/validation";
-import { shouldSkipDuplicateVersion, versionIdsToPrune } from "../../lib/workbench/versions";
 
 const { createClient } = vi.hoisted(() => ({ createClient: vi.fn() }));
 vi.mock("@/lib/supabase/server", () => ({ createSupabaseServerClient: createClient }));
@@ -534,82 +532,63 @@ describe("workbench AI revision state", () => {
 describe("workbench versions and export", () => {
   beforeEach(() => createClient.mockReset());
 
-  it("skips duplicate snapshots and prunes oldest ids beyond the retention limit", () => {
-    expect(shouldSkipDuplicateVersion({ title: "A", content: "1" }, { title: "A", content: "1" })).toBe(true);
-    expect(shouldSkipDuplicateVersion({ title: "A", content: "1" }, { title: "A", content: "2" })).toBe(false);
-    expect(shouldSkipDuplicateVersion(null, { title: "A", content: "1" })).toBe(false);
-    const ids = Array.from({ length: workbenchVersionLimit + 3 }, (_, index) => `id-${index}`);
-    expect(versionIdsToPrune(ids)).toEqual(["id-50", "id-51", "id-52"]);
-    expect(versionIdsToPrune(ids.slice(0, workbenchVersionLimit))).toEqual([]);
-  });
-
   it("builds safe Markdown and plain export payloads", () => {
     expect(workbenchExportFilename("Clinic notes / v1", "md")).toBe("Clinic-notes-v1.md");
     expect(workbenchExportFilename("  ", "txt")).toBe("Untitled.txt");
     expect(workbenchExportContentDisposition("Café.md")).toContain('filename="Caf_.md"');
     expect(workbenchExportContentDisposition("Café.md")).toContain("filename*=UTF-8''Caf%C3%A9.md");
     expect(workbenchPlainExportBody("line\r\none")).toBe("line\none");
+    expect(workbenchPlainExportBody("# Notes\n\nHello **world**")).toBe("Notes\n\nHello world");
     expect(workbenchMarkdownExportBody("Notes", "Hello")).toBe("# Notes\n\nHello\n");
     expect(workbenchMarkdownExportBody("Notes", "## Already\n\nBody")).toBe("## Already\n\nBody\n");
   });
 
-  it("creates a manual version checkpoint without changing the live document revision", async () => {
-    const memory = memoryClient({
-      seed: [{
-        id: documentId,
-        user_id: owner,
-        title: "Notes",
-        content: "first draft",
-        revision: 2,
-        room_id: null,
-        created_at: "2026-10-03T00:00:00.000Z",
-        updated_at: "2026-10-03T00:00:00.000Z",
-      }],
-    });
+  it("lists only owned document version summaries", async () => {
+    const memory = memoryClient({ seed: [{ id: documentId, user_id: owner }], versionSeed: [
+      { id: messageId, user_id: owner, document_id: documentId, source: "manual", title: "Notes", document_revision: 1, content: "private body", created_at: "2026-10-03" },
+      { id: conversationId, user_id: "stranger", document_id: documentId, source: "manual", title: "Hidden", document_revision: 1 },
+    ] });
     createClient.mockResolvedValue(memory.client);
-    const created = await createWorkbenchVersionAction({ documentId, expectedRevision: 2 });
-    expect(created.data).toMatchObject({ source: "manual", title: "Notes", content: "first draft", document_revision: 2 });
-    expect(memory.versions).toHaveLength(1);
-    expect(memory.documents[0]).toMatchObject({ revision: 2, content: "first draft" });
-    const listed = await listWorkbenchVersionsAction(documentId);
-    expect(listed.data).toHaveLength(1);
-    const duplicate = await createWorkbenchVersionAction({ documentId, expectedRevision: 2 });
-    expect(duplicate.data?.id).toBe(created.data?.id);
-    expect(memory.versions).toHaveLength(1);
+    const result = await listWorkbenchVersionsAction(documentId);
+    expect(result.data).toHaveLength(1);
+    expect(result.data?.[0]).toMatchObject({ id: messageId, title: "Notes" });
+    expect(result.data?.[0]).not.toHaveProperty("content");
   });
 
-  it("restores a prior version after saving the current text as a recoverable snapshot", async () => {
-    const memory = memoryClient({
-      seed: [{
-        id: documentId,
-        user_id: owner,
-        title: "Current",
-        content: "newer body",
-        revision: 3,
-        room_id: null,
-        created_at: "2026-10-03T00:00:00.000Z",
-        updated_at: "2026-10-03T00:00:00.000Z",
-      }],
-      versionSeed: [{
-        id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-        user_id: owner,
-        document_id: documentId,
-        source: "manual",
-        title: "Older",
-        content: "older body",
-        document_revision: 1,
-        revision_run_id: null,
-        created_at: "2026-10-02T00:00:00.000Z",
-      }],
+  it("returns the database checkpoint without changing the document", async () => {
+    const version = { id: messageId, source: "manual", title: "Notes", content: "draft", document_revision: 2 };
+    const rpc = vi.fn().mockResolvedValue({ data: { version }, error: null });
+    createClient.mockResolvedValue({ ...memoryClient().client, rpc });
+    const result = await createWorkbenchVersionAction({ documentId, expectedRevision: 2 });
+    expect(result.data).toMatchObject(version);
+    expect(rpc).toHaveBeenCalledWith("commit_workbench_version", {
+      p_document_id: documentId, p_expected_revision: 2,
     });
-    createClient.mockResolvedValue(memory.client);
-    const restored = await restoreWorkbenchVersionAction({
-      documentId,
-      versionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-      expectedRevision: 3,
+  });
+
+  it.each([
+    ["PT409", true, "changed elsewhere"],
+    ["PGRST202", undefined, "isn't available"],
+    ["XX000", undefined, "couldn't save"],
+  ])("does not fall back to a document write after snapshot transaction failure %s", async (code, conflict, text) => {
+    const memory = memoryClient();
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: { code } });
+    createClient.mockResolvedValue({ ...memory.client, rpc });
+    const result = await restoreWorkbenchVersionAction({ documentId, versionId: messageId, expectedRevision: 3 });
+    expect(result.conflict).toBe(conflict);
+    expect(result.error).toContain(text);
+    expect(memory.updates).toEqual([]);
+    expect(memory.inserts).toEqual([]);
+  });
+
+  it("uses the restored document returned by the atomic transaction", async () => {
+    const document = { id: documentId, title: "Older", content: "older body", revision: 4 };
+    const rpc = vi.fn().mockResolvedValue({ data: { document }, error: null });
+    createClient.mockResolvedValue({ ...memoryClient().client, rpc });
+    const result = await restoreWorkbenchVersionAction({ documentId, versionId: messageId, expectedRevision: 3 });
+    expect(result.data).toMatchObject(document);
+    expect(rpc).toHaveBeenCalledWith("commit_workbench_version", {
+      p_document_id: documentId, p_expected_revision: 3, p_version_id: messageId,
     });
-    expect(restored.data).toMatchObject({ title: "Older", content: "older body", revision: 4 });
-    expect(memory.versions.some((row) => row.title === "Current" && row.content === "newer body")).toBe(true);
-    expect(memory.documents[0]).toMatchObject({ title: "Older", content: "older body", revision: 4 });
   });
 });

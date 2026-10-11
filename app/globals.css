@@ -947,15 +947,15 @@ a.message-source-title:hover { text-decoration: underline; text-decoration-thick
   background: var(--bg-raised);
   box-shadow: var(--shadow-menu);
 }
-.workbench-history-scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 45;
-  border: 0;
+.workbench-history::backdrop {
   background: color-mix(in srgb, var(--bg) 55%, transparent);
-  cursor: pointer;
 }
 .workbench-history {
+  margin: 0 0 0 auto;
+  max-width: 100vw;
+  max-height: 100dvh;
+  padding: 0;
+  color: var(--text);
   position: fixed;
   top: 0;
   right: 0;
@@ -968,6 +968,7 @@ a.message-source-title:hover { text-decoration: underline; text-decoration-thick
   background: var(--bg-raised);
   box-shadow: var(--shadow-menu);
 }
+.workbench-history:not([open]) { display: none; }
 .workbench-history-top {
   display: flex;
   align-items: center;

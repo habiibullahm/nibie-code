@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   getWorkbenchVersionAction,
   listWorkbenchVersionsAction,
@@ -40,11 +40,13 @@ function formatWhen(iso: string): string {
 
 export function WorkbenchHistory({ documentId, expectedRevision, open, onClose, onRestored }: Props) {
   const titleId = useId();
+  const dialogRef = useRef<HTMLDialogElement>(null);
   const [list, setList] = useState<ListState>({ status: "loading" });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewState>({ status: "idle" });
   const [restoring, setRestoring] = useState(false);
   const [restoreError, setRestoreError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (!open) return;
@@ -56,7 +58,7 @@ export function WorkbenchHistory({ documentId, expectedRevision, open, onClose, 
       setSelectedId(null);
       setPreview({ status: "idle" });
       setRestoreError("");
-      const result = await listWorkbenchVersionsAction(documentId);
+      const result = await listWorkbenchVersionsAction(documentId).catch(() => ({ data: undefined, error: "Version history could not be loaded. Please reopen it to try again." }));
       if (cancelled) return;
       if (result.error) {
         setList({ status: "error", message: result.error });
@@ -67,7 +69,7 @@ export function WorkbenchHistory({ documentId, expectedRevision, open, onClose, 
       setSelectedId(versions[0]?.id ?? null);
     })();
     return () => { cancelled = true; };
-  }, [open, documentId]);
+  }, [open, documentId, reloadKey]);
 
   useEffect(() => {
     if (!open || !selectedId) return;
@@ -77,7 +79,7 @@ export function WorkbenchHistory({ documentId, expectedRevision, open, onClose, 
       if (cancelled) return;
       setPreview({ status: "loading" });
       setRestoreError("");
-      const result = await getWorkbenchVersionAction({ documentId, versionId: selectedId });
+      const result = await getWorkbenchVersionAction({ documentId, versionId: selectedId }).catch(() => ({ data: undefined, error: "That version could not be loaded. Please select it again." }));
       if (cancelled) return;
       if (result.error || !result.data) {
         setPreview({ status: "error", message: result.error ?? "That version is no longer available." });
@@ -89,53 +91,60 @@ export function WorkbenchHistory({ documentId, expectedRevision, open, onClose, 
   }, [open, documentId, selectedId]);
 
   useEffect(() => {
-    if (!open) return;
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-      }
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
+    const dialog = dialogRef.current;
+    if (!open || !dialog) return;
+    dialog.showModal();
+    return () => dialog.close();
+  }, [open]);
 
   if (!open) return null;
 
   async function restore() {
-    if (!selectedId || restoring) return;
+    if (!selectedId || restoring || preview.status !== "ready" || preview.version.id !== selectedId) return;
     if (!window.confirm("Restore this version? Your current document is saved as a new version first.")) return;
     setRestoring(true);
     setRestoreError("");
-    const result = await restoreWorkbenchVersionAction({
-      documentId,
-      versionId: selectedId,
-      expectedRevision,
-    });
-    setRestoring(false);
-    if (result.conflict) {
-      setRestoreError(result.error ?? "This document changed elsewhere. Reload before restoring.");
-      return;
+    try {
+      const result = await restoreWorkbenchVersionAction({ documentId, versionId: selectedId, expectedRevision });
+      if (result.error || !result.data) {
+        setRestoreError(result.error ?? "We couldn't restore that version.");
+        return;
+      }
+      onRestored({ title: result.data.title, content: result.data.content, revision: result.data.revision });
+      onClose();
+    } catch {
+      setRestoreError("We couldn't restore that version. Please try again.");
+    } finally {
+      setRestoring(false);
     }
-    if (result.error || !result.data) {
-      setRestoreError(result.error ?? "We couldn't restore that version.");
-      return;
-    }
-    onRestored({
-      title: result.data.title,
-      content: result.data.content,
-      revision: result.data.revision,
-    });
-    onClose();
   }
 
   const listError = list.status === "error" ? list.message : "";
   const previewError = preview.status === "error" ? preview.message : "";
   const alert = restoreError || listError || previewError;
 
-  return <>
-    <button type="button" className="workbench-history-scrim" aria-label="Close version history" onClick={onClose} />
-    <aside
+  return <dialog
+      ref={dialogRef}
+      onKeyDown={(event) => {
+        if (event.key !== "Tab") return;
+        const controls = [...event.currentTarget.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+        )].filter((element) => element.getClientRects().length > 0);
+        const first = controls[0];
+        const last = controls.at(-1);
+        if (!first || !last) return;
+        if (event.shiftKey && globalThis.document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && globalThis.document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }}
+      onCancel={(event) => {
+        event.preventDefault();
+        if (!restoring) onClose();
+      }}
       className="workbench-history"
       role="dialog"
       aria-modal="true"
@@ -143,9 +152,10 @@ export function WorkbenchHistory({ documentId, expectedRevision, open, onClose, 
     >
       <header className="workbench-history-top">
         <h2 id={titleId}>Version history</h2>
-        <button type="button" className="icon-button" aria-label="Close" title="Close" onClick={onClose}>Close</button>
+        <button type="button" className="icon-button" aria-label="Close" title="Close" disabled={restoring} onClick={onClose}>Close</button>
       </header>
       {alert ? <p className="workbench-history-error" role="alert">{alert}</p> : null}
+      {listError || previewError ? <button type="button" onClick={() => setReloadKey((value) => value + 1)}>Retry loading history</button> : null}
       <div className="workbench-history-body">
         <ul className="workbench-history-list" aria-label="Versions">
           {list.status === "loading" ? <li className="workbench-history-empty" role="status">Loading versions…</li> : null}
@@ -158,6 +168,7 @@ export function WorkbenchHistory({ documentId, expectedRevision, open, onClose, 
                 type="button"
                 className={selectedId === version.id ? "is-active" : undefined}
                 aria-pressed={selectedId === version.id}
+                disabled={restoring}
                 onClick={() => setSelectedId(version.id)}
               >
                 <span className="workbench-history-when">{formatWhen(version.created_at)}</span>
@@ -177,13 +188,12 @@ export function WorkbenchHistory({ documentId, expectedRevision, open, onClose, 
                 : <p className="workbench-preview-empty">This version is empty.</p>}
             </div>
             <div className="workbench-history-actions">
-              <button type="button" disabled={restoring || !selectedId} onClick={() => void restore()}>
+              <button type="button" disabled={restoring || !selectedId || preview.version.id !== selectedId} onClick={() => void restore()}>
                 {restoring ? "Restoring…" : "Restore"}
               </button>
             </div>
           </> : null}
         </section>
       </div>
-    </aside>
-  </>;
+    </dialog>;
 }

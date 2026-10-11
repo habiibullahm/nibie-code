@@ -493,7 +493,7 @@ export const workbenchDocumentVersions = pgTable(
     content: text("content").notNull(),
     documentRevision: integer("document_revision").notNull(),
     revisionRunId: uuid("revision_run_id"),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().default(sql`clock_timestamp()`),
   },
   (table) => [
     foreignKey({
