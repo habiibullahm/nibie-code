@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Check, Copy } from "lucide-react";
 import {
   markdownToClipboard,
@@ -10,8 +10,11 @@ import {
 } from "@/lib/markdown/clipboard";
 
 type Feedback = "idle" | "copied" | "failed";
+const noopSubscribe = () => () => undefined;
 
 function useCopyFeedback() {
+  // SSR controls must not accept clicks before React installs their handlers.
+  const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false);
   const [state, setState] = useState<Feedback>("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
@@ -20,13 +23,13 @@ function useCopyFeedback() {
     clearTimeout(timer.current);
     timer.current = setTimeout(() => setState("idle"), 2000);
   }
-  return { state, report };
+  return { state, report, mounted };
 }
 
 // iconOnly shows just the icon (a check once copied); the label stays the accessible name and tooltip, and the
 // result is still announced to screen readers.
 export function CopyButton({ text, label, compact = false, iconOnly = false }: { text: string; label: string; compact?: boolean; iconOnly?: boolean }) {
-  const { state, report } = useCopyFeedback();
+  const { state, report, mounted } = useCopyFeedback();
 
   async function copy() {
     try {
@@ -38,7 +41,7 @@ export function CopyButton({ text, label, compact = false, iconOnly = false }: {
   }
 
   const status = state === "copied" ? "Copied" : state === "failed" ? "Copy failed" : "Copy";
-  return <button type="button" className={`copy-button${compact ? " is-compact" : ""}${iconOnly ? " is-icon-only" : ""}`} aria-label={label} title={state === "idle" ? label : status} onClick={() => void copy()}>
+  return <button type="button" className={`copy-button${compact ? " is-compact" : ""}${iconOnly ? " is-icon-only" : ""}`} aria-label={label} title={state === "idle" ? label : status} disabled={!mounted} onClick={() => void copy()}>
     {state === "copied" ? <Check size={iconOnly ? 14 : 13} aria-hidden="true" /> : <Copy size={iconOnly ? 14 : 13} aria-hidden="true" />}
     <span className={iconOnly ? "visually-hidden" : undefined} aria-live="polite">{iconOnly && state === "idle" ? "" : status}</span>
   </button>;
@@ -57,7 +60,7 @@ type ResponseCopyProps = {
  * Code-block CopyButton stays unchanged.
  */
 export function ResponseCopyButton({ markdown, sources, label = "Copy response", iconOnly = false }: ResponseCopyProps) {
-  const { state, report } = useCopyFeedback();
+  const { state, report, mounted } = useCopyFeedback();
 
   async function copy() {
     try {
@@ -72,7 +75,7 @@ export function ResponseCopyButton({ markdown, sources, label = "Copy response",
   const status = state === "copied" ? "Copied" : state === "failed" ? "Copy failed" : "Copy";
   const iconSize = iconOnly ? 14 : 13;
 
-  return <button type="button" className={`copy-button${iconOnly ? " is-icon-only" : ""}`} aria-label={label} title={state === "idle" ? label : status} onClick={() => void copy()}>
+  return <button type="button" className={`copy-button${iconOnly ? " is-icon-only" : ""}`} aria-label={label} title={state === "idle" ? label : status} disabled={!mounted} onClick={() => void copy()}>
     {state === "copied" ? <Check size={iconSize} aria-hidden="true" /> : <Copy size={iconSize} aria-hidden="true" />}
     <span className={iconOnly ? "visually-hidden" : undefined} aria-live="polite">{iconOnly && state === "idle" ? "" : status}</span>
   </button>;

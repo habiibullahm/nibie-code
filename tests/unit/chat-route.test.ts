@@ -279,6 +279,92 @@ describe("POST /api/chat", () => {
     expect(usageRelease).not.toHaveBeenCalled();
   });
 
+  describe("explicit historical evidence lookup", () => {
+    const sourceId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const topicRequest = "What did we decide about Redis?";
+    function historyClient(writes: unknown[], options: { content?: string; rows?: unknown[]; stopped?: boolean; replayed?: boolean } = {}) {
+      stopState.status = options.stopped ? "interrupted" : "streaming";
+      const content = options.content ?? topicRequest;
+      const current = { id: "conversation", user_id: "history-owner", room_id: null, archived_at: null, title: "Current", selected_model: "Balanced" };
+      const source = { ...current, id: sourceId, title: "Cache choice" };
+      const rows = options.rows ?? [{ id: "history-message", user_id: "history-owner", conversation_id: sourceId, role: "user", status: "complete", content: "We decided on Redis.", created_at: "2026-10-01T12:00:00Z", conversations: source }];
+      let messageReads = 0;
+      const from = vi.fn((table: string) => {
+        const builder: Record<string, unknown> = {};
+        let columns = "";
+        let isSource = false;
+        let write: unknown;
+        for (const method of ["eq", "is", "neq", "ilike", "order", "limit", "abortSignal"]) builder[method] = () => builder;
+        builder.select = (value: string) => { columns = value; return builder; };
+        builder.in = () => { isSource = true; return builder; };
+        builder.update = (value: unknown) => { write = value; writes.push(value); return builder; };
+        const result = () => {
+          if (table === "conversations") return { data: isSource ? [source] : current, error: null };
+          if (table === "user_preferences") return preferenceResult;
+          if (table !== "messages") return { data: [], error: null };
+          if (write) return { data: options.stopped ? null : { id: assistantId }, error: null };
+          if (columns === "status") return { data: { status: options.stopped ? "interrupted" : "streaming" }, error: null };
+          if (columns.includes("conversations!inner")) return { data: rows, error: null };
+          messageReads++;
+          return { data: messageReads === 1 ? { id: "user-message", position: 1, content } : [{ role: "user", content, status: "complete", position: 1 }], error: null };
+        };
+        builder.maybeSingle = async () => result();
+        builder.then = (resolve: (value: unknown) => unknown) => Promise.resolve(result()).then(resolve);
+        return builder;
+      });
+      claim.mockReturnValue(query({ data: { ...assistant, replayed: options.replayed === true, content: "Previously saved evidence." }, error: null }));
+      createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "history-owner" } }, error: null }) }, from, rpc });
+      return from;
+    }
+
+    it("streams and persists the same dated source-attributed reply without a provider, Memory, actions or usage debit", async () => {
+      const writes: unknown[] = [];
+      historyClient(writes);
+      modelOptions.mockReturnValue({ models: [] });
+      const response = await POST(validRequest());
+      expect(response.status).toBe(200);
+      const events = await Array.fromAsync(readChatSse(response.body!));
+      const delta = events.find((item) => item.type === "delta");
+      expect(delta).toMatchObject({ type: "delta", text: expect.stringContaining("Redis") });
+      const text = delta && delta.type === "delta" ? delta.text : "";
+      expect(text).toContain(`http://localhost/chat?conversation=${sourceId}`);
+      expect(text).toContain("separate from saved Memory");
+      expect(writes).toEqual([{ content: text, status: "complete" }]);
+      expect(events.slice(-2)).toEqual([{ type: "status", status: "complete" }, { type: "done" }]);
+      expect(stream).not.toHaveBeenCalled();
+      expect(recallMocks.handleRecallTurn).not.toHaveBeenCalled();
+      expect(recallMocks.retrieveRelevantMemories).not.toHaveBeenCalled();
+      expect(webMocks.decideWebSearch).not.toHaveBeenCalled();
+      expect(usageReserve).not.toHaveBeenCalled();
+      expect(usageStart).not.toHaveBeenCalled();
+      expect(rpc.mock.calls.map(([name]) => name)).toEqual(["claim_assistant_message"]);
+    });
+
+    it("returns honest no-result evidence without asking a model to fill in a decision", async () => {
+      historyClient([], { rows: [] });
+      const body = await (await POST(validRequest())).text();
+      expect(body).toContain("does not establish that a decision was never made");
+      expect(stream).not.toHaveBeenCalled();
+    });
+
+    it("never publishes history after the saved Stop wins the persistence race", async () => {
+      historyClient([], { stopped: true });
+      const events = await Array.fromAsync(readChatSse((await POST(validRequest())).body!));
+      expect(events.some((item) => item.type === "delta")).toBe(false);
+      expect(events).toContainEqual({ type: "status", status: "interrupted" });
+      expect(stream).not.toHaveBeenCalled();
+    });
+
+    it("replays the saved evidence without retrieving history or charging for inference", async () => {
+      const from = historyClient([], { replayed: true });
+      const events = await Array.fromAsync(readChatSse((await POST(validRequest())).body!));
+      expect(events).toContainEqual({ type: "delta", text: "Previously saved evidence." });
+      expect(from.mock.calls.filter(([table]) => table === "conversations")).toHaveLength(1);
+      expect(stream).not.toHaveBeenCalled();
+      expect(usageReserve).not.toHaveBeenCalled();
+    });
+  });
+
   it("does not expose a provider stream when the reservation cannot be marked started", async () => {
     vi.useFakeTimers();
     const writes: unknown[] = [];
@@ -757,13 +843,13 @@ describe("POST /api/chat", () => {
       expect(stream).not.toHaveBeenCalled();
     });
 
-    it("rejects a mode that is not configured on the server, before reading any user data", async () => {
+    it("rejects an unconfigured mode for ordinary chat after checking the saved request for history intent", async () => {
       modelOptions.mockReturnValue({ models: allModes.models.filter((option) => option.id !== "High") });
       const from = readyClient([]);
       const response = await post({ model: "High" });
       expect(response.status).toBe(400);
       expect(await response.text()).toContain("isn't available");
-      expect(from).not.toHaveBeenCalled();
+      expect(from.mock.calls.map(([table]) => table)).toEqual(["conversations", "messages", "messages", "user_preferences"]);
       expect(stream).not.toHaveBeenCalled();
     });
 
