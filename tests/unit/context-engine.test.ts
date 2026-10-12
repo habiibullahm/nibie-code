@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildContext } from "../../lib/context/build-context";
-import { CONTEXT_POLICY_TEXT, CONTEXT_POLICY_VERSION, contextPolicyFor } from "../../lib/context/context-policy";
+import { CONTEXT_POLICY_TEXT, CONTEXT_POLICY_VERSION, contextPolicyFor, HISTORY_INCOMPLETE_INSTRUCTION } from "../../lib/context/context-policy";
 import { renderPin } from "../../lib/context/pin-context";
 import { previewContextDiagnostics } from "../../lib/context/profile-context";
 import { estimateTokens, PROTECTED_RECENT_COUNT } from "../../lib/context/token-budget";
@@ -114,14 +114,15 @@ describe("context engine", () => {
     expect(plan.budget.outputReserveTokens).toBe(output);
     expect(plan.blocks.find((block) => block.id === "core")?.included).toBe(true);
     expect(plan.budget.truncated).toBe(true);
-    expect(plan.diagnostics.sources[1].reason).toBe("Older messages left out so this reply stays focused.");
+    expect(plan.diagnostics.sources[1].reason).toBe("Older messages left out because they did not fit this reply.");
   });
 
   it("drops whole older messages before the protected window", () => {
     const thread = messages(8, 100).map((message, index) => ({ ...message, content: `${String(index).padStart(3, "0")}${"x".repeat(97)}` }));
     const one = estimateTokens(thread[0].content);
     const output = 40;
-    const windowTokens = estimateTokens(CONTEXT_POLICY_TEXT) + one * PROTECTED_RECENT_COUNT + output;
+    // Partial-history guidance is authoritative and must fit alongside the protected window.
+    const windowTokens = estimateTokens(`${CONTEXT_POLICY_TEXT}\n\n${HISTORY_INCOMPLETE_INSTRUCTION}`) + one * PROTECTED_RECENT_COUNT + output;
     const tight = buildContext(input({ messages: thread, currentPosition: 8, capabilities: { contextWindowTokens: windowTokens, maxOutputTokens: output } }));
     const kept = toProviderMessages(tight).filter((message) => message.role !== "system").map((message) => message.content);
     expect(kept).toEqual(thread.slice(2).map((message) => message.content));

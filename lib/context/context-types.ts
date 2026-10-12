@@ -75,6 +75,12 @@ export type ContextPlan = {
   budget: BudgetReport;
   /** citationHandle ids written into the web block for this reply (empty when web omitted). */
   includedCitationHandles: string[];
+  // Internal metadata only; does not extend the browser/SSE context schema.
+  continuity: {
+    countCapOmissions: number;
+    budgetOmissions: number;
+    summaryState: "included" | "stale" | "budget" | "absent" | "not_needed";
+  };
 };
 
 export type ModelContextCapabilities = {
