@@ -1,5 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
+// This file uses only synthetic document fixtures; retain input/selection evidence on failure.
+test.use({ trace: "retain-on-failure" });
+
 const documentId = "6f0c1c3e-9a0b-4d1e-8f2a-1b2c3d4e5f60";
 const oldVersion = {
   id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", source: "manual", title: "Previous version",
@@ -103,13 +106,21 @@ test("failed restore keeps the current draft and the history dialog available", 
 test("download waits for pending autosave and exports the visible Unicode draft", async ({ page }) => {
   const { calls, savedContent } = await stubHistory(page, { saveDelay: 700 });
   await page.goto("/preview/workbench-v2");
+  // Exercise the mode controls before editing so this export test starts from an
+  // interactive editor, rather than the textarea in the server-rendered shell.
+  await page.getByRole("button", { name: "Preview", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Document preview" })).toBeVisible();
+  await page.getByRole("button", { name: "Write", exact: true }).click();
   const content = "Catatan Café — keputusan terbaru 日本語";
-  await page.getByRole("textbox", { name: "Document", exact: true }).fill(content);
+  const body = page.getByRole("textbox", { name: "Document", exact: true });
+  await body.fill(content);
+  await expect(body).toHaveValue(content);
   await page.getByRole("button", { name: "Document actions" }).click();
   const download = page.waitForEvent("download");
   await page.getByRole("menuitem", { name: "Download plain text" }).click();
   expect((await download).suggestedFilename()).toBe("Catatan-Café.txt");
   expect(savedContent()).toBe(content);
+  await expect(body).toHaveValue(content);
   expect(calls.indexOf("save")).toBeLessThan(calls.indexOf("export"));
 });
 
