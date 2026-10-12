@@ -22,6 +22,8 @@ export const CATEGORY_COVERAGE_FLOORS = {
   architecture: 1,
   "follow-up": 1,
   grounding: 1,
+  brevity: 1,
+  detailed: 1,
 };
 /** Language coverage floors for fair pairs. */
 export const LANGUAGE_COVERAGE_FLOORS = { en: 1, id: 1 };
@@ -29,11 +31,13 @@ export const LANGUAGE_COVERAGE_FLOORS = { en: 1, id: 1 };
 const fixturePath = fileURLToPath(new URL("../tests/fixtures/response-quality-v2.json", import.meta.url));
 
 const TECHNICAL_CATEGORIES = new Set(["explanation", "coding", "how-to", "comparison"]);
+const GROUNDED_CATEGORIES = new Set(["room", "file", "web", "research"]);
 
 export function coverageBucketForCategory(category) {
   if (!category) return null;
   if (CATEGORY_COVERAGE_FLOORS[category] !== undefined) return category;
   if (TECHNICAL_CATEGORIES.has(category)) return "technical";
+  if (GROUNDED_CATEGORIES.has(category)) return "grounding";
   return null;
 }
 
@@ -84,6 +88,17 @@ function validateRun(run, cases) {
   const roomFingerprint = requiredFingerprint(run.roomFingerprint, "roomFingerprint");
   const filesFingerprint = requiredFingerprint(run.filesFingerprint, "filesFingerprint");
   const toolsFingerprint = requiredFingerprint(run.toolsFingerprint, "toolsFingerprint");
+  // An explicit `none` cannot stand in for context the selected fixture requires.
+  // Digests describe the effective request inputs; fixture digests alone do not
+  // establish that history or source evidence actually reached the application.
+  for (const [contextKey, fingerprint] of [
+    ["history", historyFingerprint], ["room", roomFingerprint],
+    ["file", filesFingerprint], ["web", toolsFingerprint],
+  ]) {
+    if (testcase.context?.[contextKey] !== undefined && fingerprint === "none") {
+      throw new Error("Provided fixture context requires an effective " + contextKey + " digest for " + run.caseId);
+    }
+  }
   for (const key of testcase.dimensions) {
     if (![0, 1, 2].includes(run.ratings?.[key])) throw new Error("Missing human rating " + key + " for " + run.caseId);
   }

@@ -24,7 +24,8 @@
     "dev:local": "node scripts/dev-local.mjs",
     "local:down": "npx --yes supabase@latest stop",
     "test:files-v3:eval": "vitest run tests/unit/files-v3.test.ts -t \"fixture-based retrieval evaluation\" --reporter=dot",
-    "test:quality:v2": "node --test tests/quality/response-quality-eval.test.mjs",
+    "test:quality:v2": "node --test tests/quality/*.test.mjs",
+    "prepare:quality:v2": "node scripts/prepare-response-quality-eval.mjs",
     "eval:response-quality": "node scripts/response-quality-eval.mjs"
   },
   "dependencies": {

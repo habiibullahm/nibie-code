@@ -23,8 +23,15 @@ const COVERAGE_CASE_IDS = [
   "debug-api-en", // debugging + en
   "architecture-caching-en", // architecture + en
   "followup-stack-en", // follow-up + en
-  "no-fabrication-id", // grounding + id
+  "file-noanswer-en", // provided-source grounding
   "database-index-en", // technical (explanation) + en
+];
+const BALANCED_COVERAGE_CASE_IDS = [
+  "brevity-sentence-id", // explicit brevity + id
+  "detailed-setting-en", // detailed request
+  "followup-stack-en",
+  "file-noanswer-en",
+  "database-index-en",
 ];
 
 function runFor(caseId, mode, score, overrides = {}) {
@@ -43,10 +50,10 @@ function runFor(caseId, mode, score, overrides = {}) {
     contextTruncated: false,
     responseDepth: "balanced",
     fixtureFingerprint: fixtureFingerprint(testcase),
-    historyFingerprint: "none",
-    roomFingerprint: "none",
-    filesFingerprint: "none",
-    toolsFingerprint: "none",
+    historyFingerprint: testcase.context?.history === undefined ? "none" : digest(JSON.stringify(testcase.context.history)),
+    roomFingerprint: testcase.context?.room === undefined ? "none" : digest(JSON.stringify(testcase.context.room)),
+    filesFingerprint: testcase.context?.file === undefined ? "none" : digest(JSON.stringify(testcase.context.file)),
+    toolsFingerprint: testcase.context?.web === undefined ? "none" : digest(JSON.stringify(testcase.context.web)),
     response: "Synthetic placeholder text for scorer tests only. Not a real provider answer.",
     reviewer: "test-fixture",
     reviewNotes: "Only tests arithmetic and validation; never a quality baseline.",
@@ -63,7 +70,9 @@ function coveredPhases(beforeScore, afterScore, overrides = {}) {
   const before = { runs: [] };
   const after = { runs: [] };
   for (const mode of MODES) {
-    for (const caseId of COVERAGE_CASE_IDS) {
+    const selected = mode === "Balanced" ? BALANCED_COVERAGE_CASE_IDS : COVERAGE_CASE_IDS;
+    assert.equal(selected.length, MIN_FAIR_PAIRS_PER_MODE);
+    for (const caseId of selected) {
       before.runs.push(runFor(caseId, mode, beforeScore, overrides));
       after.runs.push(runFor(caseId, mode, afterScore, overrides));
     }
@@ -72,6 +81,35 @@ function coveredPhases(beforeScore, afterScore, overrides = {}) {
 }
 
 describe("Response Quality V2 evaluator — synthetic scorer tests, NOT model-quality evidence", () => {
+  it("rejects absent effective context when the fixture explicitly supplies history, Room, file or web evidence", () => {
+    for (const [id, field] of [
+      ["followup-stack-en", "historyFingerprint"],
+      ["room-facts-id", "roomFingerprint"],
+      ["file-noanswer-en", "filesFingerprint"],
+      ["web-sources-id", "toolsFingerprint"],
+    ]) {
+      assert.throws(() => scorePhase({ runs: [runFor(id, "Balanced", 2, { [field]: "none" })] }, cases),
+        /Provided fixture context requires/);
+    }
+  });
+  it("rejects otherwise complete coverage that never evaluates explicit brevity or detailed requests", () => {
+    const ids = ["debug-api-en", "architecture-caching-en", "followup-stack-en", "no-fabrication-id", "database-index-en"];
+    const before = { runs: [] }, after = { runs: [] };
+    for (const mode of MODES) {
+      for (const id of ids) {
+        before.runs.push(runFor(id, mode, 1));
+        after.runs.push(runFor(id, mode, 2));
+      }
+    }
+    const result = comparePhases(before, after, cases);
+    assert.equal(result.fairPairs, MIN_FAIR_PAIRS_TOTAL);
+    assert.equal(result.modeCoverageOk, true);
+    assert.equal(result.languageOk, true);
+    assert.equal(result.categoryCoverage.brevity, 0);
+    assert.equal(result.categoryCoverage.detailed, 0);
+    assert.equal(result.coverageOk, false);
+    assert.equal(result.passes, false);
+  });
   it("requires 20-30 unique bilingual cases with required coverage categories present", () => {
     assert.equal(cases.length, 30);
     assert.equal(new Set(cases.map((c) => c.id)).size, 30);
@@ -83,7 +121,7 @@ describe("Response Quality V2 evaluator — synthetic scorer tests, NOT model-qu
         "fixture missing coverage bucket " + bucket,
       );
     }
-    for (const id of COVERAGE_CASE_IDS) {
+    for (const id of new Set([...COVERAGE_CASE_IDS, ...BALANCED_COVERAGE_CASE_IDS])) {
       assert.ok(cases.some((c) => c.id === id), "missing coverage fixture " + id);
     }
   });
