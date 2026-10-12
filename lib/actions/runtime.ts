@@ -63,6 +63,27 @@ function isAbortError(error: unknown): boolean {
   return name === "AbortError" || /abort|cancel/i.test(message);
 }
 
+/** Bound the runtime wait even when a connector ignores its cancellation signal. */
+async function executeWithCancellation(
+  action: ActionDefinition,
+  ctx: ActionExecutionContext,
+  input: unknown,
+  signal: AbortSignal,
+): Promise<ActionResult> {
+  signal.throwIfAborted();
+  let rejectCancellation: (reason: unknown) => void = () => {};
+  const cancelled = new Promise<never>((_resolve, reject) => { rejectCancellation = reject; });
+  const onAbort = () => rejectCancellation(signal.reason);
+  signal.addEventListener("abort", onAbort, { once: true });
+  try {
+    // The adapter must also pass signal to its transport: this bounds our wait,
+    // while transport cancellation is needed to stop external work and its cost.
+    return await Promise.race([action.execute(ctx, input, signal), cancelled]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
+}
+
 /**
  * Execute one allowlisted Action: registry → validate → permission → execute → audit.
  * Prefer one call per generation. Never loops on model tool requests.
@@ -179,9 +200,9 @@ export async function executeAction(input: ExecuteActionInput): Promise<ActionRu
   }
 
   try {
-    const result = await action.execute(input.ctx, parsed.data, combined);
+    const result = await executeWithCancellation(action, input.ctx, parsed.data, combined);
     const aborted = combined.aborted || input.ctx.signal.aborted;
-    if (aborted && !result.ok) {
+    if (aborted) {
       const timedOut = timeout.aborted && !input.ctx.signal.aborted;
       return await seal({
         supabase: input.supabase,
@@ -195,21 +216,6 @@ export async function executeAction(input: ExecuteActionInput): Promise<ActionRu
           timedOut ? "Action timed out." : "Action cancelled.",
         ),
       });
-    }
-    if (aborted && result.ok) {
-      // Stop won after a successful execute — still report completed truthfully for the work done,
-      // but prefer cancelled when the user Stop is the authority for the turn.
-      if (input.ctx.signal.aborted) {
-        return await seal({
-          supabase: input.supabase,
-          runId,
-          userId: input.ctx.userId,
-          action,
-          startedAt,
-          status: "cancelled",
-          result: { ...result, ok: false, errorCode: "aborted", errorMessage: "Action cancelled.", summary: "Action cancelled." },
-        });
-      }
     }
     const status: ActionRunStatus = result.ok ? "completed" : "failed";
     return await seal({
