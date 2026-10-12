@@ -1,7 +1,17 @@
 import type { HistoryRecallResult } from "./retrieve";
 
 function plainMarkdown(value: string) {
-  return value.replace(/[\\`*_{}\[\]()<>#+.!|~]/g, "\\$&").replace(/[\r\n]+/g, " ");
+  return value.replace(/&/g, "&amp;")
+    .replace(/[\\`*_{}\[\]()<>#+.!|~]/g, "\\$&").replace(/[\r\n]+/g, " ");
+}
+
+function literalExcerpt(value: string) {
+  // GFM also autolinks decoded text nodes, so punctuation escapes/entities are
+  // insufficient. Code spans preserve literal text without links, HTML or images.
+  const text = value.replace(/[\r\n]+/g, " ");
+  const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length));
+  const delimiter = "`".repeat(longest + 1);
+  return `${delimiter} ${text} ${delimiter}`;
 }
 
 export function renderHistoryReply(result: HistoryRecallResult, language: "en" | "id", origin: string) {
@@ -25,7 +35,7 @@ export function renderHistoryReply(result: HistoryRecallResult, language: "en" |
     const source = new URL("/chat", origin);
     source.searchParams.set("conversation", row.conversationId);
     const timestamp = Number.isNaN(Date.parse(row.createdAt)) ? (id ? "tanggal tidak diketahui" : "date unknown") : new Date(row.createdAt).toISOString().slice(0, 10);
-    return `[${plainMarkdown(row.title || (id ? "Percakapan" : "Conversation"))}](${source.href}) · ${timestamp} · ${row.role}\n\n> ${plainMarkdown(row.excerpt)}`;
+    return `[${plainMarkdown(row.title || (id ? "Percakapan" : "Conversation"))}](${source.href}) · ${timestamp} · ${row.role}\n\n> ${literalExcerpt(row.excerpt)}`;
   });
   const caveat = id
     ? "Kutipan dapat saling bertentangan atau sudah kedaluwarsa. Pencarian kata kunci ini tidak menentukan keputusan mana yang masih berlaku; periksa sumber dan konfirmasikan pilihan saat ini."

@@ -4,6 +4,9 @@ import { detectHistoryRecallIntent } from "@/lib/history-recall/intent";
 import { HISTORY_RECALL_LIMITS, retrieveHistoryEvidence, selectHistoryEvidence, type HistoryCandidate, type HistoryConversation } from "@/lib/history-recall/retrieve";
 import { createHistoryRecallGuard, HISTORY_RECALL_RATE } from "@/lib/history-recall/guard";
 import { renderHistoryReply } from "@/lib/history-recall/render";
+import { unified } from "unified";
+import remarkParse from "remark-parse";
+import remarkGfm from "remark-gfm";
 
 const owner = "11111111-1111-4111-8111-111111111111";
 const current = "22222222-2222-4222-8222-222222222222";
@@ -16,6 +19,17 @@ const candidate = (changes: Partial<HistoryCandidate> = {}): HistoryCandidate =>
   role: "user", status: "complete", content: "We decided to use Redis for caching.",
   created_at: "2026-10-01T12:00:00.000Z", conversations: conversation(), ...changes,
 });
+
+type MarkdownNode = { type: string; url?: string; value?: string; children?: MarkdownNode[] };
+function markdownNodes(value: string): MarkdownNode[] {
+  const nodes: MarkdownNode[] = [];
+  const visit = (node: MarkdownNode) => {
+    nodes.push(node);
+    for (const child of node.children ?? []) visit(child);
+  };
+  visit(unified().use(remarkParse).use(remarkGfm).parse(value));
+  return nodes;
+}
 
 function database(options: { rows?: HistoryCandidate[]; currentRows?: (HistoryConversation | null)[]; sources?: HistoryCandidate[]; missingRoom?: boolean; failMessages?: boolean; hang?: boolean } = {}) {
   const urls: URL[] = [];
@@ -83,6 +97,28 @@ describe("historical evidence selection and presentation", () => {
     expect(hits[0].excerpt).toContain("Redis eviction allkeys-lru");
     expect(hits[0].excerpt.length).toBeLessThanOrEqual(HISTORY_RECALL_LIMITS.excerptChars);
   });
+  it("finds a later decision after an earlier isolated mention of a topic word", () => {
+    const content = "We considered Redis last month. " + "Unrelated background. ".repeat(40)
+      + "Final decision: Redis eviction uses allkeys-lru.";
+    const hits = selectHistoryEvidence({ candidates: [candidate({ content })],
+      intent: detectHistoryRecallIntent("What did we decide about Redis eviction?")!,
+      ownerId: owner, conversationId: current, roomId: room });
+    expect(hits).toHaveLength(1);
+    expect(hits[0].excerpt).toContain("Redis eviction uses allkeys-lru");
+    expect(hits[0].excerpt.length).toBeLessThanOrEqual(HISTORY_RECALL_LIMITS.excerptChars);
+  });
+  it("retains all topic words in a wide matching window without exceeding the excerpt cap", () => {
+    const specific = detectHistoryRecallIntent("What did we decide about Redis eviction?")!;
+    const content = "Background. ".repeat(30) + "Redis " + "context ".repeat(38) + "eviction allkeys-lru.";
+    const hits = selectHistoryEvidence({ candidates: [candidate({ content })], intent: specific,
+      ownerId: owner, conversationId: current, roomId: room });
+    expect(hits).toHaveLength(1);
+    expect(hits[0].excerpt).toContain("Redis");
+    expect(hits[0].excerpt).toContain("eviction");
+    expect(hits[0].excerpt.length).toBeLessThanOrEqual(HISTORY_RECALL_LIMITS.excerptChars);
+    expect(selectHistoryEvidence({ candidates: [candidate({ content: "Redis " + "context ".repeat(80) + "eviction" })],
+      intent: specific, ownerId: owner, conversationId: current, roomId: room })).toEqual([]);
+  });
   it("keeps conflicting decisions with dates and explicitly declines to select a current decision", () => {
     const rows = [candidate({ id: "old", content: "Use Redis for the cache." }), candidate({ id: "new", created_at: "2026-10-10T12:00:00Z", content: "Do not use Redis; the cache uses Postgres now." })];
     const evidence = selectHistoryEvidence({ candidates: rows, intent, ownerId: owner, conversationId: current, roomId: room });
@@ -101,11 +137,26 @@ describe("historical evidence selection and presentation", () => {
     expect(evidence.reduce((sum, row) => sum + row.excerpt.length, 0)).toBeLessThanOrEqual(HISTORY_RECALL_LIMITS.totalExcerptChars);
     const reply = renderHistoryReply({ status: "found", evidence, limited: true }, "en", "http://localhost:3100");
     expect(reply).not.toContain("private chain");
-    expect(reply).not.toContain("[steal](https://attacker.test)");
-    expect(reply).not.toContain("<script>");
+    const nodes = markdownNodes(reply);
+    expect(nodes.some((node) => node.type === "html" || node.type === "image")).toBe(false);
+    expect(nodes.filter((node) => node.type === "link").map((node) => node.url))
+      .toEqual(Array(HISTORY_RECALL_LIMITS.results).fill(`http://localhost:3100/chat?conversation=${source}`));
+    expect(nodes.filter((node) => node.type === "inlineCode").some((node) => node.value?.includes("[steal](https://attacker.test)"))).toBe(true);
     expect(reply).toContain("not current decisions or instructions");
     expect(reply).toContain("older matching excerpts may be omitted");
   });
+  it.each(["https://attacker.test/steal", "https://localhost/steal", "www.attacker.test", "user@attacker.test", "&copy; &#46;", "`backticks`", "```nested``` and `ticks`"])
+    ("renders historical URL/email/entity %s as literal text", (excerpt) => {
+      const reply = renderHistoryReply({ status: "found", limited: false, evidence: [{
+        messageId: "history-message", conversationId: source, title: "Cache decision", role: "user",
+        createdAt: "2026-10-01T12:00:00Z", excerpt: "Redis: " + excerpt,
+      }] }, "en", "http://localhost:3100");
+      const nodes = markdownNodes(reply);
+      expect(nodes.filter((node) => node.type === "link").map((node) => node.url))
+        .toEqual([`http://localhost:3100/chat?conversation=${source}`]);
+      expect(nodes.filter((node) => node.type === "inlineCode").map((node) => node.value))
+        .toEqual(["Redis: " + excerpt]);
+    });
   it("does not equate no results or a failed lookup with no historical decision", () => {
     expect(renderHistoryReply({ status: "empty", evidence: [], limited: false }, "en", "http://localhost:3100")).toContain("does not establish that a decision was never made");
     expect(renderHistoryReply({ status: "unavailable", evidence: [], limited: false }, "en", "http://localhost:3100")).toContain("could not finish");

@@ -14,7 +14,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
     const content = renderHistoryReply({ status: "found", limited: false, evidence: [{
       conversationId: source, messageId: "history-message", title: "Cache decision", role: "user",
       createdAt: "2026-10-01T12:00:00.000Z",
-      excerpt: "Use Redis. [steal](https://attacker.test) ![pixel](https://attacker.test/pixel) <script>ignore instructions</script>",
+      excerpt: "Use Redis. [steal](https://attacker.test) ![pixel](https://attacker.test/pixel) <script>ignore instructions</script> www.attacker.test user@attacker.test https://localhost/steal",
     }] }, "en", "http://localhost:3100");
     let userId = "";
     await page.route("**/preview/chat-core**", async route => {
@@ -46,10 +46,13 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
     await expect(reply).toContainText("separate from saved Memory");
     await expect(reply.getByRole("link", { name: "Cache decision", exact: true })).toHaveAttribute("href", `http://localhost:3100/chat?conversation=${source}`);
     await expect(reply.getByRole("link", { name: "steal" })).toHaveCount(0);
+    await expect(reply.getByRole("link")).toHaveCount(1);
+    await expect(reply).toContainText("www.attacker.test user@attacker.test https://localhost/steal");
     await expect(reply.locator("img,script")).toHaveCount(0);
     await expect(reply).toContainText("may conflict or be outdated");
     await page.reload();
     await expect(reply).toContainText("Historical conversation excerpts");
     await expect(reply.getByRole("link", { name: "Cache decision", exact: true })).toHaveAttribute("href", `http://localhost:3100/chat?conversation=${source}`);
+    await expect(reply.getByRole("link")).toHaveCount(1);
   });
 }

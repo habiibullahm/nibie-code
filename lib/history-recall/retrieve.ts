@@ -47,6 +47,36 @@ function inScope(row: HistoryConversation, ownerId: string, roomId: string | nul
   return row.user_id === ownerId && row.room_id === roomId && row.archived_at === null;
 }
 
+/** Find the tightest word window, including later occurrences of a topic term. */
+function excerptForTerms(text: string, terms: string[]): string | null {
+  if (!terms.length) return null;
+  const occurrences = terms.flatMap((term, termIndex) =>
+    [...text.matchAll(new RegExp(`(?<![\\p{L}\\p{N}])${term}(?![\\p{L}\\p{N}])`, "giu"))]
+      .map((match) => ({ start: match.index, end: match.index + match[0].length, termIndex })),
+  ).sort((a, b) => a.start - b.start || a.end - b.end);
+  const counts: number[] = Array(terms.length).fill(0);
+  const maxChars = HISTORY_RECALL_LIMITS.excerptChars - 2;
+  let covered = 0;
+  let left = 0;
+  let best: { start: number; end: number } | null = null;
+  for (const occurrence of occurrences) {
+    if (counts[occurrence.termIndex]++ === 0) covered++;
+    while (covered === terms.length) {
+      const start = occurrences[left].start;
+      const span = occurrence.end - start;
+      if (span <= maxChars && (!best || span < best.end - best.start)) {
+        best = { start, end: occurrence.end };
+      }
+      if (--counts[occurrences[left++].termIndex] === 0) covered--;
+    }
+  }
+  if (!best) return null;
+  // Spend only the remaining space on leading context so the last term survives.
+  const start = Math.max(0, best.start - Math.min(100, maxChars - (best.end - best.start)));
+  const end = Math.min(text.length, start + maxChars);
+  return `${start ? "…" : ""}${text.slice(start, end)}${end < text.length ? "…" : ""}`;
+}
+
 /** Rank lexical evidence only; never interpret snippets as decisions or instructions. */
 export function selectHistoryEvidence(input: {
   candidates: HistoryCandidate[];
@@ -65,15 +95,10 @@ export function selectHistoryEvidence(input: {
   ).flatMap((row) => {
     const text = sanitizeSearchableContent(row.role, row.content).replace(/\s+/g, " ").trim();
     const lower = text.toLowerCase();
-    const matches = intent.terms.map((term) => new RegExp(`(?<![\\p{L}\\p{N}])${term}(?![\\p{L}\\p{N}])`, "u").exec(lower));
     // Require every topic token. Avoid replacing missing evidence with a loosely
     // related hit (e.g. Redis billing when the user asks Redis eviction).
-    if (!matches.length || matches.some((match) => match === null)) return [];
-    const first = Math.min(...matches.map((match) => match!.index));
-    const start = Math.max(0, first - 100);
-    const end = Math.min(text.length, start + HISTORY_RECALL_LIMITS.excerptChars - 2);
-    const excerpt = `${start ? "…" : ""}${text.slice(start, end)}${end < text.length ? "…" : ""}`;
-    if (!intent.terms.every((term) => new RegExp(`(?<![\\p{L}\\p{N}])${term}(?![\\p{L}\\p{N}])`, "u").test(excerpt.toLowerCase()))) return [];
+    const excerpt = excerptForTerms(text, intent.terms);
+    if (!excerpt) return [];
     return [{ row, excerpt, score: lower.includes(intent.topic.toLowerCase()) ? 2 : 1 }];
   }).sort((a, b) => b.score - a.score || b.row.created_at.localeCompare(a.row.created_at) || a.row.id.localeCompare(b.row.id));
   const seen = new Set<string>();
