@@ -1,7 +1,7 @@
-# Context Continuity V2 — bounded offline candidate
+# Context Continuity V2 — bounded context construction
 
 Starting point: `8dc35a44c03d3b4945eda4cb0e529cb0f74d879c` on October 12,
-2026. Issue #105 remains partial; real-answer quality is gated by Issue #80's
+2026. Implementation is delivered through PR #121; real-answer quality is gated by Issue #80's
 authorized provider captures and independent human review.
 
 ## Demonstrated gap and change
@@ -21,7 +21,13 @@ appends an unbudgeted message after allocation. Complete supplied history keeps
 the original core unchanged. Large files or optional profile text alone do not
 trigger a misleading thread-history notice.
 
-The instruction costs about 20 character/4 estimated tokens plus separation,
+The notice is checked against the final allocation. In a tight request, adding
+it can make the summary too large to fit, freeing enough space for every raw
+message instead. When that happens, the builder removes the false notice and
+recalculates its core token estimate while preserving the recovered dialogue.
+It does not run another allocation that could discard those messages again.
+
+The instruction costs about 20 estimated tokens (characters/4) plus separation,
 inside the same 16,384-token envelope and 2,048-token planning reserve. A tight
 budget can therefore retain fewer optional sources or earlier turns. No mode,
 output ceiling, fetch cap, model, reasoning effort, billing policy, tokenizer,
@@ -59,6 +65,9 @@ and context bodies are not logged or persisted.
 
 - Short complete conversation and covered-summary history keep normal provider
   input and current-request ordering.
+- Tight summary-boundary fixtures across Fast/Balanced/High recover all nine raw
+  messages, remove the omission notice, preserve extra policy, and stay within
+  the existing 16,384/2,048 envelope. These three cases failed before the fix.
 - Long, unsummarized history gets the notice across Fast/Balanced/High and stays
   within the current estimated budget.
 - A summary with a known uncovered gap is rejected. Recent English/Indonesian
@@ -95,6 +104,13 @@ route follow-up passed 166 focused tests in four files, including the new handle
 regressions. Current broad/browser/build results belong in the PR at the exact
 candidate SHA; these counts do not imply live acceptance.
 
+The final-allocation follow-up passed all 1,402 unit tests in 116 files, including
+453 focused tests in nine context and handler files. Lint passed with zero errors
+and three existing warnings; fresh route types, TypeScript, the production build,
+and release consistency also passed. The build used a synthetic HTTPS origin and
+masked provider/database credentials. The three new allocation regressions failed
+before the fix and passed afterward. No live provider or shared database was used.
+
 ## Honest limits and release gates
 
 Only omitted supplied messages and caller-observed discarded positions can be
@@ -109,7 +125,7 @@ are added; saved Memory stays distinct from historical messages.
 
 Human-reviewed bilingual real outputs, effective provider capability/pricing,
 bounded-spend authorization, signed-in exact-SHA Preview continuity, and measured
-provider latency/cost remain BLOCKED. This candidate supports honest omission
-handling but cannot prove what a real model will answer. No GO claim or issue
-closure is warranted. Rollback is the focused context commit; no migration or
-data conversion is needed.
+provider latency/cost remain BLOCKED under Issue #80. Closing the engineering
+scope of Issue #105 at the owner's request does not certify live answer quality
+or a release GO decision. Rollback is to revert the focused context commits;
+no migration or data conversion is needed.

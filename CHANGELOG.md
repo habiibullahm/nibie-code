@@ -29,7 +29,7 @@ What's new in Nibie.
 
 ### Fixed
 
-- Replies receive an explicit notice when earlier thread messages were omitted, and context details distinguish the history limit from messages that did not fit.
+- Replies receive an explicit notice only when earlier thread messages are missing, and context details distinguish the history limit from messages that did not fit.
 - Opening an empty chat through browser navigation releases the previous reply's Stop control and lets you start a fresh message.
 - Settings keeps unsaved personalization drafts between sections, asks before discarding them, and preserves keyboard focus while choices save.
 - Switching threads with Back, Forward, or a chat URL releases the previous reply so a delayed stream cannot block the next conversation.

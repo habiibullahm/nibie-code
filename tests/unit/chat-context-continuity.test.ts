@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildContext } from "../../lib/context/build-context";
-import { CONTEXT_POLICY_TEXT, HISTORY_INCOMPLETE_INSTRUCTION } from "../../lib/context/context-policy";
+import { CONTEXT_POLICY_TEXT, contextPolicyFor, HISTORY_INCOMPLETE_INSTRUCTION } from "../../lib/context/context-policy";
 import { toProviderMessages } from "../../lib/ai/provider-messages";
 import { estimateTokens } from "../../lib/context/token-budget";
 import { renderThreadSummary } from "../../lib/context/thread-context";
@@ -23,6 +23,35 @@ const input = (overrides: Partial<BuildContextInput>): BuildContextInput => ({
 });
 
 describe("bounded chat continuity", () => {
+  it.each(["Fast", "Balanced", "High"] as const)("removes the %s omission notice when reallocation recovers all supplied history", (responseMode) => {
+    const saved = { ...summary(2), objective: "o".repeat(2400) };
+    const thread = messages(9);
+    thread[2].content = "Correction: use Redis.";
+    thread[8].content = "Use the updated one.";
+    const extraPolicyInstruction = "Preserve the user's latest correction.";
+    const completeCore = `${contextPolicyFor(responseMode)}\n\n${extraPolicyInstruction}`;
+    const inputBudgetTokens = 16_384 - 2_048;
+    // Initially the summary fits exactly after the protected turns, leaving no
+    // space for the uncovered correction. The notice makes that summary too
+    // large, so the second allocation can recover every raw turn instead.
+    const protectedTotal = inputBudgetTokens - estimateTokens(completeCore)
+      - estimateTokens(thread[8].content) - estimateTokens(renderThreadSummary(saved));
+    let remaining = protectedTotal;
+    for (let index = 3; index < 8; index++) {
+      const tokens = index === 7 ? remaining : Math.floor(protectedTotal / 5);
+      thread[index].content = "x".repeat(tokens * 4);
+      remaining -= tokens;
+    }
+    const plan = buildContext(input({ messages: thread, currentPosition: 9, summary: saved, responseMode, extraPolicyInstruction }));
+    expect(plan.continuity).toEqual({ countCapOmissions: 0, budgetOmissions: 0, summaryState: "budget" });
+    const provider = toProviderMessages(plan);
+    expect(provider.filter((message) => message.role !== "system").map((message) => message.content)).toEqual(thread.map((message) => message.content));
+    expect(provider[0].content).toBe(completeCore);
+    expect(provider[0].content).not.toContain(HISTORY_INCOMPLETE_INSTRUCTION);
+    expect(plan.budget.estimatedTokens).toBe(plan.blocks.filter((block) => block.included).reduce((tokens, block) => tokens + block.tokenEstimate, 0));
+    expect(plan.budget.estimatedTokens).toBeLessThanOrEqual(inputBudgetTokens);
+  });
+
   it("ignores duplicate, invalid, future, or retained positions in caller omission metadata", () => {
     const plan = buildContext(input({
       messages: messages(41).slice(-32),

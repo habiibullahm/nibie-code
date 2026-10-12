@@ -65,14 +65,15 @@ function assembleContext(input: BuildContextInput, historyIncomplete: boolean): 
   const webVerificationUnavailable = Boolean(input.webVerificationUnavailable) && !(input.web?.length);
   const recallOpText = recallOperationInstruction(input.recallOperation);
   const extraPolicy = input.extraPolicyInstruction?.trim() || null;
-  const corePolicyText = [
+  const corePolicyTextFor = (incomplete: boolean) => [
     basePolicyText,
-    historyIncomplete ? HISTORY_INCOMPLETE_INSTRUCTION : null,
+    incomplete ? HISTORY_INCOMPLETE_INSTRUCTION : null,
     webVerificationUnavailable ? WEB_VERIFICATION_UNAVAILABLE_INSTRUCTION : null,
     recallOpText,
     extraPolicy,
   ].filter(Boolean).join("\n\n");
-  const coreTokens = estimateTokens(corePolicyText);
+  let corePolicyText = corePolicyTextFor(historyIncomplete);
+  let coreTokens = estimateTokens(corePolicyText);
   const currentTokens = estimateTokens(current.content);
   if (coreTokens + currentTokens > inputBudgetTokens) throw new ContextBuildError();
 
@@ -185,6 +186,12 @@ function assembleContext(input: BuildContextInput, historyIncomplete: boolean): 
   ]);
   const countCapOmissions = omittedAtCountCap.size;
   const budgetOmissions = omitted.filter((message) => selectedSet.has(message)).length;
+  if (historyIncomplete && !countCapOmissions && !budgetOmissions) {
+    // A summary that no longer fits can free enough space for all raw history.
+    // Remove the now-false notice without reallocating away that recovered text.
+    corePolicyText = corePolicyTextFor(false);
+    coreTokens = estimateTokens(corePolicyText);
+  }
   const truncated = countCapOmissions > 0 || budgetOmissions > 0 || droppedMessages.length > 0 || droppedPieces.length > 0 || droppedRoom.length > 0 || droppedPins.length > 0 || Boolean(renderedFiles?.truncated) || Boolean(renderedAttachments?.truncated) || Boolean(renderedWeb?.truncated) || Boolean(renderedMemories?.truncated) || summaryDroppedForBudget;
 
   const profileText = includedPieces.map((piece) => piece.text).join("\n");
