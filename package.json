@@ -15,6 +15,7 @@
     "test:qa:smoke": "node scripts/qa-smoke.mjs",
     "test:qa:preview": "node scripts/qa-preview-smoke.mjs",
     "test:chat:e2e": "node scripts/chat-e2e.mjs",
+    "test:chat:local": "node scripts/reliability-local/run.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "release:check": "node scripts/check-release.mjs",

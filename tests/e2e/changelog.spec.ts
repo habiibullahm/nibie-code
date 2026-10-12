@@ -3,6 +3,23 @@ import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { getWhatsNewPreview, parseChangelog } from "../../lib/changelog";
 
+function expectLocalChangelogDestination(href: string | null, pageUrl: string) {
+  expect(href, "Help must link to the changelog").not.toBeNull();
+  // A configured public app origin renders an absolute href. Resolve relative
+  // links too, while still requiring the exact local origin and route.
+  expect(new URL(href!, pageUrl).href).toBe(new URL("/changelog", pageUrl).href);
+}
+
+test("local changelog destination accepts equivalent hrefs and rejects other destinations", () => {
+  const pageUrl = "http://localhost:3100/preview";
+  for (const href of ["/changelog", "http://localhost:3100/changelog"]) {
+    expectLocalChangelogDestination(href, pageUrl);
+  }
+  for (const href of [null, "https://example.invalid/changelog", "http://localhost:3000/changelog", "/privacy", "/changelog?redirect=elsewhere", "/changelog#other"]) {
+    expect(() => expectLocalChangelogDestination(href, pageUrl)).toThrow();
+  }
+});
+
 test("public changelog retains semantic release hierarchy and existing metadata", async ({ page }) => {
   await page.goto("/changelog");
 
@@ -57,7 +74,7 @@ test("account Help shows the latest release, or Unreleased highlights until one 
   const panel = sidebar.locator(".account-help-panel");
   await expect(panel).toBeVisible();
   await expect(panel.getByText("What’s new", { exact: true })).toBeVisible();
-  await expect(panel.getByRole("menuitem", { name: "View full changelog" })).toHaveAttribute("href", "/changelog");
+  expectLocalChangelogDestination(await panel.getByRole("menuitem", { name: "View full changelog" }).getAttribute("href"), page.url());
   if (!release) {
     await expect(panel.getByText("No updates yet.", { exact: true })).toBeVisible();
     return;
