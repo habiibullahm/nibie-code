@@ -1,10 +1,12 @@
 import { describe, it } from "node:test";
 import { strict as assert } from "node:assert";
+import { createHash } from "node:crypto";
 import {
   CATEGORY_COVERAGE_FLOORS,
   comparePhases,
   coverageBucketForCategory,
   formatReport,
+  fixtureFingerprint,
   LANGUAGE_COVERAGE_FLOORS,
   loadCases,
   MIN_FAIR_PAIRS_PER_MODE,
@@ -14,18 +16,27 @@ import {
 } from "../../scripts/response-quality-eval.mjs";
 
 const cases = loadCases();
+const digest = (value) => createHash("sha256").update(value).digest("hex");
 
 /** Five fixtures that clear category + language floors when used across modes. */
 const COVERAGE_CASE_IDS = [
   "debug-api-en", // debugging + en
   "architecture-caching-en", // architecture + en
   "followup-stack-en", // follow-up + en
-  "no-fabrication-id", // grounding + id
+  "file-noanswer-en", // provided-source grounding
   "database-index-en", // technical (explanation) + en
+];
+const BALANCED_COVERAGE_CASE_IDS = [
+  "brevity-sentence-id", // explicit brevity + id
+  "detailed-setting-en", // detailed request
+  "followup-stack-en",
+  "file-noanswer-en",
+  "database-index-en",
 ];
 
 function runFor(caseId, mode, score, overrides = {}) {
-  const dims = cases.find((c) => c.id === caseId).dimensions;
+  const testcase = cases.find((c) => c.id === caseId);
+  const dims = testcase.dimensions;
   const ratings = Object.fromEntries(dims.map((d) => [d, score]));
   return {
     caseId,
@@ -38,6 +49,11 @@ function runFor(caseId, mode, score, overrides = {}) {
     outputTokens: 100,
     contextTruncated: false,
     responseDepth: "balanced",
+    fixtureFingerprint: fixtureFingerprint(testcase),
+    historyFingerprint: testcase.context?.history === undefined ? "none" : digest(JSON.stringify(testcase.context.history)),
+    roomFingerprint: testcase.context?.room === undefined ? "none" : digest(JSON.stringify(testcase.context.room)),
+    filesFingerprint: testcase.context?.file === undefined ? "none" : digest(JSON.stringify(testcase.context.file)),
+    toolsFingerprint: testcase.context?.web === undefined ? "none" : digest(JSON.stringify(testcase.context.web)),
     response: "Synthetic placeholder text for scorer tests only. Not a real provider answer.",
     reviewer: "test-fixture",
     reviewNotes: "Only tests arithmetic and validation; never a quality baseline.",
@@ -54,7 +70,9 @@ function coveredPhases(beforeScore, afterScore, overrides = {}) {
   const before = { runs: [] };
   const after = { runs: [] };
   for (const mode of MODES) {
-    for (const caseId of COVERAGE_CASE_IDS) {
+    const selected = mode === "Balanced" ? BALANCED_COVERAGE_CASE_IDS : COVERAGE_CASE_IDS;
+    assert.equal(selected.length, MIN_FAIR_PAIRS_PER_MODE);
+    for (const caseId of selected) {
       before.runs.push(runFor(caseId, mode, beforeScore, overrides));
       after.runs.push(runFor(caseId, mode, afterScore, overrides));
     }
@@ -63,6 +81,35 @@ function coveredPhases(beforeScore, afterScore, overrides = {}) {
 }
 
 describe("Response Quality V2 evaluator — synthetic scorer tests, NOT model-quality evidence", () => {
+  it("rejects absent effective context when the fixture explicitly supplies history, Room, file or web evidence", () => {
+    for (const [id, field] of [
+      ["followup-stack-en", "historyFingerprint"],
+      ["room-facts-id", "roomFingerprint"],
+      ["file-noanswer-en", "filesFingerprint"],
+      ["web-sources-id", "toolsFingerprint"],
+    ]) {
+      assert.throws(() => scorePhase({ runs: [runFor(id, "Balanced", 2, { [field]: "none" })] }, cases),
+        /Provided fixture context requires/);
+    }
+  });
+  it("rejects otherwise complete coverage that never evaluates explicit brevity or detailed requests", () => {
+    const ids = ["debug-api-en", "architecture-caching-en", "followup-stack-en", "no-fabrication-id", "database-index-en"];
+    const before = { runs: [] }, after = { runs: [] };
+    for (const mode of MODES) {
+      for (const id of ids) {
+        before.runs.push(runFor(id, mode, 1));
+        after.runs.push(runFor(id, mode, 2));
+      }
+    }
+    const result = comparePhases(before, after, cases);
+    assert.equal(result.fairPairs, MIN_FAIR_PAIRS_TOTAL);
+    assert.equal(result.modeCoverageOk, true);
+    assert.equal(result.languageOk, true);
+    assert.equal(result.categoryCoverage.brevity, 0);
+    assert.equal(result.categoryCoverage.detailed, 0);
+    assert.equal(result.coverageOk, false);
+    assert.equal(result.passes, false);
+  });
   it("requires 20-30 unique bilingual cases with required coverage categories present", () => {
     assert.equal(cases.length, 30);
     assert.equal(new Set(cases.map((c) => c.id)).size, 30);
@@ -74,7 +121,7 @@ describe("Response Quality V2 evaluator — synthetic scorer tests, NOT model-qu
         "fixture missing coverage bucket " + bucket,
       );
     }
-    for (const id of COVERAGE_CASE_IDS) {
+    for (const id of new Set([...COVERAGE_CASE_IDS, ...BALANCED_COVERAGE_CASE_IDS])) {
       assert.ok(cases.some((c) => c.id === id), "missing coverage fixture " + id);
     }
   });
@@ -179,6 +226,36 @@ describe("Response Quality V2 evaluator — synthetic scorer tests, NOT model-qu
     assert.equal(result.passes, false);
   });
 
+  it("blocks absent context provenance and unknown saved depth instead of assuming matching defaults", () => {
+    for (const field of ["fixtureFingerprint", "historyFingerprint", "roomFingerprint", "filesFingerprint", "toolsFingerprint"]) {
+      const { before, after } = coveredPhases(1, 2, { [field]: undefined });
+      assert.throws(() => comparePhases(before, after, cases), new RegExp("Missing " + field));
+    }
+    const { before, after } = coveredPhases(1, 2, { responseDepth: undefined });
+    assert.throws(() => comparePhases(before, after, cases), /Invalid responseDepth/);
+  });
+
+  it("detects changed prompt or context even when the case id is reused", () => {
+    const run = runFor("followup-stack-en", "Balanced", 2);
+    const changed = cases.map((testcase) => testcase.id === run.caseId ? { ...testcase, prompt: "Use a different stack." } : testcase);
+    assert.throws(() => scorePhase({ runs: [run] }, changed), /Changed or unverified fixture content/);
+  });
+
+  it("blocks unknown or placeholder fingerprints instead of accepting them as evidence", () => {
+    for (const historyFingerprint of ["unknown", "unverified", "hist-a", " "]) {
+      assert.throws(() => scorePhase({ runs: [runFor("database-index-en", "Balanced", 2, { historyFingerprint })] }), /fingerprint/);
+    }
+  });
+
+  it("does not pair distinct configurations containing delimiter characters", () => {
+    const { before, after } = coveredPhases(1, 2);
+    before.runs = before.runs.map((run) => ({ ...run, provider: "gateway|model", model: "version" }));
+    after.runs = after.runs.map((run) => ({ ...run, provider: "gateway", model: "model|version" }));
+    const result = comparePhases(before, after, cases);
+    assert.equal(result.fairPairs, 0);
+    assert.equal(result.passes, false);
+  });
+
   it("rejects mismatched finishReason and excludes incomplete length/error finishes from fair pairs", () => {
     const { before, after } = coveredPhases(1, 2);
     after.runs = after.runs.map((run, index) =>
@@ -202,15 +279,15 @@ describe("Response Quality V2 evaluator — synthetic scorer tests, NOT model-qu
     assert.equal(comparePhases(depth.before, depth.after, cases).fairPairs, 0);
 
     const history = coveredPhases(1, 2);
-    history.before.runs = history.before.runs.map((run) => ({ ...run, historyFingerprint: "hist-a" }));
-    history.after.runs = history.after.runs.map((run) => ({ ...run, historyFingerprint: "hist-b" }));
+    history.before.runs = history.before.runs.map((run) => ({ ...run, historyFingerprint: digest("hist-a") }));
+    history.after.runs = history.after.runs.map((run) => ({ ...run, historyFingerprint: digest("hist-b") }));
     assert.equal(comparePhases(history.before, history.after, cases).fairPairs, 0);
 
     const matched = coveredPhases(1, 2, {
-      historyFingerprint: "hist-a",
-      roomFingerprint: "room-a",
-      filesFingerprint: "files-a",
-      toolsFingerprint: "tools-none",
+      historyFingerprint: digest("hist-a"),
+      roomFingerprint: digest("room-a"),
+      filesFingerprint: digest("files-a"),
+      toolsFingerprint: "none",
     });
     const ok = comparePhases(matched.before, matched.after, cases);
     assert.equal(ok.fairPairs, MIN_FAIR_PAIRS_TOTAL);

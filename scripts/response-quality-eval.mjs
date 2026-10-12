@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 
 export const DIMENSIONS = ["accuracy", "completeness", "whyHow", "example", "continuity", "tradeoffs", "grounding", "brevity"];
 export const MODES = ["Fast", "Balanced", "High"];
@@ -21,6 +22,8 @@ export const CATEGORY_COVERAGE_FLOORS = {
   architecture: 1,
   "follow-up": 1,
   grounding: 1,
+  brevity: 1,
+  detailed: 1,
 };
 /** Language coverage floors for fair pairs. */
 export const LANGUAGE_COVERAGE_FLOORS = { en: 1, id: 1 };
@@ -28,11 +31,13 @@ export const LANGUAGE_COVERAGE_FLOORS = { en: 1, id: 1 };
 const fixturePath = fileURLToPath(new URL("../tests/fixtures/response-quality-v2.json", import.meta.url));
 
 const TECHNICAL_CATEGORIES = new Set(["explanation", "coding", "how-to", "comparison"]);
+const GROUNDED_CATEGORIES = new Set(["room", "file", "web", "research"]);
 
 export function coverageBucketForCategory(category) {
   if (!category) return null;
   if (CATEGORY_COVERAGE_FLOORS[category] !== undefined) return category;
   if (TECHNICAL_CATEGORIES.has(category)) return "technical";
+  if (GROUNDED_CATEGORIES.has(category)) return "grounding";
   return null;
 }
 
@@ -49,16 +54,20 @@ export function loadCases() {
   return source.cases;
 }
 
-function optionalFingerprint(value, label) {
-  if (value === undefined || value === null) return "";
-  if (typeof value !== "string") throw new Error("Invalid " + label + " fingerprint (must be a string)");
+function requiredFingerprint(value, label) {
+  if (typeof value !== "string" || !value.trim()) throw new Error("Missing " + label + " fingerprint; record a digest or explicit none, not unknown");
+  if (!/^(?:[a-f0-9]{64}|none)$/.test(value.trim())) throw new Error("Invalid " + label + " fingerprint; expected SHA-256 hex or explicit none");
   return value.trim();
 }
 
 function normalizeDepth(value) {
-  if (value === undefined || value === null || value === "") return "balanced";
   if (typeof value !== "string" || !RESPONSE_DEPTHS.has(value)) throw new Error("Invalid responseDepth (concise|balanced|detailed)");
   return value;
+}
+
+/** Covers prompt, rubric, and supplied synthetic context, rather than just a reusable case id. */
+export function fixtureFingerprint(testcase) {
+  return createHash("sha256").update(JSON.stringify(testcase)).digest("hex");
 }
 
 function validateRun(run, cases) {
@@ -73,10 +82,23 @@ function validateRun(run, cases) {
     run.sourceFidelity !== "human_reviewed" ||
     typeof run.critical !== "boolean") throw new Error("Incomplete actual-model output metadata for " + run.caseId);
   const responseDepth = normalizeDepth(run.responseDepth);
-  const historyFingerprint = optionalFingerprint(run.historyFingerprint, "historyFingerprint");
-  const roomFingerprint = optionalFingerprint(run.roomFingerprint, "roomFingerprint");
-  const filesFingerprint = optionalFingerprint(run.filesFingerprint, "filesFingerprint");
-  const toolsFingerprint = optionalFingerprint(run.toolsFingerprint, "toolsFingerprint");
+  const recordedFixture = requiredFingerprint(run.fixtureFingerprint, "fixtureFingerprint");
+  if (recordedFixture !== fixtureFingerprint(testcase)) throw new Error("Changed or unverified fixture content for " + run.caseId);
+  const historyFingerprint = requiredFingerprint(run.historyFingerprint, "historyFingerprint");
+  const roomFingerprint = requiredFingerprint(run.roomFingerprint, "roomFingerprint");
+  const filesFingerprint = requiredFingerprint(run.filesFingerprint, "filesFingerprint");
+  const toolsFingerprint = requiredFingerprint(run.toolsFingerprint, "toolsFingerprint");
+  // An explicit `none` cannot stand in for context the selected fixture requires.
+  // Digests describe the effective request inputs; fixture digests alone do not
+  // establish that history or source evidence actually reached the application.
+  for (const [contextKey, fingerprint] of [
+    ["history", historyFingerprint], ["room", roomFingerprint],
+    ["file", filesFingerprint], ["web", toolsFingerprint],
+  ]) {
+    if (testcase.context?.[contextKey] !== undefined && fingerprint === "none") {
+      throw new Error("Provided fixture context requires an effective " + contextKey + " digest for " + run.caseId);
+    }
+  }
   for (const key of testcase.dimensions) {
     if (![0, 1, 2].includes(run.ratings?.[key])) throw new Error("Missing human rating " + key + " for " + run.caseId);
   }
@@ -89,6 +111,7 @@ function validateRun(run, cases) {
     roomFingerprint,
     filesFingerprint,
     toolsFingerprint,
+    fixtureFingerprint: recordedFixture,
     fixtureId: testcase.id,
     language: testcase.language,
     category: testcase.category,
@@ -103,7 +126,7 @@ function validateRun(run, cases) {
 
 /** Stable context/config fingerprint used for fair before/after pairing. */
 export function runFingerprint(run) {
-  return [
+  return JSON.stringify([
     run.provider,
     run.model,
     run.reasoningEffort,
@@ -111,11 +134,12 @@ export function runFingerprint(run) {
     run.finishReason,
     run.responseDepth,
     run.fixtureId,
+    run.fixtureFingerprint,
     run.historyFingerprint,
     run.roomFingerprint,
     run.filesFingerprint,
     run.toolsFingerprint,
-  ].join("|");
+  ]);
 }
 
 export function scorePhase(data, cases = loadCases()) {

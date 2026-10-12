@@ -289,12 +289,13 @@ test("invalid finalize extraction surfaces an error and does not send", async ({
 });
 
 test("removing while uploading cancels staging cleanup", async ({ page }) => {
+  const uploadId = "c0ffee00-0000-4000-8000-000000000099";
   let releaseFinalize: (() => void) | undefined;
   const gate = new Promise<void>((resolve) => { releaseFinalize = resolve; });
+  let finalizeStarted = false;
   const cancelled: string[] = [];
   await page.route("**/storage.example/**", fulfillTus);
   await page.route("**/api/chat/attachments/upload-init", async (route) => {
-    const uploadId = "c0ffee00-0000-4000-8000-000000000099";
     await route.fulfill({
       status: 201,
       json: {
@@ -315,6 +316,7 @@ test("removing while uploading cancels staging cleanup", async ({ page }) => {
       cancelled.push(payload.uploadId ?? "");
       return route.fulfill({ json: { ok: true } });
     }
+    finalizeStarted = true;
     await gate;
     await route.fulfill({ status: 201, json: { attachment: { id: crypto.randomUUID(), name: "slow.txt", mimeType: "text/plain", sizeBytes: 4, truncated: false, pageCount: null } } });
   });
@@ -325,10 +327,13 @@ test("removing while uploading cancels staging cleanup", async ({ page }) => {
   await page.goto("/preview/chat-core?workspace=1&mode=Balanced&conversation=" + conversation);
   await attach(page, [{ name: "slow.txt", mimeType: "text/plain", buffer: Buffer.from("slow") }]);
   await expect(page.locator(".attachment-chip.is-uploading")).toBeVisible();
+  // The chip appears before upload-init returns. Cleanup needs a known session;
+  // hold finalization and remove only after the request proves that session exists.
+  await expect.poll(() => finalizeStarted).toBe(true);
   await page.getByRole("button", { name: "Remove slow.txt" }).click();
   releaseFinalize?.();
   await expect(page.locator(".attachment-chip")).toHaveCount(0);
-  await expect.poll(() => cancelled.length).toBeGreaterThan(0);
+  await expect.poll(() => cancelled).toContain(uploadId);
 });
 
 for (const [width, height] of [[390, 844], [1440, 900]] as const) {

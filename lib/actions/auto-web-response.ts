@@ -64,6 +64,7 @@ type AutoActionChatBase = {
   memories: MemoryRecord[] | undefined;
   recallOperation: RecallOperationStatus;
   rows: { role: string; content: string; position: number }[];
+  omittedMessagePositions?: number[];
   /** HTTP preflight already reserved this generation; do not reserve again. */
   weeklyUsageReserved?: boolean;
 };
@@ -352,6 +353,7 @@ async function createAutoActionChatResponse(input: ResolvedActionChat): Promise<
               position: row.position,
             })),
             currentPosition: userMessage.position,
+            omittedMessagePositions: input.omittedMessagePositions,
           });
           prompt = toProviderMessages(plan);
           context = plan.diagnostics;
@@ -392,6 +394,7 @@ async function createAutoActionChatResponse(input: ResolvedActionChat): Promise<
             recentMessageCount: plan.diagnostics.recentMessageCount,
             estimatedTokens: plan.budget.estimatedTokens,
             truncated: plan.budget.truncated,
+            ...plan.continuity,
             policyVersion: CONTEXT_POLICY_VERSION,
           });
         } catch {

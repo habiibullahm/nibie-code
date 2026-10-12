@@ -18,6 +18,7 @@ import { createGenerationPersistence } from "@/lib/chat/orchestration/persist-re
 import { createGenerationLifecycle } from "@/lib/chat/orchestration/generation-lifecycle";
 import { chatSseEvent as event, createGenerationStream } from "@/lib/chat/orchestration/stream-response";
 import { buildContext } from "@/lib/context/build-context";
+import { FETCH_CAP } from "@/lib/context/token-budget";
 import { CONTEXT_POLICY_VERSION } from "@/lib/context/context-policy";
 import type { FileContextInput } from "@/lib/context/context-types";
 import type { RoomContextInput } from "@/lib/context/room-context";
@@ -47,6 +48,8 @@ import {
 import { decideGitHubRead } from "@/lib/github/routing";
 import { decideWebSearch } from "@/lib/web/routing";
 import type { WebContextInput } from "@/lib/web/types";
+import { detectHistoryRecallIntent } from "@/lib/history-recall/intent";
+import { createHistoryRecallResponse } from "@/lib/history-recall/response";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -151,7 +154,6 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   // Only modes that are configured on the server can be used, whether the client asked for one or the conversation has one saved.
   const { models: availableModels } = getModelOptions();
   const availableModes = availableModels.map((option) => option.id);
-  if (requestedModel && requestedModel.data !== "Auto" && !availableModes.includes(requestedModel.data)) return NextResponse.json({ error: "That model isn't available." }, { status: 400 });
 
   // The conversation, the user message and the recent context only depend on the ids in the request, so they are read together
   // (RLS hides other owners' rows from all three); the message context is trimmed to this message below.
@@ -176,6 +178,9 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   }
   if (conversationError) return NextResponse.json({ error: safeError }, { status: 503 });
   if (!conversation) return NextResponse.json({ error: "Conversation unavailable." }, { status: 404 });
+  const historyIntent = !deepResearch && typeof userMessage?.content === "string"
+    ? detectHistoryRecallIntent(userMessage.content) : null;
+  if (!historyIntent && requestedModel && requestedModel.data !== "Auto" && !availableModes.includes(requestedModel.data)) return NextResponse.json({ error: "That model isn't available." }, { status: 400 });
   let room: RoomContextInput | null = null;
   if (conversation.room_id) {
     const [{ data: roomRow, error: roomError }, { data: briefRow, error: briefError }, { data: pinRows, error: pinError }] = await Promise.all([
@@ -198,7 +203,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       return { id: row.id, name: row.original_name, text: row.extracted_text, truncated: row.extracted_truncated };
     });
   }
-  if (conversation.room_id) {
+  if (conversation.room_id && !historyIntent) {
     const currentText = String(userMessage?.content ?? "").trim();
     const matches = await searchRoomFiles(
       supabase,
@@ -211,11 +216,15 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
     if (matches.length) files = prioritizeRoomFileMatches(files ?? [], matches);
   }
   const mode = requestedModel?.data && requestedModel.data !== "Auto" ? requestedModel.data : resolveMode(normalizeSavedMode(conversation.selected_model), availableModes);
-  if (!mode) return NextResponse.json({ error: safeError }, { status: 503 });
+  if (!mode && !historyIntent) return NextResponse.json({ error: safeError }, { status: 503 });
   if (messageError) return NextResponse.json({ error: safeError }, { status: 503 });
   if (!userMessage) return NextResponse.json({ error: "Message unavailable." }, { status: 404 });
   if (!validateMessage(userMessage.content).success) return NextResponse.json({ error: "Invalid saved message." }, { status: 400 });
-  const rows = recent?.filter((row) => row.position <= userMessage.position && (row.role === "user" || row.role === "assistant") && row.status === "complete").slice(0, 32);
+  const eligibleRows = recent?.filter((row) => row.position <= userMessage.position && (row.role === "user" || row.role === "assistant") && row.status === "complete");
+  const rows = eligibleRows?.slice(0, FETCH_CAP);
+  // Preserve evidence from the existing bounded read before discarding bodies.
+  // Positions are observed omissions only; they are not a total-history count.
+  const omittedMessagePositions = eligibleRows?.slice(FETCH_CAP).map((row) => row.position) ?? [];
   if (readError || !rows?.length) return NextResponse.json({ error: safeError }, { status: 503 });
   // An attachment that cannot be read is never silently dropped: the reply waits for a working read instead.
   // A database without the attachments table (not migrated yet) simply has none.
@@ -236,6 +245,14 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
     const text = sanitizeModelOutput(assistant.content).text;
     return new Response(event("start", { id: assistant.id, position: assistant.position }) + event("delta", { text }) + event("status", { status: "complete" }) + event("done", {}), { headers });
   }
+
+  if (historyIntent) {
+    return createHistoryRecallResponse({
+      supabase, request, requestId, ownerId: user.id, conversationId: conversation.id,
+      roomId: conversation.room_id ?? null, assistant, intent: historyIntent,
+    });
+  }
+  if (!mode) return NextResponse.json({ error: safeError }, { status: 503 });
 
   const responseStartedAt = Date.now();
   const durationMs = () => Date.now() - responseStartedAt;
@@ -331,6 +348,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       memories,
       recallOperation,
       rows,
+      omittedMessagePositions,
       weeklyUsageReserved: true,
     });
   }
@@ -367,6 +385,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       memories,
       recallOperation,
       rows,
+      omittedMessagePositions,
       githubActionId: githubDecision.actionId,
       githubRawInput: githubDecision.input,
       githubRouteReason: githubDecision.reason,
@@ -408,6 +427,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       memories,
       recallOperation,
       rows,
+      omittedMessagePositions,
       webRouteReason: webDecision.reason,
       weeklyUsageReserved: true,
     });
@@ -451,6 +471,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       memories,
       recallOperation,
       messages: rows.map((row) => ({ role: row.role as "user" | "assistant", content: row.content, position: row.position })),
+      omittedMessagePositions,
       currentPosition: userMessage.position,
     });
     prompt = toProviderMessages(plan);
@@ -496,6 +517,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       recentMessageCount: plan.diagnostics.recentMessageCount,
       estimatedTokens: plan.budget.estimatedTokens,
       truncated: plan.budget.truncated,
+      ...plan.continuity,
       policyVersion: CONTEXT_POLICY_VERSION,
     });
   } catch {

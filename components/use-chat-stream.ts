@@ -47,7 +47,7 @@ export function useChatStream({ busyRef, mode, researchMode, localMessages, late
   // an old thread immediately; a delayed reader must not own the newly selected view.
   const reconcileConversation = useStableCallback(() => {
     const controller = streamController.current;
-    if (!activeId || !controller || streamConversationId.current === activeId) return;
+    if (!controller || streamConversationId.current === activeId) return;
     controller.abort("conversation_changed");
     setContextDiagnostics(null);
     finishLiveChatStream(controller);

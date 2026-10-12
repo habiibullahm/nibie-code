@@ -8,6 +8,7 @@ What's new in Nibie.
 
 ### Added
 
+- Ask what you decided about a topic to see dated excerpts and original conversation links from this Room's active chats; historical lookup stays separate from saved Memory.
 - Workbench version history: save a checkpoint, preview prior versions (manual or AI-applied), and restore atomically with confirmation and recoverable text, keeping up to 50 versions per document; download Markdown or plain text, or copy formatted for Word/Docs (UI stays behind `WORKBENCH_UI_ENABLED`).
 - Open a finished reply in Workbench beside chat, edit Markdown with autosave, and Ask Nibie on selected text to change that span inline (credits apply).
 - Copy a single conversation’s transcript from the thread ··· menu as clean plain text.
@@ -30,6 +31,8 @@ What's new in Nibie.
 ### Fixed
 
 - Web and GitHub Actions stop waiting when cancelled or timed out, and discard late results instead of presenting them as a successful check.
+- Replies receive an explicit notice only when earlier thread messages are missing, and context details distinguish the history limit from messages that did not fit.
+- Opening an empty chat through browser navigation releases the previous reply's Stop control and lets you start a fresh message.
 - Settings keeps unsaved personalization drafts between sections, asks before discarding them, and preserves keyboard focus while choices save.
 - Switching threads with Back, Forward, or a chat URL releases the previous reply so a delayed stream cannot block the next conversation.
 - Web and GitHub replies keep consistent usage accounting if an error occurs after the response starts.

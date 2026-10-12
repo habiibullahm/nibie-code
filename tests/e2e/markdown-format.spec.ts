@@ -10,6 +10,8 @@ async function openSample(page: Page) {
   ])) }]);
   await page.goto(`/preview/chat-core?workspace=1&mode=Balanced&conversation=${conversation}`);
   await page.locator(".markdown h2").waitFor();
+  // Wait for the client effect before interacting with server-rendered controls.
+  await expect(page.locator(".code-block .hljs-keyword").first()).toBeVisible();
 }
 
 const layout = (page: Page) => page.evaluate(() => {
