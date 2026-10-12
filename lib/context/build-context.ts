@@ -49,6 +49,9 @@ function assembleContext(input: BuildContextInput, historyIncomplete: boolean): 
   if (inputBudgetTokens <= 0) throw new ContextBuildError();
 
   const selected = selectThreadMessages(input.messages, input.currentPosition);
+  const selectedPositions = new Set(selected.map((message) => message.position));
+  const omittedBeforeBuild = [...new Set(input.omittedMessagePositions ?? [])].filter((position) =>
+    Number.isInteger(position) && position > 0 && position < input.currentPosition && !selectedPositions.has(position));
   const current = selected.find((message) => message.position === input.currentPosition && message.role === "user");
   if (!current) throw new ContextBuildError();
   const earlier = selected.filter((message) => message !== current);
@@ -165,7 +168,8 @@ function assembleContext(input: BuildContextInput, historyIncomplete: boolean): 
     && (message.role === "user" || message.role === "assistant") && !selectedSet.has(message));
   const droppedMessages = [...droppedAtFetchCap, ...olderFit.dropped, ...protectedFit.dropped];
   // An omitted correction can invalidate facts in the earlier summary too.
-  const summaryHasGap = summaryIncluded && droppedMessages.some((message) => message.position > coveredThrough);
+  const summaryHasGap = summaryIncluded && (droppedMessages.some((message) => message.position > coveredThrough)
+    || omittedBeforeBuild.some((position) => position > coveredThrough));
   if (summaryHasGap) {
     summaryText = "";
     summaryIncluded = false;
@@ -175,8 +179,12 @@ function assembleContext(input: BuildContextInput, historyIncomplete: boolean): 
   const omitted = input.messages.filter((message) => Number.isInteger(message.position)
     && message.position > representedThrough && message.position <= input.currentPosition
     && (message.role === "user" || message.role === "assistant") && !retained.has(message));
-  const countCapOmissions = omitted.filter((message) => !selectedSet.has(message)).length;
-  const budgetOmissions = omitted.length - countCapOmissions;
+  const omittedAtCountCap = new Set([
+    ...omitted.filter((message) => !selectedSet.has(message)).map((message) => message.position),
+    ...omittedBeforeBuild.filter((position) => position > representedThrough),
+  ]);
+  const countCapOmissions = omittedAtCountCap.size;
+  const budgetOmissions = omitted.filter((message) => selectedSet.has(message)).length;
   const truncated = countCapOmissions > 0 || budgetOmissions > 0 || droppedMessages.length > 0 || droppedPieces.length > 0 || droppedRoom.length > 0 || droppedPins.length > 0 || Boolean(renderedFiles?.truncated) || Boolean(renderedAttachments?.truncated) || Boolean(renderedWeb?.truncated) || Boolean(renderedMemories?.truncated) || summaryDroppedForBudget;
 
   const profileText = includedPieces.map((piece) => piece.text).join("\n");
@@ -226,7 +234,7 @@ function assembleContext(input: BuildContextInput, historyIncomplete: boolean): 
     ? { type: "profile", label: "Your profile", state: "included", reason: profileReason(includedPieces.flatMap((piece) => piece.categories)) }
     : { type: "profile", label: "Your profile", state: "not_used", reason: input.preferenceReadFailed ? "Preferences couldn't be loaded, so Nibie used defaults." : "No extra profile details are set." };
   const earlierIncluded = dialogue.length - 1;
-  const recentDiagnostic: ContextSourceDiagnostic = earlierIncluded > 0 || droppedMessages.length > 0
+  const recentDiagnostic: ContextSourceDiagnostic = earlierIncluded > 0 || countCapOmissions > 0 || budgetOmissions > 0
     ? { type: "recent_messages", label: "Recent conversation", state: earlierIncluded > 0 ? "included" : "not_used", reason: countCapOmissions && budgetOmissions ? "Older messages left out by the history limit and reply budget." : countCapOmissions ? "Older messages left out by the history limit." : budgetOmissions ? "Older messages left out because they did not fit this reply." : "The latest messages in this thread." }
     : { type: "recent_messages", label: "Recent conversation", state: "not_used", reason: "No earlier messages yet." };
   const summaryDiagnostic: ContextSourceDiagnostic = summaryIncluded

@@ -23,6 +23,24 @@ const input = (overrides: Partial<BuildContextInput>): BuildContextInput => ({
 });
 
 describe("bounded chat continuity", () => {
+  it("ignores duplicate, invalid, future, or retained positions in caller omission metadata", () => {
+    const plan = buildContext(input({
+      messages: messages(41).slice(-32),
+      omittedMessagePositions: [8, 8, 9, 0, -1, 1.5, Number.NaN, 10, 41, 42],
+    }));
+    expect(plan.continuity.countCapOmissions).toBe(2);
+    expect(plan.continuity.budgetOmissions).toBe(0);
+    expect(toProviderMessages(plan)[0].content).toContain(HISTORY_INCOMPLETE_INSTRUCTION);
+  });
+
+  it("does not infer missing messages from noncontiguous positions", () => {
+    const thread = messages(3).map((message) => ({ ...message, position: message.position * 10 }));
+    const plan = buildContext(input({ messages: thread, currentPosition: 30 }));
+    expect(plan.continuity.countCapOmissions).toBe(0);
+    expect(plan.budget.truncated).toBe(false);
+    expect(toProviderMessages(plan)[0].content).not.toContain(HISTORY_INCOMPLETE_INSTRUCTION);
+  });
+
   it.each(["Fast", "Balanced", "High"] as const)("tells %s when earlier supplied history is absent without pretending to recall it", (responseMode) => {
     const plan = buildContext(input({ responseMode }));
     expect(toProviderMessages(plan)[0].content).toContain(HISTORY_INCOMPLETE_INSTRUCTION);

@@ -113,6 +113,9 @@ export type BuildContextInput = {
   preferenceReadFailed: boolean;
   summary: ThreadSummary | null;
   messages: ThreadMessage[];
+  // Server-observed positions discarded by the caller's history cap. No bodies,
+  // inferred position gaps, or claim to count every message outside its read window.
+  omittedMessagePositions?: number[];
   currentPosition: number;
   // Omitted or null for a general thread. Present only after the caller has authorized the room.
   room?: RoomContextInput | null;
