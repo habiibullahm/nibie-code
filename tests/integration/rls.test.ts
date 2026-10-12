@@ -502,6 +502,73 @@ describe("Supabase row-level security", () => {
     });
   });
 
+  it("keeps evidence-only history lookup inside the current owner/Room, excluding archived/deleted/moved sources", async () => {
+    const requestedRoom = randomUUID();
+    const otherRoom = randomUUID();
+    const privateRoom = randomUUID();
+    const current = randomUUID();
+    const owned = randomUUID();
+    const other = randomUUID();
+    const archived = randomUUID();
+    const general = randomUUID();
+    const stranger = randomUUID();
+    const token = `history-recall-${randomUUID()}`;
+    const hitId = randomUUID();
+    const threads = [current, owned, other, archived, general, stranger];
+    await sql`insert into public.rooms (id, user_id, name) values
+      (${requestedRoom}, ${userA}, 'Recall scope'), (${otherRoom}, ${userA}, 'Other scope'), (${privateRoom}, ${userB}, 'Private scope')`;
+    try {
+      await sql`insert into public.conversations (id, user_id, room_id, title, archived_at) values
+        (${current}, ${userA}, ${requestedRoom}, 'Current', null),
+        (${owned}, ${userA}, ${requestedRoom}, 'Authorized source', null),
+        (${other}, ${userA}, ${otherRoom}, 'Different Room', null),
+        (${archived}, ${userA}, ${requestedRoom}, 'Archived', now()),
+        (${general}, ${userA}, null, 'General', null),
+        (${stranger}, ${userB}, ${privateRoom}, 'Private', null)`;
+      await sql`insert into public.messages (id, conversation_id, user_id, role, content, position, status) values
+        (${randomUUID()}, ${current}, ${userA}, 'user', ${token}, 1, 'complete'),
+        (${hitId}, ${owned}, ${userA}, 'user', ${`Redis eviction ${token} uses allkeys-lru`}, 1, 'complete'),
+        (${randomUUID()}, ${owned}, ${userA}, 'assistant', ${token}, 2, 'streaming'),
+        (${randomUUID()}, ${other}, ${userA}, 'user', ${token}, 1, 'complete'),
+        (${randomUUID()}, ${archived}, ${userA}, 'user', ${token}, 1, 'complete'),
+        (${randomUUID()}, ${general}, ${userA}, 'user', ${token}, 1, 'complete'),
+        (${randomUUID()}, ${stranger}, ${userB}, 'user', ${token}, 1, 'complete')`;
+      // SQL equivalent of the authenticated PostgREST inner relation. RLS on
+      // both tables remains active; all predicates apply before the result cap.
+      const lookup = (actor: string, roomId: string | null) => asUser(actor, tx => tx`
+        select m.id, m.content, c.id as conversation_id
+        from public.messages m
+        join public.conversations c on (c.id, c.user_id) = (m.conversation_id, m.user_id)
+        where m.user_id = ${userA} and c.user_id = ${userA}
+          and c.room_id is not distinct from ${roomId}::uuid and c.archived_at is null
+          and m.status = 'complete' and m.conversation_id <> ${current}
+          and m.content ilike ${`%${token}%`}
+        order by m.created_at desc, m.id asc limit 24
+      `);
+      expect((await lookup(userA, requestedRoom)).map(row => row.id)).toEqual([hitId]);
+      expect(await lookup(userB, requestedRoom)).toHaveLength(0);
+      expect((await lookup(userA, null)).map(row => row.conversation_id)).toEqual([general]);
+      await asUser(userA, tx => tx`update public.conversations set room_id = ${otherRoom} where id = ${owned}`);
+      expect(await lookup(userA, requestedRoom)).toHaveLength(0);
+      await asUser(userA, tx => tx`update public.conversations set room_id = ${requestedRoom}, archived_at = now() where id = ${owned}`);
+      expect(await lookup(userA, requestedRoom)).toHaveLength(0);
+      await asUser(userA, tx => tx`update public.conversations set archived_at = null where id = ${owned}`);
+      expect(await lookup(userA, requestedRoom)).toHaveLength(1);
+      await asUser(userA, tx => tx`delete from public.messages where id = ${hitId}`);
+      expect(await lookup(userA, requestedRoom)).toHaveLength(0);
+      await asUser(userA, tx => tx`delete from public.rooms where id = ${requestedRoom}`);
+      // Deleting the Room detaches threads, but an in-progress request for the
+      // old Room never falls back into all of General.
+      expect(await lookup(userA, requestedRoom)).toHaveLength(0);
+      const [detached] = await asUser(userA, tx => tx`select room_id from public.conversations where id = ${current}`);
+      expect(detached.room_id).toBeNull();
+    } finally {
+      await sql`delete from public.messages where conversation_id in ${sql(threads)}`;
+      await sql`delete from public.conversations where id in ${sql(threads)}`;
+      await sql`delete from public.rooms where id in ${sql([requestedRoom, otherRoom, privateRoom])}`;
+    }
+  });
+
   it("keeps rooms owner-scoped and leaves general threads valid when a room is deleted", async () => {
     const roomA = randomUUID();
     const roomB = randomUUID();

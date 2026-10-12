@@ -1,0 +1,43 @@
+services:
+  db:
+    image: pgvector/pgvector@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d
+    env_file: local.env
+    ports: ["127.0.0.1:54622:5432"]
+    volumes: ["qa-db:/var/lib/postgresql/data", "./init.sql:/docker-entrypoint-initdb.d/00-qa.sql:ro"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  auth:
+    image: ghcr.io/supabase/gotrue@sha256:1736a63078f5922b198c4cbe50f80ab9a2d3b54fe8b7b6cfb2e9dc5dbbc12c6b
+    env_file: local.env
+    ports: ["127.0.0.1:54626:9999"]
+    depends_on:
+      db: {condition: service_healthy}
+    environment:
+      GOTRUE_API_HOST: "0.0.0.0"
+      GOTRUE_API_PORT: "9999"
+      API_EXTERNAL_URL: "http://localhost:54621"
+      GOTRUE_SITE_URL: "http://localhost:3100"
+      GOTRUE_URI_ALLOW_LIST: "http://localhost:3100/**"
+      GOTRUE_DB_DRIVER: "postgres"
+      GOTRUE_DB_NAMESPACE: "auth"
+      GOTRUE_JWT_AUD: "authenticated"
+      GOTRUE_JWT_ADMIN_ROLES: "service_role"
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: "authenticated"
+      GOTRUE_JWT_EXP: "3600"
+      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+  rest:
+    image: ghcr.io/supabase/postgrest@sha256:d155c6718ed9a9f990d159a2ab7c0a3f16944dbb6d0a0344557421042acfe0df
+    env_file: local.env
+    ports: ["127.0.0.1:54627:3000"]
+    depends_on:
+      db: {condition: service_healthy}
+    environment:
+      PGRST_DB_SCHEMAS: "public"
+      PGRST_DB_ANON_ROLE: "anon"
+volumes:
+  qa-db:
