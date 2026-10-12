@@ -30,6 +30,8 @@ What's new in Nibie.
 
 ### Fixed
 
+- Opening an empty chat through browser navigation releases the previous reply's Stop control and lets you start a fresh message.
+
 - Settings keeps unsaved personalization drafts between sections, asks before discarding them, and preserves keyboard focus while choices save.
 - Switching threads with Back, Forward, or a chat URL releases the previous reply so a delayed stream cannot block the next conversation.
 - Web and GitHub replies keep consistent usage accounting if an error occurs after the response starts.

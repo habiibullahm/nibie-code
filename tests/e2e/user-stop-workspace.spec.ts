@@ -9,6 +9,7 @@ declare global {
     userStopHarness?: {
       requests: { body: { model: string; reasoning?: string; userMessageId: string }; signal: AbortSignal; aborted: boolean }[];
       releaseOldReader: () => void;
+      releaseLateFrames: () => void;
       completeSecond: () => void;
       confirmPartial: () => void;
       partialSaves: number;
@@ -54,7 +55,7 @@ async function workspace(page: Page, mode: string, stopFailure = false, holdMode
     const original = window.fetch;
     const encoder = new TextEncoder();
     const frame = (type: string, data: unknown) => encoder.encode("event: " + type + "\ndata: " + JSON.stringify(data) + "\n\n");
-    const state: NonNullable<Window["userStopHarness"]> = { requests: [], partialSaves: 0, releaseOldReader: () => {}, completeSecond: () => {}, confirmPartial: () => {} };
+    const state: NonNullable<Window["userStopHarness"]> = { requests: [], partialSaves: 0, releaseOldReader: () => {}, releaseLateFrames: () => {}, completeSecond: () => {}, confirmPartial: () => {} };
     window.userStopHarness = state;
     window.fetch = async (input, options) => {
       if (input !== "/api/chat") return original(input, options);
@@ -74,6 +75,13 @@ async function workspace(page: Page, mode: string, stopFailure = false, holdMode
             emit("stream-abort", { requestIndex: count, reason: record.signal.reason === "user_stopped" ? "user_stopped" : "other" });
             // Deliberately late reader cleanup and partial-save confirmation.
             state.releaseOldReader = () => { emit("reader-release", { requestIndex: count }); controller.error(new DOMException("Stopped", "AbortError")); };
+            state.releaseLateFrames = () => {
+              emit("late-completion", { requestIndex: count });
+              controller.enqueue(frame("delta", { text: " stale provider completion" }));
+              controller.enqueue(frame("status", { status: "complete" }));
+              controller.enqueue(frame("done", {}));
+              controller.close();
+            };
             state.confirmPartial = () => { if (!state.partialSaves) state.partialSaves++; emit("partial-save", { count: state.partialSaves }); };
           }, { once: true });
           if (count === 2) state.completeSecond = () => {
@@ -185,6 +193,59 @@ test("a completed answer saved before Stop landed never replaces the stopped rep
   await expect(first).toContainText("Stopped");
   await expect(first).not.toContainText("the rest of the finished answer");
 });
+
+test("queued completion frames after Stop cannot change the stopped reply or the next stream", async ({ page, stopDiagnostics }) => {
+  const server = await workspace(page, "High");
+  const input = page.getByRole("textbox", { name: "Message Nibie" });
+  await input.fill("First synthetic prompt");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.locator(".message-row.assistant")).toContainText("Partial first response");
+  await input.fill("Next before persistence confirmation");
+  await clickStop(page, stopDiagnostics);
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.locator(".message-row.assistant").last()).toContainText("Second response");
+  await page.evaluate(() => window.userStopHarness!.releaseLateFrames());
+  await expect(page.getByRole("button", { name: "Stop response" })).toBeVisible();
+  await expect(page.locator(".message-row.assistant").first()).toContainText("Stopped");
+  await expect(page.locator(".message-row.assistant").first()).not.toContainText("stale provider completion");
+  expect(await page.evaluate(() => window.userStopHarness!.requests[1].signal.aborted)).toBe(false);
+  await input.fill("Third draft");
+  await page.evaluate(() => window.userStopHarness!.completeSecond());
+  await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();
+  await expect(page.locator(".message-row.assistant")).toHaveCount(2);
+  await expect(page.locator(".message-row.user")).toHaveCount(2);
+  expect(await page.evaluate(() => window.userStopHarness!.requests.length)).toBe(2);
+  server.releaseStop();
+});
+
+for (const width of [1440, 390]) {
+  test(`URL navigation to an empty workspace at ${width}px releases the old stream`, async ({ page, stopDiagnostics }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const server = await workspace(page, "Balanced", false, false, true);
+    const input = page.getByRole("textbox", { name: "Message Nibie" });
+    await input.fill("First synthetic prompt");
+    await page.getByRole("button", { name: "Send message" }).click();
+    await expect(page.locator(".message-row.assistant")).toContainText("Partial first response");
+    await stopDiagnostics.capture("before-empty-workspace");
+    // Back to a new-chat URL and unavailable conversation IDs both produce activeId=null.
+    // Native history bypasses the sidebar's beforeConversation callback.
+    await page.evaluate(() => {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("conversation");
+      window.history.pushState(null, "", url);
+    });
+    await expect(page.getByRole("button", { name: "Stop response" })).toHaveCount(0);
+    await expect(page.locator(".message-row")).toHaveCount(0);
+    expect(await page.evaluate(() => window.userStopHarness!.requests[0].signal.aborted)).toBe(true);
+    expect(await page.evaluate(() => window.userStopHarness!.requests[0].signal.reason)).toBe("conversation_changed");
+    await input.fill("Fresh draft");
+    await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();
+    await page.evaluate(() => window.userStopHarness!.releaseOldReader());
+    await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();
+    expect(server.stops).toEqual([]);
+    server.releaseStop();
+  });
+}
 
 test("failed background Stop acknowledgement preserves the partial and never re-locks the main composer", async ({ page, stopDiagnostics }) => {
   const server = await workspace(page, "Fast", true);
