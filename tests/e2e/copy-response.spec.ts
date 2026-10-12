@@ -14,8 +14,9 @@ async function openSample(page: Page, waitUntil: "load" | "commit" = "load") {
   }]);
   await page.goto(`/preview/chat-core?workspace=1&mode=Balanced&conversation=${conversation}`, { waitUntil });
   await page.locator(".markdown h2").waitFor();
-  // The heading is server-rendered; highlighted tokens require the client effect.
-  await expect(page.locator(".code-block .hljs-keyword").first()).toBeVisible();
+  // The heading is server-rendered; highlighted tokens require the client effect,
+  // so skip that wait when the caller is holding client scripts back ("commit").
+  if (waitUntil === "load") await expect(page.locator(".code-block .hljs-keyword").first()).toBeVisible();
 }
 
 test("formatted copy writes html and plain clipboard payloads without Markdown markers", async ({ page, context }) => {
