@@ -70,6 +70,7 @@ export type DeepResearchChatStreamInput = {
   memories: MemoryRecord[] | undefined;
   recallOperation: RecallOperationStatus;
   rows: { role: string; content: string; position: number }[];
+  omittedMessagePositions?: number[];
   /** HTTP preflight already reserved this generation; do not reserve again. */
   weeklyUsageReserved?: boolean;
 };
@@ -376,6 +377,7 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
                 position: row.position,
               })),
               currentPosition: userMessage.position,
+              omittedMessagePositions: input.omittedMessagePositions,
             });
             const included = citationSourcesIncludedInContext(citationSources, plan.includedCitationHandles);
             if (included.length === citationSources.length) break;
@@ -404,6 +406,7 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
             recentMessageCount: plan.diagnostics.recentMessageCount,
             estimatedTokens: plan.budget.estimatedTokens,
             truncated: plan.budget.truncated,
+            ...plan.continuity,
             policyVersion: CONTEXT_POLICY_VERSION,
             deepResearch: true,
           });

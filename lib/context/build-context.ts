@@ -1,4 +1,4 @@
-import { contextPolicyFor, CONTEXT_POLICY_VERSION } from "@/lib/context/context-policy";
+import { contextPolicyFor, CONTEXT_POLICY_VERSION, HISTORY_INCOMPLETE_INSTRUCTION } from "@/lib/context/context-policy";
 import { ContextBuildError, type BuildContextInput, type ContextBlock, type ContextDiagnostics, type ContextPlan, type ContextSourceDiagnostic, type ThreadMessage } from "@/lib/context/context-types";
 import { renderAttachmentContext } from "@/lib/context/attachment-context";
 import { renderFileContext } from "@/lib/context/file-context";
@@ -33,12 +33,25 @@ function takeNewest(messages: ThreadMessage[], remaining: { value: number }) {
 }
 
 export function buildContext(input: BuildContextInput): ContextPlan {
+  const initial = assembleContext(input, false);
+  // A second bounded allocation makes room for the notice without exceeding the
+  // existing envelope or silently appending unbudgeted provider instructions.
+  if (initial.continuity.countCapOmissions || initial.continuity.budgetOmissions) {
+    return assembleContext(input, true);
+  }
+  return initial;
+}
+
+function assembleContext(input: BuildContextInput, historyIncomplete: boolean): ContextPlan {
   const { contextWindowTokens, maxOutputTokens } = input.capabilities;
   if (!Number.isInteger(contextWindowTokens) || contextWindowTokens <= 0 || !Number.isInteger(maxOutputTokens) || maxOutputTokens <= 0) throw new ContextBuildError();
   const { inputBudgetTokens, outputReserveTokens } = budgetLimits(input.capabilities);
   if (inputBudgetTokens <= 0) throw new ContextBuildError();
 
   const selected = selectThreadMessages(input.messages, input.currentPosition);
+  const selectedPositions = new Set(selected.map((message) => message.position));
+  const omittedBeforeBuild = [...new Set(input.omittedMessagePositions ?? [])].filter((position) =>
+    Number.isInteger(position) && position > 0 && position < input.currentPosition && !selectedPositions.has(position));
   const current = selected.find((message) => message.position === input.currentPosition && message.role === "user");
   if (!current) throw new ContextBuildError();
   const earlier = selected.filter((message) => message !== current);
@@ -52,13 +65,15 @@ export function buildContext(input: BuildContextInput): ContextPlan {
   const webVerificationUnavailable = Boolean(input.webVerificationUnavailable) && !(input.web?.length);
   const recallOpText = recallOperationInstruction(input.recallOperation);
   const extraPolicy = input.extraPolicyInstruction?.trim() || null;
-  const corePolicyText = [
+  const corePolicyTextFor = (incomplete: boolean) => [
     basePolicyText,
+    incomplete ? HISTORY_INCOMPLETE_INSTRUCTION : null,
     webVerificationUnavailable ? WEB_VERIFICATION_UNAVAILABLE_INSTRUCTION : null,
     recallOpText,
     extraPolicy,
   ].filter(Boolean).join("\n\n");
-  const coreTokens = estimateTokens(corePolicyText);
+  let corePolicyText = corePolicyTextFor(historyIncomplete);
+  let coreTokens = estimateTokens(corePolicyText);
   const currentTokens = estimateTokens(current.content);
   if (coreTokens + currentTokens > inputBudgetTokens) throw new ContextBuildError();
 
@@ -154,12 +169,30 @@ export function buildContext(input: BuildContextInput): ContextPlan {
     && (message.role === "user" || message.role === "assistant") && !selectedSet.has(message));
   const droppedMessages = [...droppedAtFetchCap, ...olderFit.dropped, ...protectedFit.dropped];
   // An omitted correction can invalidate facts in the earlier summary too.
-  const summaryHasGap = summaryIncluded && droppedMessages.some((message) => message.position > coveredThrough);
+  const summaryHasGap = summaryIncluded && (droppedMessages.some((message) => message.position > coveredThrough)
+    || omittedBeforeBuild.some((position) => position > coveredThrough));
   if (summaryHasGap) {
     summaryText = "";
     summaryIncluded = false;
   }
-  const truncated = droppedMessages.length > 0 || droppedPieces.length > 0 || droppedRoom.length > 0 || droppedPins.length > 0 || Boolean(renderedFiles?.truncated) || Boolean(renderedAttachments?.truncated) || Boolean(renderedWeb?.truncated) || Boolean(renderedMemories?.truncated) || summaryDroppedForBudget;
+  const retained = new Set(dialogue);
+  const representedThrough = summaryIncluded && summary ? summary.coversThroughPosition : 0;
+  const omitted = input.messages.filter((message) => Number.isInteger(message.position)
+    && message.position > representedThrough && message.position <= input.currentPosition
+    && (message.role === "user" || message.role === "assistant") && !retained.has(message));
+  const omittedAtCountCap = new Set([
+    ...omitted.filter((message) => !selectedSet.has(message)).map((message) => message.position),
+    ...omittedBeforeBuild.filter((position) => position > representedThrough),
+  ]);
+  const countCapOmissions = omittedAtCountCap.size;
+  const budgetOmissions = omitted.filter((message) => selectedSet.has(message)).length;
+  if (historyIncomplete && !countCapOmissions && !budgetOmissions) {
+    // A summary that no longer fits can free enough space for all raw history.
+    // Remove the now-false notice without reallocating away that recovered text.
+    corePolicyText = corePolicyTextFor(false);
+    coreTokens = estimateTokens(corePolicyText);
+  }
+  const truncated = countCapOmissions > 0 || budgetOmissions > 0 || droppedMessages.length > 0 || droppedPieces.length > 0 || droppedRoom.length > 0 || droppedPins.length > 0 || Boolean(renderedFiles?.truncated) || Boolean(renderedAttachments?.truncated) || Boolean(renderedWeb?.truncated) || Boolean(renderedMemories?.truncated) || summaryDroppedForBudget;
 
   const profileText = includedPieces.map((piece) => piece.text).join("\n");
   const roomText = includedRoom.map((piece) => piece.text).join("\n\n");
@@ -208,12 +241,12 @@ export function buildContext(input: BuildContextInput): ContextPlan {
     ? { type: "profile", label: "Your profile", state: "included", reason: profileReason(includedPieces.flatMap((piece) => piece.categories)) }
     : { type: "profile", label: "Your profile", state: "not_used", reason: input.preferenceReadFailed ? "Preferences couldn't be loaded, so Nibie used defaults." : "No extra profile details are set." };
   const earlierIncluded = dialogue.length - 1;
-  const recentDiagnostic: ContextSourceDiagnostic = earlierIncluded > 0 || droppedMessages.length > 0
-    ? { type: "recent_messages", label: "Recent conversation", state: earlierIncluded > 0 ? "included" : "not_used", reason: droppedMessages.length ? "Older messages left out so this reply stays focused." : "The latest messages in this thread." }
+  const recentDiagnostic: ContextSourceDiagnostic = earlierIncluded > 0 || countCapOmissions > 0 || budgetOmissions > 0
+    ? { type: "recent_messages", label: "Recent conversation", state: earlierIncluded > 0 ? "included" : "not_used", reason: countCapOmissions && budgetOmissions ? "Older messages left out by the history limit and reply budget." : countCapOmissions ? "Older messages left out by the history limit." : budgetOmissions ? "Older messages left out because they did not fit this reply." : "The latest messages in this thread." }
     : { type: "recent_messages", label: "Recent conversation", state: "not_used", reason: "No earlier messages yet." };
   const summaryDiagnostic: ContextSourceDiagnostic = summaryIncluded
     ? { type: "thread_summary", label: "Thread summary", state: "included", reason: "Older parts of this conversation." }
-    : { type: "thread_summary", label: "Thread summary", state: "not_used", reason: summaryHasGap ? "Not used because newer conversation context was left out." : summaryDroppedForBudget ? "Not used for this reply." : "Not needed yet." };
+    : { type: "thread_summary", label: "Thread summary", state: "not_used", reason: summaryHasGap ? "Not used because newer conversation context was left out." : summaryDroppedForBudget ? "Not used for this reply." : resolved.exclusionReason === "stale" ? "Not used because it covers this reply or newer messages." : "Not needed yet." };
   const roomDiagnostic: ContextSourceDiagnostic | null = hasRoom
     ? roomText
       ? { type: "room", label: "This room", state: "included", reason: roomReason(includedRoom.flatMap((piece) => piece.categories)) }
@@ -276,5 +309,10 @@ export function buildContext(input: BuildContextInput): ContextPlan {
     diagnostics,
     budget: { inputBudgetTokens, outputReserveTokens, estimatedTokens, truncated },
     includedCitationHandles: renderedWeb?.includedHandles ?? [],
+    continuity: {
+      countCapOmissions,
+      budgetOmissions,
+      summaryState: summaryIncluded ? "included" : summaryHasGap || resolved.exclusionReason === "stale" ? "stale" : summaryDroppedForBudget ? "budget" : resolved.exclusionReason === "absent" ? "absent" : "not_needed",
+    },
   };
 }

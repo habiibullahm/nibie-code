@@ -126,7 +126,7 @@ vi.mock("@/lib/recall/retrieve", () => ({ retrieveRelevantMemories: recallMocks.
 const allModes = { models: ["Fast", "Balanced", "High"].map((id) => ({ id, label: id, description: "" })) };
 
 import { POST } from "../../app/api/chat/route";
-import { CONTEXT_DATA_PREAMBLE, CONTEXT_POLICY_TEXT, contextPolicyFor } from "../../lib/context/context-policy";
+import { CONTEXT_DATA_PREAMBLE, CONTEXT_POLICY_TEXT, contextPolicyFor, HISTORY_INCOMPLETE_INSTRUCTION } from "../../lib/context/context-policy";
 import { readChatSse } from "../../lib/ai/sse";
 import { responseQualityFor } from "../../lib/ai/response-quality";
 
@@ -1763,6 +1763,156 @@ describe("POST /api/chat", () => {
       expect(stream).toHaveBeenCalledOnce();
       expect(writes).toContainEqual(expect.objectContaining({ content: "Partial findings [1].", status: "complete" }));
       expect(writes).not.toContainEqual(expect.objectContaining({ content: "Response stopped.", status: "interrupted" }));
+    });
+  });
+
+  describe("history omitted before context assembly", () => {
+    const modes = ["Fast", "Balanced", "High"] as const;
+    type Mode = (typeof modes)[number];
+    const fetchedRows = () => Array.from({ length: 34 }, (_, index) => ({
+      id: `m${index + 31}`, role: index % 2 === 0 ? "assistant" : "user",
+      content: `turn ${index + 31}`, status: "complete", position: index + 31,
+    })).reverse();
+    const coveredSummary = (coversThroughPosition: number) => ({
+      objective: "Build the project", importantContext: "Existing budget",
+      decisions: "Use Kafka.", completedWork: "Plan", currentState: "Implement",
+      openQuestions: "", coversThroughPosition, updatedAt: "2026-10-12T00:00:00Z",
+    });
+
+    function cappedThreadClient(mode: Mode, rows = fetchedRows()) {
+      const results = [
+        { data: { id: "user-message", position: 64, content: rows.find((row) => row.position === 64)!.content }, error: null },
+        { data: rows, error: null },
+        { data: { id: assistantId }, error: null },
+      ];
+      const from = vi.fn((table: string) => table === "user_preferences" ? query(preferenceResult) : table === "conversations"
+        ? query({ data: { id: "conversation", selected_model: mode }, error: null })
+        : query(results.shift()));
+      createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc });
+      claim.mockReturnValue(query({ data: { ...assistant, position: 65 }, error: null }));
+      stream.mockResolvedValue(providerChunks(["Done."], "stop"));
+    }
+
+    async function cappedReply(request = validRequest()) {
+      const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+      try {
+        const response = await POST(request);
+        expect(response.status).toBe(200);
+        const events = await Array.fromAsync(readChatSse(response.body!));
+        expect(events.at(-1)).toEqual({ type: "done" });
+        const records = info.mock.calls.map((call) => JSON.parse(String(call[0])));
+        return {
+          events,
+          prompt: stream.mock.calls[0][1] as { role: string; content: string }[],
+          metadata: records.find((record) => record.event === "context.built"),
+        };
+      } finally { info.mockRestore(); }
+    }
+
+    it.each(modes)("discloses %s history removed by the route cap even when all supplied turns fit", async (mode) => {
+      cappedThreadClient(mode);
+      const { prompt, events, metadata } = await cappedReply();
+      expect(prompt[0].content).toContain(HISTORY_INCOMPLETE_INSTRUCTION);
+      expect(prompt.filter((message) => message.role !== "system").map((message) => message.content))
+        .toEqual(Array.from({ length: 32 }, (_, index) => `turn ${index + 33}`));
+      expect(events[0]).toMatchObject({ type: "start", context: { sources: expect.arrayContaining([
+        expect.objectContaining({ type: "recent_messages", reason: "Older messages left out by the history limit." }),
+      ]) } });
+      // Two observed discarded rows, not a guessed count of all unfetched history.
+      expect(metadata).toMatchObject({ countCapOmissions: 2, budgetOmissions: 0, summaryState: "not_needed", truncated: true });
+      expect(JSON.stringify(metadata)).not.toContain("turn 31");
+      expect(JSON.stringify(metadata)).not.toContain("turn 64");
+    });
+
+    it.each(modes)("rejects a %s summary across a route-omitted correction and keeps the newest follow-up", async (mode) => {
+      const rows = fetchedRows();
+      rows.find((row) => row.position === 32)!.content = "Koreksi: gunakan Redis, bukan Kafka.";
+      rows.find((row) => row.position === 62)!.content = "Correction: use Redis rather than Kafka.";
+      rows[0].content = "Use the updated one / pakai yang diperbarui.";
+      cappedThreadClient(mode, rows);
+      summaryStore.load.mockResolvedValue(coveredSummary(31));
+      const { prompt, metadata } = await cappedReply();
+      expect(prompt[0].content).toContain(HISTORY_INCOMPLETE_INSTRUCTION);
+      expect(prompt.some((message) => message.content.includes("Use Kafka."))).toBe(false);
+      expect(prompt.some((message) => message.content === "Correction: use Redis rather than Kafka.")).toBe(true);
+      expect(prompt.at(-1)?.content).toBe("Use the updated one / pakai yang diperbarui.");
+      expect(metadata).toMatchObject({ countCapOmissions: 2, budgetOmissions: 0, summaryState: "stale", truncated: true });
+    });
+
+    it.each(modes)("keeps a %s summary that covers every observed route omission without adding a notice", async (mode) => {
+      cappedThreadClient(mode);
+      summaryStore.load.mockResolvedValue(coveredSummary(32));
+      const { prompt, metadata } = await cappedReply();
+      expect(prompt[0].content).not.toContain(HISTORY_INCOMPLETE_INSTRUCTION);
+      expect(prompt.some((message) => message.content.includes("Use Kafka."))).toBe(true);
+      expect(metadata).toMatchObject({ countCapOmissions: 0, budgetOmissions: 0, summaryState: "included", truncated: false });
+    });
+
+    it("distinguishes route omissions from token omissions without logging either message body", async () => {
+      const rows = fetchedRows();
+      rows.find((row) => row.position === 50)!.content = "private correction ".repeat(1000);
+      cappedThreadClient("Fast", rows);
+      contextCapabilities.mockReturnValue({ contextWindowTokens: Math.ceil(contextPolicyFor("Fast").length / 4) + 400, maxOutputTokens: 40 });
+      const { prompt, metadata } = await cappedReply();
+      expect(prompt[0].content).toContain(HISTORY_INCOMPLETE_INSTRUCTION);
+      expect(metadata).toMatchObject({ countCapOmissions: 2, budgetOmissions: 18, truncated: true });
+      expect(JSON.stringify(metadata)).not.toContain("private correction");
+    });
+
+    it("forwards route omissions to automatic Web synthesis", async () => {
+      cappedThreadClient("Balanced");
+      webMocks.decideWebSearch.mockReturnValue({ search: true, reason: "news" });
+      const { prompt, metadata } = await cappedReply();
+      expect(prompt[0].content).toContain(HISTORY_INCOMPLETE_INSTRUCTION);
+      expect(metadata).toMatchObject({ countCapOmissions: 2, budgetOmissions: 0, truncated: true });
+    });
+
+    it("forwards route omissions to public GitHub synthesis without a live read", async () => {
+      const rows = fetchedRows();
+      rows[0].content = "Check the GitHub repo https://github.com/example/project";
+      cappedThreadClient("Balanced", rows);
+      const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+        id: 1, name: "project", full_name: "example/project", private: false,
+        owner: { login: "example" },
+        html_url: "https://github.com/example/project", default_branch: "main",
+      }), { headers: { "content-type": "application/json" } }));
+      try {
+        const { prompt, events, metadata } = await cappedReply();
+        expect(events.some((event) => event.type === "action_result")).toBe(true);
+        expect(prompt[0].content).toContain(HISTORY_INCOMPLETE_INSTRUCTION);
+        expect(metadata).toMatchObject({ countCapOmissions: 2, budgetOmissions: 0, truncated: true });
+        expect(fetch).toHaveBeenCalledOnce();
+      } finally { fetch.mockRestore(); }
+    });
+
+    it("forwards route omissions to Deep Research synthesis", async () => {
+      cappedThreadClient("Balanced");
+      webMocks.getWebSearchProvider.mockReturnValue({ id: "tavily", searchWeb: vi.fn() });
+      const source = { url: "https://example.com/guide", title: "Guide", domain: "example.com", retrieval: "web_search", text: "Synthetic evidence." };
+      researchMocks.runDeepResearch.mockResolvedValue({
+        status: "complete",
+        plan: { normalizedQuestion: "Compare options", subquestions: ["a"], initialQueries: ["a"], timeSensitive: false, notes: "" },
+        evidence: [source], web: [source], contradictions: [], incompleteNotice: null,
+        usagePolicy: { id: "research_metered_v1", summary: "test" },
+        metrics: { modelCallCount: 1, searchQueryCount: 1, searchResultCount: 1, pagesFetched: 1, pagesFailed: 0, candidateUrlCount: 1, evidenceCount: 1, followUpUsed: false, durationMs: 1, timeSensitive: false },
+      });
+      const request = validRequest();
+      const { prompt, events, metadata } = await cappedReply(new Request(request.url, {
+        method: "POST", headers: request.headers, body: JSON.stringify({ ...await request.json(), deepResearch: true }),
+      }));
+      expect(events[0]).toMatchObject({ type: "start", research: true });
+      expect(prompt[0].content).toContain(HISTORY_INCOMPLETE_INSTRUCTION);
+      expect(metadata).toMatchObject({ countCapOmissions: 2, budgetOmissions: 0, truncated: true });
+    });
+
+    it("does not count rows excluded by status or role as complete-history omissions", async () => {
+      const rows = fetchedRows();
+      rows.find((row) => row.position === 31)!.status = "interrupted";
+      rows.find((row) => row.position === 32)!.role = "system";
+      cappedThreadClient("Balanced", rows);
+      const { prompt, metadata } = await cappedReply();
+      expect(prompt[0].content).not.toContain(HISTORY_INCOMPLETE_INSTRUCTION);
+      expect(metadata).toMatchObject({ countCapOmissions: 0, budgetOmissions: 0, truncated: false });
     });
   });
 
