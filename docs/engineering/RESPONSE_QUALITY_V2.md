@@ -114,6 +114,8 @@ present their arithmetic PASS as Issue #80 acceptance.
 
 ### Issue #80 focused follow-up — new capture package (12 October 2026)
 
+These changes follow the original evaluator hardening in merged PR #120.
+
 PR #77 has already merged. Its actual squash-merge parent is
 `fa19af9b07253ff45122c4910b8988dfd175643b` and its application candidate is
 `08d5506d4613a3394b58ddea6996d101f29649cb`. These are the source comparison

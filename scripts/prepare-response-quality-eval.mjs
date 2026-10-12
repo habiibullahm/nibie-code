@@ -65,7 +65,7 @@ export function prepareCapturePackage(directory, { baselineSha = FOUNDATION_BASE
   json("baseline.template.json", blankPhase("baseline", baselineSha, plan));
   json("candidate.template.json", blankPhase("candidate", candidateSha, plan));
   json("manifest.template.json", {
-    status: "UNRUN", issue: 80, foundationPR: 77, toolingPR: 120,
+    status: "UNRUN", issue: 80, foundationPR: 77, toolingOriginPR: 120,
     preparedAt: new Date().toISOString(),
     evaluatorSourceSha256: createHash("sha256").update(readFileSync(new URL("./response-quality-eval.mjs", import.meta.url))).digest("hex"),
     baseline: { sourceCommitSha: baselineSha, verifiedDeploymentSha: null, immutablePreviewUrl: null },

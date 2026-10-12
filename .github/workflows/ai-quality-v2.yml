@@ -35,6 +35,7 @@ on:
       - 'playwright.reliability-local.config.ts'
       - 'tests/fixtures/response-quality-v2.json'
       - 'scripts/response-quality-eval.mjs'
+      - 'scripts/prepare-response-quality-eval.mjs'
       - 'package.json'
       - '.github/workflows/ai-quality-v2.yml'
 
