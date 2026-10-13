@@ -69,4 +69,3 @@ Nibie's product direction is documented in [`docs/product/PERSONAL_AI_WORKSPACE.
 
 
 The implemented chat scope and release boundaries are in [`docs/product/V1_RELEASE.md`](docs/product/V1_RELEASE.md). Beta acceptance is tracked in [`docs/engineering/CHAT_V1_BETA_ACCEPTANCE.md`](docs/engineering/CHAT_V1_BETA_ACCEPTANCE.md). Original starter documents remain historical references under [`docs/archive/starter/`](docs/archive/starter/).
-
