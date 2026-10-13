@@ -30,6 +30,7 @@ What's new in Nibie.
 
 ### Fixed
 
+- Workbench downloads preserve emoji in long document filenames instead of failing during export.
 - Replies receive an explicit notice only when earlier thread messages are missing, and context details distinguish the history limit from messages that did not fit.
 - Opening an empty chat through browser navigation releases the previous reply's Stop control and lets you start a fresh message.
 - Settings keeps unsaved personalization drafts between sections, asks before discarding them, and preserves keyboard focus while choices save.
