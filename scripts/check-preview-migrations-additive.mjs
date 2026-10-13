@@ -92,7 +92,9 @@ export function checkAdditiveMigrations(root, opts = {}) {
       problems.push(`${name}: missing on disk`);
       continue;
     }
-    const sql = readFileSync(path, "utf8");
+    // Normalize CRLF (e.g. Windows autocrlf checkouts) so the exact reviewed
+    // retention match behaves the same as on CI; forbidden patterns ignore whitespace.
+    const sql = readFileSync(path, "utf8").replace(/\r\n/g, "\n");
     for (const hit of findForbiddenPatterns(migrationSqlForCheck(name, sql))) {
       problems.push(`${name}: forbidden pattern ${hit}`);
     }

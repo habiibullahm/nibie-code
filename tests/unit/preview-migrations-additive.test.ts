@@ -68,6 +68,7 @@ describe("preview shared-DB migration additive gate", () => {
       return checkAdditiveMigrations(root, { changedNames: [name] }).problems;
     };
     expect(check(sql)).toEqual([]);
+    expect(check(sql.replace(/\r?\n/g, "\r\n"))).toEqual([]);
     expect(check(`${sql}\nDELETE FROM public.workbench_document_versions;`)).toContain(`${name}: forbidden pattern DELETE FROM`);
     expect(check(sql.replace("ORDER BY created_at DESC, id DESC OFFSET 50", "ORDER BY created_at DESC, id DESC OFFSET 0"))).toContain(`${name}: forbidden pattern DELETE FROM`);
     expect(check(sql.replace("DELETE FROM public.workbench_document_versions", "DELETE FROM public.messages"))).toContain(`${name}: forbidden pattern DELETE FROM`);
