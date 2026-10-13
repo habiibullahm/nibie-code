@@ -154,6 +154,10 @@ test.describe("mobile section tabs", () => {
     const y = bounds.y + bounds.height / 2;
     await touch.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: width - 30, y }] });
     for (const x of [width - 80, width / 2, 30]) await touch.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y }] });
+    // Hold before lifting so release velocity is zero. Otherwise Chromium on Windows
+    // can leave a fling active at the scroll edge and swallow the next tap to cancel it.
+    await page.waitForTimeout(150);
+    await touch.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: 30, y }] });
     await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
     await touch.detach();
     await expect.poll(() => navigation.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
