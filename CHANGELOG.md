@@ -8,7 +8,7 @@ What's new in Nibie.
 
 ### Added
 
-- Start a temporary chat from the ghost button next to New chat: it stays out of your history and search, doesn't use or update Memory, and is deleted when you leave it (or 24 hours after it started if you just close the tab). Temporary chats are General only and don't take attachments.
+- Start a temporary chat from the ghost button next to New chat: it stays out of your history and search, doesn't use or update Memory, and is deleted when you leave it. If you just close the tab, it expires 24 hours after it started and is deleted soon after. Temporary chats are General only and don't take attachments.
 - Ask what you decided about a topic to see dated excerpts and original conversation links from this Room's active chats; historical lookup stays separate from saved Memory.
 - Workbench version history: save a checkpoint, preview prior versions (manual or AI-applied), and restore atomically with confirmation and recoverable text, keeping up to 50 versions per document; download Markdown or plain text, or copy formatted for Word/Docs (UI stays behind `WORKBENCH_UI_ENABLED`).
 - Open a finished reply in Workbench beside chat, edit Markdown with autosave, and Ask Nibie on selected text to change that span inline (credits apply).
