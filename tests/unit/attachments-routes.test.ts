@@ -377,10 +377,12 @@ describe("GET /api/chat/attachments/[attachmentId]/download", () => {
 
 describe("sending a message with attachments", () => {
   beforeEach(() => { createClient.mockReset(); modelOptions.mockReset().mockReturnValue({ models: [{ id: "Balanced" }] }); });
+  // The conversation read that keeps attachments out of temporary chats.
+  const conversationRead = (temporaryExpiresAt: string | null) => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { temporary_expires_at: temporaryExpiresAt }, error: null }) }) }) });
 
   it("saves the message and links its attachments in one call, and keeps plain messages on the existing call", async () => {
     const rpc = vi.fn(() => ({ single: async () => ({ data: { id: message, position: 3 }, error: null }) }));
-    createClient.mockResolvedValue({ auth: signedIn, rpc, from: vi.fn() });
+    createClient.mockResolvedValue({ auth: signedIn, rpc, from: () => conversationRead(null) });
     await expect(addUserMessageAction(conversation, "What is the codename?", message, [], [attachmentId])).resolves.toEqual({ data: { id: message, position: 3 } });
     expect(rpc).toHaveBeenLastCalledWith("append_user_message_with_attachments", { p_conversation_id: conversation, p_message_id: message, p_content: "What is the codename?", p_attachment_ids: [attachmentId] });
     await addUserMessageAction(conversation, "Plain", message, []);
@@ -398,6 +400,7 @@ describe("sending a message with attachments", () => {
     const rpc = vi.fn(() => ({ single: async () => ({ data: null, error: { code: "PT409", message: "Attachment unavailable." } }) }));
     const removed: unknown[] = [];
     const conversations = {
+      ...conversationRead(null),
       insert: () => ({ select: () => ({ single: async () => ({ data: { id: conversation, title: "New chat", selected_model: "Balanced", room_id: null, created_at: "", updated_at: "" }, error: null }) }) }),
       delete: () => ({ eq: (column: string, value: string) => { removed.push([column, value]); return Promise.resolve({ error: null }); } }),
     };
@@ -406,5 +409,13 @@ describe("sending a message with attachments", () => {
     expect(removed).toEqual([["id", conversation]]);
     rpc.mockImplementation(() => ({ single: async () => ({ data: null, error: { code: "PT413", message: "too large" } }) }));
     await expect(addUserMessageAction(conversation, "x", message, [], [attachmentId])).resolves.toEqual({ error: attachmentErrors.totalTooLarge });
+  });
+
+  it("keeps attachments out of temporary chats, whose files would outlive them", async () => {
+    const rpc = vi.fn();
+    createClient.mockResolvedValue({ auth: signedIn, rpc, from: () => conversationRead("2026-10-14T09:00:00.000Z") });
+    await expect(addUserMessageAction(conversation, "x", message, [], [attachmentId])).resolves.toEqual({ error: "Files can't be attached to a temporary chat." });
+    await expect(startConversationAction("Balanced", message, "x", null, [attachmentId], true)).resolves.toEqual({ error: "Files can't be attached to a temporary chat." });
+    expect(rpc).not.toHaveBeenCalled();
   });
 });

@@ -162,6 +162,9 @@ export type DeferredThreadSummary = {
   finish(): void;
 };
 
+// A temporary chat keeps no rolling summary: its replies hand off to this instead, so nothing is ever scheduled.
+export const skippedThreadSummaryMaintenance: DeferredThreadSummary = { complete: () => undefined, finish: () => undefined };
+
 // Registered with after() while the request is still open, so the work runs once the response has finished streaming and
 // never delays the reply. The outcome is only known when the stream ends, hence the deferred hand-off. Call it only where every
 // later path reaches finish(); the guard below is a backstop so a missed hand-off cannot hold the function open.

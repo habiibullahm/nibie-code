@@ -390,6 +390,12 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .header-context { color: var(--text-4); font-size: 12px; font-weight: 400; }
 .header-new-chat { display: none; align-items: center; justify-content: center; flex: none; width: 36px; height: 36px; border: 1px solid var(--border); border-radius: 10px; padding: 0; background: var(--bg-raised); cursor: pointer; }
 .header-new-chat:hover:not(:disabled) { background: var(--hover); }
+.header-actions { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+.header-actions .header-new-chat { margin-left: 0; }
+.header-temporary-chat { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 36px; height: 36px; border: 1px solid var(--border); border-radius: 10px; padding: 0; background: var(--bg-raised); color: var(--text); cursor: pointer; }
+.header-temporary-chat:hover:not(:disabled) { background: var(--hover); }
+.header-temporary-chat.is-active { border-color: var(--border-strong); background: var(--active); }
+.header-temporary-chat:disabled { cursor: default; opacity: 0.55; }
 .mobile-menu-button { display: none; }
 .conversation-scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 .conversation-scroll.is-empty { display: flex; align-items: center; justify-content: center; padding: 30px 20px; }

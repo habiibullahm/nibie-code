@@ -11,6 +11,7 @@ import type { MessageResearchView } from "@/lib/research/types";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { schemaUnavailable } from "@/lib/chat/schema-error";
 import { validateConversationId } from "@/lib/chat/validation";
+import { isExpiredTemporaryConversation, isTemporaryConversation } from "@/lib/chat/temporary";
 
 export type ConversationSummary = {
   id: string;
@@ -18,6 +19,8 @@ export type ConversationSummary = {
   selected_model: string;
   room_id: string | null;
   archived_at?: string | null;
+  /** Set only on a temporary chat (see lib/chat/temporary.ts). */
+  temporary_expires_at?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -88,7 +91,7 @@ export async function getChatWorkspaceData(conversationId: unknown) {
   // The history list and the selected conversation's messages are independent reads, so they run together.
   // RLS scopes both to the signed-in owner; messages are only used when the conversation is in the owner's list.
   const [conversationResult, { data: roomRows, error: roomsError }, { data: briefRows, error: briefsError }, { data: pinRows, error: pinsError }, messagesResult, attachmentsResult, sourcesResult, researchResult, actionsResult] = await Promise.all([
-    orderedConversations("id,title,selected_model,room_id,archived_at,created_at,updated_at"),
+    orderedConversations("id,title,selected_model,room_id,archived_at,temporary_expires_at,created_at,updated_at"),
     supabase
     .from("rooms")
       .select("id,name,description,instructions,created_at,updated_at")
@@ -117,7 +120,11 @@ export async function getChatWorkspaceData(conversationId: unknown) {
       ? loadMessageActionsByConversation(supabase, parsedId.data)
       : Promise.resolve({ byMessage: new Map<string, MessageActionView>(), error: false, unavailable: true }),
   ]);
-  const withoutArchive = schemaUnavailable(conversationResult.error)
+  // A database without temporary chats yet has none, so the ordinary columns are all there is to read.
+  const withoutTemporary = schemaUnavailable(conversationResult.error)
+    ? await orderedConversations("id,title,selected_model,room_id,archived_at,created_at,updated_at")
+    : null;
+  const withoutArchive = withoutTemporary && schemaUnavailable(withoutTemporary.error)
     ? await orderedConversations("id,title,selected_model,room_id,created_at,updated_at")
     : null;
   const withoutRoom = withoutArchive && schemaUnavailable(withoutArchive.error)
@@ -127,14 +134,20 @@ export async function getChatWorkspaceData(conversationId: unknown) {
     ? ((withoutRoom.data ?? []) as unknown as Omit<ConversationSummary, "room_id" | "archived_at">[]).map((row) => ({ ...row, room_id: null, archived_at: null }))
     : withoutArchive && !withoutArchive.error
       ? ((withoutArchive.data ?? []) as unknown as Omit<ConversationSummary, "archived_at">[]).map((row) => ({ ...row, archived_at: null }))
-      : conversationResult.data;
-  const conversationsError = withoutRoom ? withoutRoom.error : withoutArchive ? withoutArchive.error : conversationResult.error;
-  const empty = { conversations: [] as ConversationSummary[], archivedConversations: [] as ConversationSummary[], rooms: [] as RoomSummary[], roomsError: null as string | null, messages: [] as PersistedMessage[], activeId: null };
+      : withoutTemporary && !withoutTemporary.error
+        ? withoutTemporary.data
+        : conversationResult.data;
+  const conversationsError = withoutRoom ? withoutRoom.error : withoutArchive ? withoutArchive.error : withoutTemporary ? withoutTemporary.error : conversationResult.error;
+  const empty = { conversations: [] as ConversationSummary[], archivedConversations: [] as ConversationSummary[], temporaryConversation: null as ConversationSummary | null, rooms: [] as RoomSummary[], roomsError: null as string | null, messages: [] as PersistedMessage[], activeId: null };
   if (conversationsError) return { ...empty, error: "Conversation history couldn't be loaded. Refresh to try again." };
   // Saved modes from earlier builds ("Reasoning", display names) are normalized here, so the client only ever sees Fast / Balanced / High.
-  const allConversations = ((conversationRows ?? []) as ConversationSummary[]).map((row) => ({ ...row, selected_model: normalizeSavedMode(row.selected_model) ?? row.selected_model, room_id: row.room_id ?? null, archived_at: row.archived_at ?? null }));
-  const conversations = allConversations.filter((item) => !item.archived_at);
-  const archivedConversations = allConversations.filter((item) => item.archived_at);
+  const allConversations = ((conversationRows ?? []) as ConversationSummary[]).map((row) => ({ ...row, selected_model: normalizeSavedMode(row.selected_model) ?? row.selected_model, room_id: row.room_id ?? null, archived_at: row.archived_at ?? null, temporary_expires_at: row.temporary_expires_at ?? null }));
+  // Temporary chats never appear in history. Only the one this page was opened on is returned, and only until it expires.
+  const history = allConversations.filter((item) => !isTemporaryConversation(item));
+  const conversations = history.filter((item) => !item.archived_at);
+  const archivedConversations = history.filter((item) => item.archived_at);
+  const requestedTemporary = parsedId.success ? allConversations.find((item) => item.id === parsedId.data && isTemporaryConversation(item)) : undefined;
+  const temporaryConversation = requestedTemporary && !isExpiredTemporaryConversation(requestedTemporary) ? requestedTemporary : null;
   const roomsMissing = schemaUnavailable(roomsError) || schemaUnavailable(briefsError);
   const briefs = new Map(roomsMissing ? [] : (briefRows ?? []).map((brief) => [brief.room_id, {
     goal: brief.goal,
@@ -155,10 +168,10 @@ export async function getChatWorkspaceData(conversationId: unknown) {
   const rooms: RoomSummary[] = roomsMissing ? [] : (roomRows ?? []).map((room) => ({ ...room, brief: briefs.get(room.id) ?? null, pins: pinsByRoom.get(room.id) ?? [] }));
   const roomError = !roomsMissing && (roomsError || briefsError || (!pinsMissing && pinsError)) ? "Rooms couldn't be loaded. Refresh to try again." : null;
 
-  const active = parsedId.success ? conversations.find((item) => item.id === parsedId.data) : undefined;
-  if (!active || !messagesResult) return { conversations, archivedConversations, rooms, roomsError: roomError, messages: [] as PersistedMessage[], activeId: null, error: roomError };
+  const active = parsedId.success ? conversations.find((item) => item.id === parsedId.data) ?? temporaryConversation ?? undefined : undefined;
+  if (!active || !messagesResult) return { conversations, archivedConversations, temporaryConversation, rooms, roomsError: roomError, messages: [] as PersistedMessage[], activeId: null, error: roomError };
 
-  const loadError = { conversations, archivedConversations, rooms, roomsError: roomError, messages: [] as PersistedMessage[], activeId: active.id, error: "This conversation couldn't be loaded. Refresh to try again." };
+  const loadError = { conversations, archivedConversations, temporaryConversation, rooms, roomsError: roomError, messages: [] as PersistedMessage[], activeId: active.id, error: "This conversation couldn't be loaded. Refresh to try again." };
   if (messagesResult.error) return loadError;
   let messages = messagesResult.data ?? [];
 
@@ -184,6 +197,7 @@ export async function getChatWorkspaceData(conversationId: unknown) {
   return {
     conversations,
     archivedConversations,
+    temporaryConversation,
     rooms,
     roomsError: roomError,
     messages: messages.map((message) =>

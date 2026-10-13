@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { sanitizeSearchableContent } from "@/lib/chat/search";
+import { schemaUnavailable } from "@/lib/chat/schema-error";
 import type { HistoryRecallIntent } from "./intent";
 
 export const HISTORY_RECALL_LIMITS = {
@@ -147,20 +148,26 @@ export async function retrieveHistoryEvidence(input: {
       return !signal.aborted;
     };
     if (!await verifyCurrent()) return result("scope_unavailable");
-    const authorizedMessages = () => {
+    const authorizedMessages = (excludeTemporary: boolean) => {
       let query = supabase.from("messages")
         .select("id,user_id,conversation_id,role,status,content,created_at,conversations!inner(id,user_id,room_id,archived_at,title)")
         .eq("user_id", ownerId).eq("conversations.user_id", ownerId)
         .eq("status", "complete").is("conversations.archived_at", null)
         .neq("conversation_id", conversationId);
+      // Temporary chats are never recalled from another conversation.
+      if (excludeTemporary) query = query.is("conversations.temporary_expires_at", null);
       // Topic words are ANDed before LIMIT so unrelated newer messages containing
       // only one word cannot crowd an older multi-word decision out of the pool.
       for (const term of intent.terms) query = query.ilike("content", `%${term}%`);
       return roomId === null ? query.is("conversations.room_id", null) : query.eq("conversations.room_id", roomId);
     };
-    const read = await authorizedMessages()
+    const readCandidates = (excludeTemporary: boolean) => authorizedMessages(excludeTemporary)
       .order("created_at", { ascending: false }).order("id", { ascending: true })
       .limit(HISTORY_RECALL_LIMITS.candidates).abortSignal(signal);
+    let excludeTemporary = true;
+    let read = await readCandidates(excludeTemporary);
+    // A database without temporary chats yet has none to exclude.
+    if (schemaUnavailable(read.error)) read = await readCandidates(excludeTemporary = false);
     if (read.error) return result("unavailable");
     const candidates = (read.data ?? []) as unknown as HistoryCandidate[];
     let evidence = selectHistoryEvidence({ candidates, intent, ownerId, conversationId, roomId });
@@ -172,7 +179,7 @@ export async function retrieveHistoryEvidence(input: {
       // edited or newly inaccessible message cannot survive the recheck as an
       // old excerpt. Inner-relation filters revalidate the source scope too.
       const selectedIds = new Set(evidence.map((row) => row.messageId));
-      const sources = await authorizedMessages().in("id", [...selectedIds])
+      const sources = await authorizedMessages(excludeTemporary).in("id", [...selectedIds])
         .limit(HISTORY_RECALL_LIMITS.results).abortSignal(signal);
       if (sources.error) return result("unavailable");
       const refreshed = selectHistoryEvidence({ candidates: (sources.data ?? []) as unknown as HistoryCandidate[], intent, ownerId, conversationId, roomId });
