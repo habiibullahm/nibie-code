@@ -428,6 +428,16 @@ describe("workbench documents", () => {
     expect(streaming.inserts).toHaveLength(0);
   });
 
+  it("never copies a temporary chat's reply into a Workbench document, which would outlive the chat", async () => {
+    const temporary = memoryClient({
+      message: { id: messageId, user_id: owner, role: "assistant", status: "complete", content: "Temporary answer", conversation_id: conversationId },
+      conversation: { id: conversationId, user_id: owner, room_id: null, temporary_expires_at: "2026-10-14T00:00:00.000Z" },
+    });
+    createClient.mockResolvedValue(temporary.client);
+    await expect(createWorkbenchFromAssistantAction(messageId)).resolves.toEqual({ error: "A reply from a temporary chat can't be opened in Workbench." });
+    expect(temporary.inserts).toHaveLength(0);
+  });
+
   it("strips internal reasoning before a Workbench handoff", async () => {
     const client = memoryClient({
       message: {

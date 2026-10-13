@@ -177,11 +177,14 @@ export const conversations = pgTable(
     title: text("title").notNull().default("New chat"),
     selectedModel: text("selected_model").notNull().default("default"),
     archivedAt: timestamp("archived_at", { withTimezone: true, mode: "date" }),
+    // Set only on a temporary chat: hidden from history and Memory, and deleted on leave or at this time at the latest.
+    temporaryExpiresAt: timestamp("temporary_expires_at", { withTimezone: true, mode: "date" }),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
   },
   (table) => [
     index("conversations_user_updated_idx").on(table.userId, table.updatedAt),
+    index("conversations_temporary_expiry_idx").on(table.temporaryExpiresAt).where(sql`${table.temporaryExpiresAt} IS NOT NULL`),
     index("conversations_user_room_idx").on(table.userId, table.roomId),
     unique("conversations_id_user_id_key").on(table.id, table.userId),
     // Same-owner link. The migration nulls only room_id when the room is deleted; user_id stays.

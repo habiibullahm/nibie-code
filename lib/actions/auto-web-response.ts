@@ -18,7 +18,7 @@ import { buildContext } from "@/lib/context/build-context";
 import { CONTEXT_POLICY_VERSION } from "@/lib/context/context-policy";
 import type { AttachmentContextInput, FileContextInput, ThreadSummary } from "@/lib/context/context-types";
 import type { RoomContextInput } from "@/lib/context/room-context";
-import { deferThreadSummaryMaintenance } from "@/lib/context/thread-summary-store";
+import { deferThreadSummaryMaintenance, skippedThreadSummaryMaintenance } from "@/lib/context/thread-summary-store";
 import {
   ACTION_FAILED_TRUTHFULNESS_INSTRUCTION,
   actionSucceeded,
@@ -65,6 +65,8 @@ type AutoActionChatBase = {
   recallOperation: RecallOperationStatus;
   rows: { role: string; content: string; position: number }[];
   omittedMessagePositions?: number[];
+  /** A temporary chat: no rolling summary is kept for it. */
+  temporary?: boolean;
   /** HTTP preflight already reserved this generation; do not reserve again. */
   weeklyUsageReserved?: boolean;
 };
@@ -179,7 +181,7 @@ async function createAutoActionChatResponse(input: ResolvedActionChat): Promise<
   const { persist } = persistence;
   const releaseReservation = lifecycle.releaseBeforeStart;
 
-  const summaryMaintenance = deferThreadSummaryMaintenance({ supabase, conversationId, requestId });
+  const summaryMaintenance = input.temporary ? skippedThreadSummaryMaintenance : deferThreadSummaryMaintenance({ supabase, conversationId, requestId });
   let usageReservationMs = 0;
   let spendReservedMicros = 0;
   let providerStartedAt = Date.now();
