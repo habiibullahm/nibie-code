@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS_TOTAL_BYTES } from "../../lib/attachments/limits";
+import { ATTACHMENT_TUS_CHUNK_SIZE, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS_TOTAL_BYTES } from "../../lib/attachments/limits";
 
 const conversation = "5e9bdcca-9205-4fea-a773-13952bb78c44";
 const fixture = (name: string) => ({ name, mimeType: name.endsWith(".md") ? "text/markdown" : "text/plain", buffer: readFileSync(`tests/fixtures/attachments/${name}`) });
@@ -11,6 +11,12 @@ const sized = (name: string, bytes: number, mimeType = "text/plain") => ({
 });
 
 type Saved = { id: string; name: string; mimeType: string; sizeBytes: number; truncated: boolean; pageCount: null };
+
+// Fake TUS server. Each upload gets its own Location so PATCH can look up its length, and
+// progress never depends on Chromium exposing the intercepted body: when it doesn't, assume
+// the client sent what the protocol implies (one chunk, or the remainder). Otherwise PATCH
+// replies stall at offset 1 and the chip stays "Reading…".
+const tusLengths = new Map<string, number>();
 
 async function fulfillTus(route: Route) {
   const method = route.request().method();
@@ -29,14 +35,12 @@ async function fulfillTus(route: Route) {
     return;
   }
   if (method === "POST") {
-    const bodyLen = route.request().postDataBuffer()?.byteLength ?? 0;
+    const location = `https://storage.example/storage/v1/upload/resumable/sign/uploads/${crypto.randomUUID()}`;
+    tusLengths.set(location, uploadLength);
+    const sent = route.request().postDataBuffer()?.byteLength || Math.min(ATTACHMENT_TUS_CHUNK_SIZE, uploadLength);
     await route.fulfill({
       status: 201,
-      headers: {
-        ...headers,
-        Location: "https://storage.example/storage/v1/upload/resumable/sign/uploads/fake",
-        "Upload-Offset": String(bodyLen > 0 && (!uploadLength || bodyLen >= uploadLength) ? (uploadLength || bodyLen) : bodyLen),
-      },
+      headers: { ...headers, Location: location, "Upload-Offset": String(Math.min(sent, uploadLength)) },
       body: "",
     });
     return;
@@ -46,12 +50,12 @@ async function fulfillTus(route: Route) {
     return;
   }
   if (method === "PATCH") {
-    const bodyLen = route.request().postDataBuffer()?.byteLength ?? 0;
+    const total = tusLengths.get(route.request().url()) ?? 0;
     const prev = Number(reqHeaders["upload-offset"] || 0);
-    const next = prev + bodyLen;
+    const sent = route.request().postDataBuffer()?.byteLength || Math.min(ATTACHMENT_TUS_CHUNK_SIZE, total - prev);
     await route.fulfill({
       status: 204,
-      headers: { ...headers, "Upload-Offset": String(uploadLength && next >= uploadLength ? uploadLength : Math.max(next, 1)) },
+      headers: { ...headers, "Upload-Offset": String(Math.min(prev + sent, total)) },
       body: "",
     });
     return;
