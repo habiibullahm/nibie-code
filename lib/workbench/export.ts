@@ -6,13 +6,15 @@ export type WorkbenchExportFormat = "md" | "txt";
 /** Filesystem-safe Unicode download basename from a document title (no path separators or control chars). */
 export function workbenchExportBasename(title: string): string {
   const trimmed = title.trim() || untitledWorkbenchTitle;
-  const cleaned = trimmed
+  const cleaned = Array.from(trimmed
     .normalize("NFKC")
     .replace(/[\u0000-\u001F\u007F]/g, "")
     .replace(/[\\/:*?"<>|]+/g, "")
     .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 80);
+    .trim())
+    // Keep complete Unicode characters so UTF-8 Content-Disposition encoding cannot split an emoji.
+    .slice(0, 80)
+    .join("");
   const dashed = (cleaned || untitledWorkbenchTitle)
     .replace(/\s+/g, "-")
     .replace(/-+/g, "-")

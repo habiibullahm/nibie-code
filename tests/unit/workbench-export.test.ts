@@ -46,4 +46,20 @@ describe("Workbench authenticated export", () => {
     if (format === "md") expect(body).toContain("## Catatan\n\nHello **world**");
     else expect(body).toBe("Catatan\n\nHello world 日本語");
   });
+
+  it.each(["md", "txt"])("exports %s when a long title has an emoji at the filename limit", async format => {
+    const prefix = "a".repeat(79);
+    readDocument.mockResolvedValue({
+      document: { title: `${prefix}😀 notes`, content: "Document body" },
+      error: null,
+    });
+
+    const response = await GET(request(format), context);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-disposition")).toContain(
+      `filename*=UTF-8''${prefix}%F0%9F%98%80.${format}`,
+    );
+    expect(await response.text()).toContain("Document body");
+  });
 });
