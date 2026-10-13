@@ -70,4 +70,3 @@ Before submission atomically reserve a pessimistic upper bound: billing quantum 
 4. Exact-head disposable-account Preview QA and measured cost/latency envelope pass before feature enablement. No shared migrations or production deployment without separate authorization.
 
 Rollback for this PR is documentation removal. Runtime delivery remains blocked and #107 remains OPEN. This assessment is repository-based architectural analysis, not a completed provider penetration test or Codex Security plugin scan.
-
