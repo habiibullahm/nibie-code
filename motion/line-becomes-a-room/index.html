@@ -16,7 +16,8 @@
 // no state carried between frames. Letters are Syne 700 outlines taken from
 // Syne-700.ttf (see README), so they can be split into stems and counters.
 
-const W = 1920, H = 1080, DUR = 15;
+const W = 1920, H = 1080, DUR = 21;
+const EXT = 6, APP_END = 11.5 + EXT; // v2: the app section runs 6 s (12 beats) longer than the 15 s cut
 const C = { white: '#F4F1EA', black: '#141414', indigo: '#1B3A4B', orange: '#E24E1B', stone: '#D6D1C7' };
 const G = {"upm":1000,"cap":650,"g":{"A":{"adv":789,"d":"M178 -141V-252H606V-141ZM17 0 321 -647H465L772 0H627L361 -583H425L161 0Z","bb":[17,0,772,647]},"B":{"adv":780,"d":"M77 0V-647H450Q580 -647 647.5 -603.5Q715 -560 715 -474Q715 -419 688 -387.5Q661 -356 611.5 -341Q562 -326 495 -322L499 -329Q548 -328 591.5 -322Q635 -316 668 -300Q701 -284 720 -255.5Q739 -227 739 -181Q739 -121 707 -81.5Q675 -42 618 -22Q561 -2 486 0ZM210 -110H472Q535 -110 569 -130.5Q603 -151 603 -196Q603 -229 583 -244Q563 -259 530 -262.5Q497 -266 459 -266H210ZM210 -373H445Q508 -373 542 -391.5Q576 -410 576 -455Q576 -500 542 -518.5Q508 -537 452 -537H210Z","bb":[77,0,739,647]},"C":{"adv":885,"d":"M832 -233Q823 -155 777 -100Q731 -45 652 -16Q573 13 464 13Q373 13 297.5 -8Q222 -29 167.5 -71Q113 -113 83 -175.5Q53 -238 53 -322Q53 -406 83 -469Q113 -532 167.5 -574.5Q222 -617 297.5 -638.5Q373 -660 464 -660Q573 -660 652.5 -630Q732 -600 778 -544.5Q824 -489 832 -410H700Q687 -452 656.5 -482.5Q626 -513 578 -529Q530 -545 464 -545Q382 -545 320 -519.5Q258 -494 224 -444.5Q190 -395 190 -322Q190 -250 224 -201Q258 -152 320 -126.5Q382 -101 464 -101Q530 -101 577.5 -117Q625 -133 655.5 -163Q686 -193 700 -233Z","bb":[53,-13,832,660]},"D":{"adv":879,"d":"M447 -647Q556 -647 629 -621Q702 -595 745.5 -550.5Q789 -506 807.5 -448Q826 -390 826 -326Q826 -262 805.5 -203Q785 -144 740.5 -98.5Q696 -53 623.5 -26.5Q551 0 447 0H77V-647ZM210 -114H444Q516 -114 563.5 -131.5Q611 -149 639 -179Q667 -209 679 -247Q691 -285 691 -326Q691 -367 679 -404Q667 -441 639 -470Q611 -499 563.5 -516Q516 -533 444 -533H210Z","bb":[77,0,826,647]},"E":{"adv":769,"d":"M210 -270V-111H709V0H77V-647H708V-536H210V-375H618V-270Z","bb":[77,0,709,647]},"F":{"adv":741,"d":"M708 -647V-536H210V-362H618V-258H210V0H77V-647Z","bb":[77,0,708,647]},"G":{"adv":914,"d":"M449 13Q359 13 286.5 -8Q214 -29 161.5 -71Q109 -113 81 -175Q53 -237 53 -318Q53 -400 82.5 -463.5Q112 -527 166.5 -571Q221 -615 296.5 -637.5Q372 -660 464 -660Q573 -660 652 -629.5Q731 -599 776.5 -544Q822 -489 828 -413H700Q687 -453 657.5 -482.5Q628 -512 580 -528.5Q532 -545 464 -545Q377 -545 315.5 -517Q254 -489 222 -438Q190 -387 190 -318Q190 -251 218 -202.5Q246 -154 304.5 -128Q363 -102 454 -102Q524 -102 577.5 -120.5Q631 -139 667 -170.5Q703 -202 718 -241L770 -260Q757 -131 672.5 -59Q588 13 449 13ZM736 0Q736 -31 740 -71.5Q744 -112 750 -153.5Q756 -195 761 -230H465V-315H851V0Z","bb":[53,-13,851,660]},"H":{"adv":895,"d":"M194 -380H707V-269H194ZM685 -647H818V0H685ZM77 -647H210V0H77Z","bb":[77,0,818,647]},"I":{"adv":324,"d":"M96 -647H229V0H96Z","bb":[96,0,229,647]},"K":{"adv":814,"d":"M354 -315 353 -371 789 0H597L209 -340L554 -647H743ZM77 -647H210V0H77Z","bb":[77,0,789,647]},"L":{"adv":687,"d":"M210 -647V-111H640V0H77V-647Z","bb":[77,0,640,647]},"M":{"adv":1099,"d":"M580 -66H517L889 -647H1022V0H889V-470L921 -461L624 0H475L178 -459L210 -468V0H77V-647H210Z","bb":[77,0,1022,647]},"N":{"adv":901,"d":"M733 -132 691 -115V-647H824V0H691L168 -511L210 -528V0H77V-647H210Z","bb":[77,0,824,647]},"O":{"adv":924,"d":"M462 13Q333 13 241.5 -27.5Q150 -68 101.5 -143Q53 -218 53 -323Q53 -429 101.5 -504Q150 -579 241.5 -619.5Q333 -660 462 -660Q592 -660 683 -619.5Q774 -579 822.5 -504Q871 -429 871 -323Q871 -218 822.5 -143Q774 -68 683 -27.5Q592 13 462 13ZM462 -102Q542 -102 602.5 -126Q663 -150 697.5 -199Q732 -248 732 -323Q732 -398 697.5 -447Q663 -496 602.5 -520.5Q542 -545 462 -545Q383 -545 321 -520.5Q259 -496 224 -447Q189 -398 189 -323Q189 -248 224 -199Q259 -150 321 -126Q383 -102 462 -102Z","bb":[53,-13,871,660]},"P":{"adv":784,"d":"M192 -210V-316H488Q541 -316 572 -344.5Q603 -373 603 -424Q603 -477 572 -505Q541 -533 488 -533H208V0H75V-647H476Q530 -647 577.5 -634Q625 -621 660.5 -594Q696 -567 716 -525Q736 -483 736 -424Q736 -366 716 -325Q696 -284 660.5 -258.5Q625 -233 577.5 -221.5Q530 -210 476 -210Z","bb":[75,0,736,647]},"R":{"adv":826,"d":"M77 0V-647H516Q591 -647 646.5 -626.5Q702 -606 733 -562.5Q764 -519 764 -451Q764 -405 748 -373Q732 -341 703.5 -321Q675 -301 638 -290.5Q601 -280 559 -277L545 -285Q615 -284 660 -273.5Q705 -263 727.5 -235.5Q750 -208 750 -154V0H617V-145Q617 -182 604 -202.5Q591 -223 557.5 -231Q524 -239 461 -239H210V0ZM210 -343H516Q572 -343 601.5 -370Q631 -397 631 -443Q631 -487 601.5 -510Q572 -533 516 -533H210Z","bb":[77,0,764,647]},"S":{"adv":694,"d":"M34 -218H169Q173 -184 200.5 -156.5Q228 -129 273 -113.5Q318 -98 374 -98Q425 -98 458 -109Q491 -120 507 -140Q523 -160 523 -188Q523 -215 503 -229.5Q483 -244 440 -253.5Q397 -263 327 -273Q272 -281 223 -295.5Q174 -310 136.5 -333Q99 -356 77.5 -389.5Q56 -423 56 -469Q56 -526 88.5 -569Q121 -612 185 -636Q249 -660 342 -660Q482 -660 557.5 -600.5Q633 -541 631 -437H501Q497 -496 451.5 -522Q406 -548 337 -548Q273 -548 231.5 -529Q190 -510 190 -464Q190 -446 200 -432.5Q210 -419 234 -409Q258 -399 299 -390Q340 -381 401 -372Q458 -364 504.5 -350.5Q551 -337 584.5 -315.5Q618 -294 636 -261Q654 -228 654 -180Q654 -121 623.5 -77.5Q593 -34 529.5 -10Q466 14 365 14Q293 14 238 -1.5Q183 -17 143 -43Q103 -69 78 -100Q53 -131 42.5 -162Q32 -193 34 -218Z","bb":[34,-14,654,660]},"T":{"adv":722,"d":"M20 -647H702V-536H20ZM295 -550H428V0H295Z","bb":[20,0,702,647]},"X":{"adv":780,"d":"M576 -647H738L432 -290L428 -286L201 0H39L354 -375L357 -378ZM211 -647 427 -376 429 -373 741 0H572L348 -290L345 -292L49 -647Z","bb":[39,0,741,647]}},"hasKern":true};
 const CAP = 647, MID = CAP / 2;
@@ -42,7 +43,7 @@ function spring(p, w = 9) { // critically damped, normalised so it lands exactly
   const s = x => 1 - (1 + w * x) * Math.exp(-w * x);
   return s(clamp(p)) / s(1);
 }
-const EASE = { io: p => expoInOut(p, 8), in: expoIn, out: expoOut, spring };
+const EASE = { io: p => expoInOut(p, 8), in: expoIn, out: expoOut, spring, lin: p => clamp(p) };
 
 // Keyframes: [[time, value, dur = 0.4, ease = 'io'], ...]. The move into a key
 // runs over [time - dur, time], so every key lands exactly on its time.
@@ -60,7 +61,8 @@ function K(t, keys) {
 
 // Orthographic dolly on Z: a uniform scale about the frame centre.
 const S = 1.3;
-const cam = t => t <= 12 ? lerp(1, S, expoInOut(t / 12, 5)) : lerp(S, 1, expoInOut((t - 12) / 3, 5));
+const cam = t => t <= 12 ? lerp(1, S, expoInOut(t / 12, 5)) : lerp(S, 1, expoInOut((t - 12) / 3, 5)); // story time, 0 to 15
+const camR = t => t < 8.5 ? cam(t) : t < APP_END ? cam(8.5 + (t - 8.5) * 3 / (3 + EXT)) : cam(t - EXT); // reel time, 0 to 21
 
 // ---------- type
 function layout(word, cap, track = 0) {
@@ -153,7 +155,7 @@ const L_CHAT = layout('CHAT', W_CAP), L_THINK = layout('THINKING', W_CAP);
 const L_ROOMS = layout('ROOMS', W_CAP), L_CONTEXT = layout('CONTEXT', W_CAP);
 const LABELS = ['FAST', 'BALANCED', 'HIGH'];
 const L_SLAB = LABELS.map(w => layout(w, 70));
-const L_SEG = LABELS.map(w => layout(w, 46));
+const L_BAY = ['THREADS', 'PINS', 'BRIEF'].map(w => layout(w, 34)); // front, middle, back bay
 
 // plan: a 1300 x 560 room, three bays stacked front to back
 const RW = 650, RD = 280, TW = 44, TP = 28;
@@ -172,16 +174,6 @@ L_BIG.L.forEach(l => {
   const st = { N: [[77, 210], [691, 824]], I: [[96, 229]], B: [[77, 210]], E: [[77, 210]] }[l.ch];
   st.forEach(s => STEMS.push([x + s[0] * e, x + s[1] * e]));
 });
-
-// UI, laid out in world units so the dolly keeps pushing through it
-const VW = 960 / S;
-const HW = 960 / cam(8.5) + 40, HH = 540 / cam(8.5) + 40;
-const UI = { side: -VW + 120, x0: -560, x1: 700, head: -330, comp: 120 };
-const SEG = (() => {
-  const pad = 60, ws = L_SEG.map(l => l.w + pad * 2), tot = ws.reduce((a, b) => a + b, 0);
-  let x = (UI.x0 + UI.x1) / 2 - tot / 2;
-  return { y: 230, h: 110, x0: x, x1: x + tot, cells: ws.map(w => { const c = [x, x + w]; x += w; return c; }) };
-})();
 
 // ---------- the shared word moves of 2.0 to 3.0 (also feed the walls)
 function slotWord(t, kind) {
@@ -216,13 +208,6 @@ function sceneA(t) {
     const xr = K(t, [[1.1, 0], [1.5, L_WIDE.w / 2], [2.0, 800], [2.5, 800], [3.0, -RW + 26, 0.4, 'in'], [3.5, RW - 8], [4.05, RW - 8], [4.5, RW - TW], [5.0, RW - TW], [5.4, -RW + TW, 0.4, 'in']]);
     if (xr - xl > 0.2) rect(xl, ry - th / 2, xr - xl, th, C.orange);
   }
-  // pins
-  if (t > 3.55 && t < 5.4) for (let j = 0; j < 3; j++) {
-    const sc = K(t, [[3.6, 0], [4.0, 1, 0.4 - 0.07 * j, 'out'], [5.0, 1], [5.4, 0, 0.4 - 0.07 * (2 - j), 'in']]);
-    const s = 40 * sc;
-    if (s > 0.2) rect(-400 + 400 * j - s / 2, -s / 2, s, s, C.indigo);
-  }
-
   // word slots above and below the rule
   if (t > 1.1 && t < 3.0) {
     const slot = (above, fn) => {
@@ -301,8 +286,33 @@ function sceneB(t) {
     const y = COR.far;
     panel = [proj(-COR.half, y, hp), proj(COR.half, y, hp), proj(COR.half, y, 0), proj(-COR.half, y, 0)].map(p => [p[0], p[1]]);
   }
+  floorMarks(t);
   drawBoxes(B);
   return panel;
+}
+
+function floorMarks(t) {
+  if (t > 6.6) return;
+  // pins: the three squares from the thread, now the Room's pins, lying in the middle bay
+  for (let j = 0; j < 3; j++) {
+    const s = 40 * K(t, [[3.6, 0], [4.0, 1, 0.4 - 0.07 * j, 'out']]);
+    const x = K(t, [[5.0, -400 + 400 * j], [5.5, -200 + 300 * j]]);
+    if (s > 0.2) quad([proj(x - s / 2, -s / 2, 0), proj(x + s / 2, -s / 2, 0), proj(x + s / 2, s / 2, 0), proj(x - s / 2, s / 2, 0)], C.orange);
+  }
+  // bay names on the floor: BRIEF, PINS, THREADS
+  const ly = K(t, [[4.6, 0], [5.0, 1]]);
+  if (ly <= 0.0005) return;
+  const O = proj(0, 0, 0), ex = proj(1, 0, 0), ey = proj(0, 1, 0);
+  const ax = [ex[0] - O[0], ex[1] - O[1]], ay = [ey[0] - O[0], ey[1] - O[1]];
+  L_BAY.forEach((lay, i) => {
+    const yc = (BAYS[i][0] + BAYS[i][1]) / 2, e = lay.e, x0 = -RW + TW + 34;
+    for (const l of lay.L) {
+      const u = x0 + l.x, v = yc - MID * e * ly;
+      ctx.save();
+      ctx.transform(ax[0] * e, ax[1] * e, ay[0] * e * ly, ay[1] * e * ly, O[0] + ax[0] * u + ay[0] * v, O[1] + ax[1] * u + ay[1] * v);
+      fill(C.black); ctx.fill(PATH[l.ch]); ctx.restore();
+    }
+  });
 }
 
 function slabLabel(i, parts, y1, z0, z1, lsy) {
@@ -328,98 +338,303 @@ function slabLabel(i, parts, y1, z0, z1, lsy) {
   ctx.restore();
 }
 
-// ---------- the panel becomes a screen, then flat UI (7.5 to 8.5)
+// ---------- the screen: Nibie's real website and app, drawn on a 1600 x 900 virtual display
+// Colours inside the screen are Nibie's own dark theme; type is Bricolage Grotesque and Onest, as in the product.
+const UIC = { bg: '#171717', raised: '#1f1f1f', muted: '#242424', hover: '#2b2b2b', line: '#292929', border: '#333333', strong: '#454545',
+  text: '#e7e7e7', text2: '#c7c7c7', text3: '#8f8f8f', cream: '#f0efec', terra: '#D97757', pick: C.orange };
+const FW = 960 / cam(8.5), FH = 540 / cam(8.5), VK = FW * 2 / 1600; // world size of the display when it fills the frame
+const FONT = { h: px => `600 ${px}px "Bricolage Grotesque"`, r: px => `400 ${px}px Onest`, m: px => `500 ${px}px Onest` };
+const LOGO_FOLD = new Path2D('M90.5 48.7 C96 45 103 42 109.5 42.1 C117 42.2 122.5 46 123 52.5 C123.5 62 115 78.5 99 79.7 C92 80.2 85 76.5 77 71 C73 69.5 66 76.5 54.5 78 C43 78 35.5 68 34 60 C33.6 53 40 48.5 48 48.5 L48 40 Z');
+const LOGO_BODY = new Path2D('M56 20.2 C66 20.2 75 25 81 33 C85 38.5 88 44 90.5 48.7 C95 55.5 101 62.5 110 63 C118 63.4 122.5 58 122.8 52.5 C121 61 110 70.5 94 72.5 C84 72.5 76 66 69 60 C62 54 55 49.8 48 49.8 C41 49.8 34.5 53 34 58.5 C33 55 31.8 50 31.8 45 C31.8 31 42 20.2 56 20.2Z');
+
+// what happens when, shared by the picture and the sound
+const EV = {
+  tryClick: 8.72, scrollEnd: 9.0, brief: 9.5, pins: 10.0, threadClick: 10.55, threadIn: 11.0,
+  typeA: 11.1, typeB: 11.85, send: 12.0, ctx: 12.35, replyA: 12.5, replyB: 14.0,
+  menuOpen: 14.4, highClick: 14.88, highOn: 15.0, menuShut: 15.35, rememberClick: 15.78, saved: 16.0, squash: APP_END,
+};
+const DRAFT = 'Draft the launch note for the team.';
+const REPLY = [
+  [['Here is a draft for '], ['the whole team', 1], [', under '], ['120 words', 1], ['.']],
+  [['Nibie v1 launches on '], ['Nov 4', 1], ['. Rooms keep your brief,']],
+  [['pins and threads in one place, so nobody has to']],
+  [['re-explain the project. Reply with anything to change.']],
+];
+const REPLY_WORDS = (() => { const out = []; REPLY.forEach((line, li) => line.forEach(([s, hl]) => s.split(/(?<= )/).forEach(w => out.push({ w, hl: !!hl, li })))); return out; })();
+const PINS = ['Launch day is Nov 4', 'Audience: the whole team', 'Keep it under 120 words'];
+
+function rr(x0, y0, x1, y1, r, color, stroke) {
+  if (x1 - x0 < 0.1 || y1 - y0 < 0.1) return;
+  ctx.beginPath(); ctx.roundRect(x0, y0, x1 - x0, y1 - y0, Math.min(r, (x1 - x0) / 2, (y1 - y0) / 2));
+  if (color) { ctx.fillStyle = color; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1.5; ctx.stroke(); }
+}
+function txt(s, x, y, font, color, align = 'left', ls = 0) {
+  ctx.font = font; ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = 'alphabetic';
+  ctx.letterSpacing = ls + 'px'; ctx.fillText(s, x, y); ctx.letterSpacing = '0px';
+}
+const tw = (s, font, ls = 0) => { ctx.font = font; ctx.letterSpacing = ls + 'px'; const w = ctx.measureText(s).width; ctx.letterSpacing = '0px'; return w; };
+function logo(x, y, h) { // top-left at x, y; height h
+  const s = h / 62; ctx.save(); ctx.transform(s, 0, 0, s, x - 31 * s, y - 19 * s);
+  ctx.fillStyle = UIC.terra; ctx.fill(LOGO_FOLD); ctx.fillStyle = UIC.cream; ctx.fill(LOGO_BODY); ctx.restore();
+}
+function stroke(color, w, fn) { ctx.strokeStyle = color; ctx.lineWidth = w; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.beginPath(); fn(); ctx.stroke(); }
+const iconPlus = (x, y, s, c) => stroke(c, 1.8, () => { ctx.moveTo(x - s, y); ctx.lineTo(x + s, y); ctx.moveTo(x, y - s); ctx.lineTo(x, y + s); });
+const iconChat = (x, y, c) => stroke(c, 1.5, () => { ctx.roundRect(x - 7, y - 6, 14, 11, 3); ctx.moveTo(x - 3, y + 5); ctx.lineTo(x - 5, y + 8); });
+const iconRoom = (x, y, c) => stroke(c, 1.5, () => { ctx.moveTo(x - 7, y - 2); ctx.lineTo(x, y - 7); ctx.lineTo(x + 7, y - 2); ctx.moveTo(x - 6, y + 7); ctx.lineTo(x + 6, y + 7); for (const dx of [-4, 0, 4]) { ctx.moveTo(x + dx, y - 1); ctx.lineTo(x + dx, y + 5); } });
+const iconCaret = (x, y, c) => stroke(c, 1.5, () => { ctx.moveTo(x - 3.5, y - 2); ctx.lineTo(x, y + 1.5); ctx.lineTo(x + 3.5, y - 2); });
+function sendBtn(x, y, on, press = 0) {
+  const r = 18 * (1 - 0.12 * press);
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = on ? UIC.text : UIC.hover; ctx.fill();
+  stroke(on ? UIC.bg : UIC.text3, 2, () => { ctx.moveTo(x, y + 7); ctx.lineTo(x, y - 7); ctx.moveTo(x - 6, y - 1); ctx.lineTo(x, y - 7); ctx.lineTo(x + 6, y - 1); });
+}
+const pulse = (t, at, d = 0.12) => (t >= at && t < at + d) ? 1 - (t - at) / d : 0; // a click press, from t alone
+
+// The website, as on nibie's landing page
+function siteHero(t) {
+  rect(0, 0, 1600, 900, UIC.bg);
+  logo(160, 26, 26); txt('Nibie', 204, 49, FONT.h(25), UIC.text, 'left', -0.8);
+  let x = 610; for (const l of ['Product', 'Personalization', 'Docs', 'Privacy']) { txt(l, x, 47, FONT.r(16), UIC.text2); x += tw(l, FONT.r(16)) + 30; }
+  rr(1296, 20, 1440, 62, 10, UIC.text); txt('Open Nibie', 1368, 47, FONT.m(16), UIC.bg, 'center');
+  rect(0, 80, 1600, 1, UIC.line);
+  rect(208, 196, 18, 2, UIC.text2);
+  txt('PERSONAL AI WORKSPACE', 208, 232, FONT.m(13), UIC.text2, 'left', 2.6);
+  txt('A quieter place to', 202, 350, FONT.h(104), UIC.text, 'left', -4);
+  txt('think with AI.', 202, 456, FONT.h(104), UIC.text, 'left', -4);
+  txt('Nibie is a personal AI workspace that helps you think, research, and', 208, 530, FONT.r(22), UIC.text2);
+  txt('continue your work—with less repetition.', 208, 562, FONT.r(22), UIC.text2);
+  const p = pulse(t, EV.tryClick);
+  rr(208 + 3 * p, 604 + 2 * p, 332 - 3 * p, 650 - 2 * p, 10, p ? '#cfcfcf' : UIC.text); txt('Try Nibie', 270, 633, FONT.m(16), UIC.bg, 'center');
+  rr(346, 604, 524, 650, 10, null, UIC.strong); txt('See how it works', 435, 633, FONT.m(16), UIC.text, 'center');
+}
+
+// The app: sidebar plus either the Room page or a thread
+function sidebar(t, inThread, threadName) {
+  rect(0, 0, 300, 900, UIC.bg); rect(299, 0, 1, 900, UIC.line);
+  logo(24, 26, 24); txt('Nibie', 64, 47, FONT.h(23), UIC.text, 'left', -0.7);
+  rr(16, 82, 284, 126, 10, UIC.raised, UIC.border); iconPlus(40, 104, 6, UIC.text); txt('New chat', 58, 110, FONT.m(15), UIC.text);
+  txt('ROOMS', 26, 166, FONT.m(12), UIC.text3, 'left', 1.4);
+  rr(16, 180, 284, 218, 8, inThread ? null : UIC.muted); iconCaret(32, 199, UIC.text3); iconRoom(54, 199, UIC.text2);
+  txt('Launch plan', 72, 205, FONT.m(15), UIC.text);
+  const kids = ['Release checklist', 'Press notes'];
+  let y = 224;
+  if (threadName) {
+    rr(30, y, 284, y + 36, 8, UIC.muted); iconChat(52, y + 18, UIC.text); txt(threadName, 70, y + 23, FONT.m(14.5), UIC.text); y += 40;
+  }
+  for (const k of kids) { iconChat(52, y + 18, UIC.text3); txt(k, 70, y + 23, FONT.r(14.5), UIC.text2); y += 40; }
+  txt('Today', 26, y + 40, FONT.m(13), UIC.text3);
+  iconChat(36, y + 70, UIC.text3); txt('Debouncing a search box', 54, y + 75, FONT.r(14.5), UIC.text2);
+  rect(16, 830, 268, 1, UIC.line);
+  ctx.beginPath(); ctx.arc(40, 864, 15, 0, Math.PI * 2); ctx.fillStyle = '#2a2a2a'; ctx.fill(); txt('Y', 40, 869, FONT.m(12), UIC.text2, 'center');
+  txt('You', 66, 869, FONT.m(14.5), UIC.text);
+}
+function header(left, right, extra) {
+  rect(300, 72, 1300, 1, UIC.line);
+  iconRoom(330, 36, UIC.text2); txt(left, 348, 42, FONT.m(15), UIC.text);
+  const w = tw(left, FONT.m(15)); txt('/', 358 + w, 42, FONT.r(15), '#555'); txt(right, 374 + w, 42, FONT.r(15), UIC.text3);
+  if (extra) extra();
+}
+function roomPage(t) {
+  const p = pulse(t, EV.threadClick);
+  header('Launch plan', 'Room', () => { rr(1340 + 2 * p, 18 + 2 * p, 1500 - 2 * p, 54 - 2 * p, 9, p ? UIC.hover : UIC.raised, UIC.border); iconPlus(1366, 36, 5.5, UIC.text); txt('New thread', 1382, 41, FONT.m(14.5), UIC.text); });
+  txt('Launch plan', 420, 154, FONT.h(40), UIC.text, 'left', -1.4);
+  txt('Room · 2 threads · 3 pins', 422, 186, FONT.r(15), UIC.text3);
+  // brief
+  const b = K(t, [[9.1, 0], [EV.brief, 1]]);
+  txt('Brief', 420, 246, FONT.h(22), UIC.text, 'left', -0.6);
+  if (b > 0) {
+    ctx.save(); ctx.beginPath(); ctx.rect(410, 250, 20 + 1060 * b, 100); ctx.clip();
+    rr(420, 262, 1480, 330, 12, UIC.raised, UIC.line);
+    txt('Ship the v1 launch note and the release checklist by Nov 4.', 444, 303, FONT.r(17), UIC.text2);
+    ctx.restore();
+  }
+  // pins: the three squares from the plan, back as the Room's pins
+  txt('Pins', 420, 384, FONT.h(22), UIC.text, 'left', -0.6);
+  PINS.forEach((s, j) => {
+    const a = K(t, [[9.55, 0], [EV.pins, 1, 0.42 - 0.07 * j]]);
+    if (a <= 0) return;
+    const x0 = 420 + j * 360, dy = (1 - a) * -40;
+    rr(x0, 398 + dy, x0 + 340, 478 + dy, 12, UIC.raised, UIC.line);
+    const sq = 16 * K(t, [[9.75, 0], [EV.pins + 0.05 * j, 1, 0.3, 'in']]);
+    if (sq > 0.2) rect(x0 + 22 + (16 - sq) / 2, 416 + dy + (16 - sq) / 2, sq, sq, UIC.pick);
+    txt(s, x0 + 22, 462 + dy, FONT.m(16), UIC.text);
+  });
+  // threads
+  txt('Threads', 420, 532, FONT.h(22), UIC.text, 'left', -0.6);
+  [['Release checklist', 'Yesterday'], ['Press notes', 'Mon']].forEach(([s, d], i) => {
+    const y = 560 + i * 52;
+    rect(420, y, 1060, 1, UIC.line); iconChat(436, y + 27, UIC.text3); txt(s, 456, y + 32, FONT.m(16), UIC.text); txt(d, 1480, y + 32, FONT.r(14), UIC.text3, 'right');
+  });
+}
+function composer(t, x0, y0, x1, centered, draft, caret, mode) {
+  const y1 = y0 + 100;
+  rr(x0, y0, x1, y1, 16, UIC.raised, UIC.border);
+  if (draft) txt(draft, x0 + 24, y0 + 38, FONT.r(17), UIC.text);
+  else txt(centered ? 'Ask Nibie anything...' : 'Reply to Nibie...', x0 + 24, y0 + 38, FONT.r(17), UIC.text3);
+  if (caret) rect(x0 + 25 + (draft ? tw(draft, FONT.r(17)) : 0), y0 + 20, 2, 24, UIC.text);
+  iconPlus(x0 + 30, y0 + 74, 6, UIC.text3);
+  let x = x0 + 54;
+  for (const l of ['General', mode, 'Off']) { txt(l, x, y0 + 80, FONT.r(14.5), UIC.text3); const w = tw(l, FONT.r(14.5)); iconCaret(x + w + 9, y0 + 75, UIC.text3); x += w + 34; }
+  sendBtn(x1 - 32, y0 + 72, !!draft, pulse(t, EV.send - 0.12));
+  return y1;
+}
+function modeMenu(t, x0, yBottom, open, highOn) {
+  const items = [['Fast', 'Quick answers · 1 credit'], ['Balanced', 'Best for everyday work · 3 credits'], ['High', 'Deeper reasoning · 6 credits']];
+  const h = 3 * 58 + 16, y0 = yBottom - h;
+  ctx.save(); ctx.beginPath(); ctx.rect(x0 - 10, yBottom - h * open, 400, h * open + 2); ctx.clip();
+  rr(x0, y0, x0 + 360, yBottom, 12, UIC.raised, UIC.border);
+  items.forEach(([n, d], i) => {
+    const ry = y0 + 8 + i * 58, sel = highOn > 0 ? i === 2 : i === 1;
+    if (i === 2 && highOn > 0) { ctx.save(); ctx.beginPath(); ctx.rect(x0 + 6, ry, 348 * highOn, 58); ctx.clip(); rr(x0 + 6, ry, x0 + 354, ry + 56, 9, UIC.pick); ctx.restore(); }
+    const on = i === 2 && highOn >= 1;
+    txt(n, x0 + 20, ry + 26, FONT.m(16), on ? C.white : UIC.text);
+    txt(d, x0 + 20, ry + 46, FONT.r(13), on ? C.white : UIC.text3);
+    if (sel) stroke(on ? C.white : UIC.text2, 2, () => { ctx.moveTo(x0 + 324, ry + 29); ctx.lineTo(x0 + 330, ry + 35); ctx.lineTo(x0 + 341, ry + 22); });
+  });
+  ctx.restore();
+}
+function threadPage(t) {
+  const sent = K(t, [[11.9, 0], [EV.send, 1, 0.1, 'out']]); // lands on the beat, so the beat frame is settled
+  header('Launch plan', sent > 0 ? 'Launch note' : 'New thread');
+  const chars = Math.floor(K(t, [[EV.typeA, 0], [EV.typeB, DRAFT.length, EV.typeB - EV.typeA, 'lin']]));
+  const draft = sent > 0 ? '' : DRAFT.slice(0, chars);
+  const caret = t < EV.send - 0.1 && Math.floor(t * 4) % 2 === 0;
+  const highOn = K(t, [[EV.highOn - 0.12, 0], [EV.highOn, 1, 0.12, 'in']]);
+  const mode = highOn >= 1 ? 'High' : 'Balanced';
+  // empty state, then the docked composer after send
+  if (sent < 1) {
+    const sq = 1 - sent;
+    ctx.save(); ctx.translate(0, 350); ctx.scale(1, sq); ctx.translate(0, -350);
+    txt('Hey there.', 950, 352, FONT.h(46), UIC.text, 'center', -1.6); ctx.restore();
+  }
+  const cy = lerp(392, 772, sent);
+  composer(t, 570, cy, 1330, sent < 0.5, draft, caret, mode);
+  if (sent <= 0) return;
+  // the user's message lands
+  const bw = tw(DRAFT, FONT.r(17)) + 34, by = lerp(cy, 100, sent);
+  rr(1290 - bw, by, 1290, by + 48, 14, UIC.muted, UIC.border); txt(DRAFT, 1290 - bw + 17, by + 30, FONT.r(17), UIC.text);
+  ctx.beginPath(); ctx.arc(1318, by + 20, 14, 0, Math.PI * 2); ctx.fillStyle = '#2a2a2a'; ctx.fill(); txt('Y', 1318, by + 25, FONT.m(11), UIC.text2, 'center');
+  // context used: the Room's brief, its three pins, and Memory
+  const cx = K(t, [[EV.send + 0.05, 0], [EV.ctx, 1, 0.3, 'out']]);
+  if (cx > 0) {
+    ctx.save(); ctx.beginPath(); ctx.rect(560, 160, 30 + 420 * cx, 50); ctx.clip();
+    rr(570, 170, 960, 204, 17, null, UIC.border);
+    for (let j = 0; j < 3; j++) rect(588 + j * 13, 183, 8, 8, UIC.pick);
+    txt('Using Room brief · 3 pins · Memory', 634, 193, FONT.r(14), UIC.text2);
+    ctx.restore();
+  }
+  // Nibie's reply streams in and recalls the pins
+  if (t > EV.replyA - 0.15) {
+    rr(570, 232, 606, 268, 10, UIC.muted); logo(576, 242, 16);
+    txt('Nibie', 622, 256, FONT.m(16), UIC.text);
+    const n = Math.floor(K(t, [[EV.replyA, 0], [EV.replyB, REPLY_WORDS.length, EV.replyB - EV.replyA, 'lin']]));
+    const xs = [0, 0, 0, 0];
+    REPLY_WORDS.slice(0, n).forEach(({ w, hl, li }) => {
+      const x = 622 + xs[li], y = 296 + li * 32, ww = tw(w, FONT.r(18));
+      txt(w, x, y, FONT.r(18), hl ? C.white : UIC.text);
+      if (hl) rect(x, y + 6, ww - (w.endsWith(' ') ? tw(' ', FONT.r(18)) : 0), 2.5, UIC.pick);
+      xs[li] += ww;
+    });
+    if (n > 0 && n < REPLY_WORDS.length) { const last = REPLY_WORDS[n - 1]; rect(622 + xs[last.li] + 2, 280 + last.li * 32, 9, 20, UIC.text2); }
+    // actions under the reply, then Remember -> Saved to Memory
+    if (t > EV.replyB) {
+      const ay = 436, p = pulse(t, EV.rememberClick), done = t >= EV.saved - 0.2;
+      stroke(UIC.text3, 1.5, () => { ctx.roundRect(624, ay - 9, 12, 14, 2); ctx.roundRect(628, ay - 13, 12, 14, 2); });
+      stroke(UIC.text3, 1.5, () => { ctx.arc(668, ay - 2, 7, 0.3, Math.PI * 1.8); });
+      rr(694 + 2 * p, ay - 18 + p, 820 - 2 * p, ay + 12 - p, 15, done ? UIC.muted : null, UIC.border);
+      rect(708, ay - 7, 8, 8, done ? UIC.pick : UIC.text3);
+      txt('Remember', 724, ay + 2, FONT.m(14), UIC.text2);
+    }
+  }
+  // mode menu over the composer
+  const open = K(t, [[EV.menuOpen - 0.3, 0], [EV.menuOpen, 1, 0.3], [EV.menuShut - 0.2, 1], [EV.menuShut, 0, 0.2, 'in']]);
+  if (open > 0) modeMenu(t, 640, 760, open, highOn);
+  // the memory toast
+  const toast = K(t, [[EV.saved - 0.25, 0], [EV.saved, 1, 0.25, 'out']]);
+  if (toast > 0) {
+    const w = 430, x0 = 950 - w / 2, y0 = 700 + (1 - toast) * 40;
+    ctx.save(); ctx.beginPath(); ctx.rect(0, 0, 1600, 754); ctx.clip();
+    rr(x0, y0, x0 + w, y0 + 46, 23, UIC.muted, UIC.border);
+    rect(x0 + 20, y0 + 19, 9, 9, UIC.pick);
+    txt('Saved to Memory: Launch day is Nov 4', x0 + 40, y0 + 29, FONT.m(15), UIC.text);
+    ctx.restore();
+  }
+}
+function workspace(t) {
+  rect(0, 0, 1600, 900, UIC.bg);
+  const sw = K(t, [[10.75, 0], [EV.threadIn, 1, 0.25]]); // room page slides up, thread rises in
+  sidebar(t, sw >= 1, t >= EV.send - 0.1 ? 'Launch note' : sw >= 1 ? 'New thread' : null);
+  ctx.save(); ctx.beginPath(); ctx.rect(300, 0, 1300, 900); ctx.clip();
+  if (sw < 1) { ctx.save(); ctx.translate(0, -900 * sw); roomPage(t); ctx.restore(); }
+  if (sw > 0) { ctx.save(); ctx.translate(0, 900 * (1 - sw)); rect(300, 0, 1300, 900, UIC.bg); threadPage(t); ctx.restore(); }
+  ctx.restore();
+}
+function cursor(x, y, press) {
+  const s = 1.25 * (1 - 0.15 * press);
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, 22); ctx.lineTo(5.5, 17); ctx.lineTo(9.5, 26); ctx.lineTo(13, 24.5); ctx.lineTo(9, 15.5); ctx.lineTo(16, 15.5); ctx.closePath();
+  ctx.fillStyle = C.white; ctx.fill(); ctx.strokeStyle = C.black; ctx.lineWidth = 1.4; ctx.lineJoin = 'round'; ctx.stroke(); ctx.restore();
+}
+// the view inside the display: zoom to the mode menu and back
+function view(t) {
+  const z = K(t, [[EV.menuOpen - 0.4, 0], [EV.menuOpen, 1], [EV.menuShut, 1], [EV.menuShut + 0.4, 0]]);
+  const Z = lerp(1, 2.1, z), F = [820, 690], T = [lerp(820, 800, z), lerp(690, 470, z)];
+  return { Z, apply: () => { ctx.translate(T[0], T[1]); ctx.scale(Z, Z); ctx.translate(-F[0], -F[1]); }, map: (x, y) => [T[0] + (x - F[0]) * Z, T[1] + (y - F[1]) * Z] };
+}
+function display(t) { // everything on the 1600 x 900 display at time t
+  const pS = K(t, [[8.62, 0], [EV.scrollEnd, 1, 0.38]]);
+  if (pS < 1) { ctx.save(); ctx.translate(0, -700 * pS); siteHero(t); ctx.restore(); }
+  if (pS > 0 || t >= EV.scrollEnd) {
+    const f = lerp(0.75, 1, pS), fx = lerp(200, 0, pS), fy = lerp(720 - 700 * pS, 0, pS);
+    ctx.save(); ctx.translate(fx, fy); ctx.scale(f, f);
+    if (pS < 1) { ctx.beginPath(); ctx.roundRect(0, 0, 1600, 900, 18 * (1 - pS)); ctx.clip(); }
+    const v = view(t); ctx.save(); v.apply(); workspace(t); ctx.restore();
+    if (pS < 1) rr(0, 0, 1600, 900, 18 * (1 - pS), null, UIC.border);
+    ctx.restore();
+  }
+  // the cursor, in display space
+  const P = [[8.3, 1150, 760], [EV.tryClick, 268, 628, 0.4], [9.3, 900, 560, 0.5], [10.2, 1150, 300, 0.5], [EV.threadClick - 0.03, 1420, 38, 0.33],
+    [11.2, 1200, 640, 0.5], [14.2, 1250, 560, 0.9], [EV.highClick - 0.02, 0, 0, 0.4], [15.45, 1000, 600, 0.43], [EV.rememberClick - 0.03, 760, 436, 0.3], [16.7, 1180, 760, 0.6], [17.5, 1250, 860, 0.8]];
+  const v = view(t), hi = v.map(830, 688); // the High row, wherever the zoom puts it
+  P[7][1] = hi[0]; P[7][2] = hi[1];
+  const cx = K(t, P.map(k => [k[0], k[1], k[3]])), cy = K(t, P.map(k => [k[0], k[2], k[3]]));
+  const press = Math.max(pulse(t, EV.tryClick), pulse(t, EV.threadClick), pulse(t, EV.highClick), pulse(t, EV.rememberClick));
+  if (t >= 8.3) cursor(cx, cy, press);
+}
+
+// ---------- the panel becomes a screen showing the website (7.5 to 8.5)
 function scenePanel(t, q0) {
   const pA = K(t, [[7.55, 0], [8.0, 1]]), pB = K(t, [[8.05, 0], [8.5, 1]]);
   const c0 = q0.reduce((a, p) => [a[0] + p[0] / 4, a[1] + p[1] / 4], [0, 0]);
   const c1 = [lerp(c0[0], 0, 0.75), lerp(c0[1], 0, 0.75)];
   const q1 = [[-380, -235], [380, -235], [455, 235], [-455, 235]].map(p => [c1[0] + p[0], c1[1] + p[1]]);
-  const q2 = [[-HW, -HH], [HW, -HH], [HW, HH], [-HW, HH]];
+  const q2 = [[-FW, -FH], [FW, -FH], [FW, FH], [-FW, FH]];
   const q = q0.map((p, i) => [lerp(lerp(p[0], q1[i][0], pA), q2[i][0], pB), lerp(lerp(p[1], q1[i][1], pA), q2[i][1], pB)]);
   quad(q, C.black);
   const eps = K(t, [[7.6, 0.5], [8.0, 0.065], [8.5, 0]]);
   if (eps < 0.4999) {
     const inner = subQuad(q, eps, 1 - eps, eps, 1 - eps);
-    if (pB > 0) {
-      quad(inner, C.white);
-      const r = lerp(1, (UI.side + HW) / (2 * HW), pB);
-      quad(subQuad(inner, 0, r, 0, 1), C.indigo);
-    } else quad(inner, C.indigo);
+    quad(inner, UIC.bg);
+    if (pA > 0.5) { // the website on the glass, mapped onto the panel's face
+      const [a, b, , d] = inner;
+      ctx.save(); ctx.beginPath(); ctx.moveTo(...inner[0]); inner.slice(1).forEach(p => ctx.lineTo(...p)); ctx.closePath(); ctx.clip();
+      ctx.transform((b[0] - a[0]) / 1600, (b[1] - a[1]) / 1600, (d[0] - a[0]) / 900, (d[1] - a[1]) / 900, a[0], a[1]);
+      display(t); ctx.restore();
+    }
   }
 }
 
-// ---------- scene C: flat UI (8.5 to 11.5)
-function rrect(x0, y0, x1, y1, r, color) {
-  if (x1 - x0 < 0.1 || y1 - y0 < 0.1) return;
-  fill(color); ctx.beginPath(); ctx.roundRect(x0, y0, x1 - x0, y1 - y0, Math.min(r, (x1 - x0) / 2, (y1 - y0) / 2)); ctx.fill();
-}
-function sceneUI(t) {
-  const pc = K(t, [[11.1, 0], [11.5, 1, 0.4]]);
-  const sq = 1 - pc; // everything but the grid squashes flat
-  const squash = (y0, y1) => { const m = (y0 + y1) / 2, h = (y1 - y0) * sq; return [m - h / 2, m + h / 2]; };
-
-  // sidebar
-  rect(-HW, -HH, lerp(UI.side, -HW, pc) + HW, HH * 2, C.indigo);
-
-  // grid: six columns that become the six letter stems
-  for (let j = 0; j < 6; j++) {
-    const g = K(t, [[8.55, 0], [9.0, 1, 0.42 - 0.04 * j]]);
-    const x = lerp(lerp(UI.x0, UI.x1, j / 5), (STEMS[j][0] + STEMS[j][1]) / 2, pc);
-    const y0 = lerp(-HH, -BIG_CAP / 2, pc), y1 = lerp(lerp(-HH, HH, g), BIG_CAP / 2, pc);
-    rect(x - 1.5, y0, 3, y1 - y0, C.stone);
-    const sw = (STEMS[j][1] - STEMS[j][0]) * pc;
-    if (sw > 0.05) rect(x - sw / 2, y0, sw, y1 - y0, C.black);
+// ---------- scene C: the display fills the frame (8.5 to 17.5), then squashes into the letter stems
+function sceneApp(t) {
+  const pc = K(t, [[APP_END - 0.4, 0], [APP_END, 1, 0.4]]);
+  const sq = 1 - pc;
+  if (sq > 0.0005) {
+    ctx.save(); ctx.scale(1, sq);
+    ctx.save(); ctx.beginPath(); ctx.rect(-FW, -FH, FW * 2, FH * 2); ctx.clip();
+    ctx.transform(VK, 0, 0, VK, -FW, -FH); display(t);
+    ctx.restore(); ctx.restore();
   }
-  for (const y of [UI.head, UI.comp]) {
-    const g = K(t, [[8.6, 0], [9.0, 1]]), mid = (UI.x0 + UI.x1) / 2, half = (UI.x1 - UI.x0) / 2 * g * sq;
-    if (half > 0.1) rect(mid - half, y - 1.5, half * 2, 3, C.stone);
-  }
-
-  // message row one
-  const w1 = K(t, [[8.6, 0], [9.0, 1]]);
-  if (w1 > 0) {
-    const [a0, a1] = squash(-272, -228); rrect(UI.x0 + 20, a0, UI.x0 + 20 + 44 * w1, a1, 6, C.indigo);
-    let [b0, b1] = squash(-274, -250); rrect(UI.x0 + 90, b0, UI.x0 + 90 + 760 * w1, b1, 12, C.black);
-    [b0, b1] = squash(-234, -210); rrect(UI.x0 + 90, b0, UI.x0 + 90 + 520 * w1, b1, 12, C.black);
-  }
-  // message row two, right aligned
-  const w2 = K(t, [[9.1, 0], [9.5, 1]]);
-  const bx1 = UI.x1 - 20, bx0 = bx1 - 600;
-  if (w2 > 0) {
-    const [y0, y1] = squash(-170, -80);
-    rrect(lerp(bx1, bx0, w2), y0, bx1, y1, 22, C.stone);
-    const [c0, c1] = squash(-137, -113);
-    rrect(lerp(bx1, bx0 + 36, w2), c0, lerp(bx1, bx0 + 436, w2), c1, 12, C.black);
-  }
-  // pin chip on row two
-  const pin = K(t, [[9.65, 0], [10.0, 1, 0.35, 'spring']]);
-  if (pin > 0) {
-    const cx = bx0 - 24 - 60, cy = -125, w = 120 * pin, h = 54 * pin * sq;
-    rrect(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2, 27, C.indigo);
-    rrect(cx - 34 * pin, cy - 9 * pin * sq, cx - 16 * pin, cy + 9 * pin * sq, 2, C.white);
-    rrect(cx - 6 * pin, cy - 5 * pin * sq, cx + 34 * pin, cy + 5 * pin * sq, 5, C.white);
-  }
-  // segmented control FAST / BALANCED / HIGH
-  const cw = K(t, [[10.1, 0], [10.5, 1]]);
-  if (cw > 0 && sq > 0.001) {
-    const mid = (SEG.x0 + SEG.x1) / 2, half = (SEG.x1 - SEG.x0) / 2 * cw;
-    const [y0, y1] = squash(SEG.y - SEG.h / 2, SEG.y + SEG.h / 2);
-    ctx.save(); ctx.beginPath(); ctx.rect(mid - half - 4, y0 - 4, half * 2 + 8, y1 - y0 + 8); ctx.clip();
-    rrect(SEG.x0, y0, SEG.x1, y1, 18, C.black);
-    rrect(SEG.x0 + 4, y0 + 4, SEG.x1 - 4, y1 - 4, 14, C.white);
-    const of = K(t, [[10.65, 0], [11.0, 1]]);
-    const cell = SEG.cells[1];
-    const ox1 = lerp(cell[0] + 2, cell[1] - 2, of);
-    if (of > 0) rect(cell[0] + 2, y0 + 4, ox1 - cell[0] - 2, y1 - y0 - 8, C.orange);
-    for (const x of [SEG.cells[0][1], SEG.cells[1][1]]) rect(x - 2, y0, 4, y1 - y0, C.black);
-    SEG.cells.forEach((c, i) => {
-      const lay = L_SEG[i], cx = (c[0] + c[1]) / 2;
-      if (i !== 1 || of === 0) return word(lay, cx, SEG.y, 1, sq);
-      ctx.save(); ctx.beginPath(); ctx.rect(ox1, -4000, 8000, 8000); ctx.clip(); word(lay, cx, SEG.y, 1, sq); ctx.restore();
-      ctx.save(); ctx.beginPath(); ctx.rect(-4000, -4000, ox1 + 4000, 8000); ctx.clip(); word(lay, cx, SEG.y, 1, sq, C.white); ctx.restore();
-    });
-    ctx.restore();
-  }
+  if (pc > 0) for (const [x0, x1] of STEMS) { const h = BIG_CAP * pc; rect(x0, -h / 2, x1 - x0, h, C.black); }
 }
 
 // ---------- scene D: full-bleed word, rooms, rule, back to the hairline (11.5 to 15)
@@ -475,15 +690,15 @@ function frame(c, t) {
   ctx = c;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   rect(0, 0, W, H, C.white);
-  const s = cam(t);
+  const s = camR(t);
   ctx.setTransform(s, 0, 0, s, W / 2, H / 2);
-  if (t < 3.05 || (t < 5.5)) sceneA(t);
+  if (t < 5.5) sceneA(t);
   if (t >= 2.6 && t < 8.5) {
     const q0 = sceneB(t);
     if (q0) scenePanel(t, q0);
   }
-  if (t >= 8.5 && t < 11.5) sceneUI(t);
-  if (t >= 11.5) sceneD(t);
+  if (t >= 8.5 && t < APP_END) sceneApp(t);
+  if (t >= APP_END) sceneD(t - EXT); // the outro keeps its 15 s timing, shifted by the extra 6 s
 }
 
 // ---------- motion blur: the shutter is integrated inside seek(t)
@@ -497,7 +712,7 @@ window.seek = function (t) {
   t = Math.min(Math.max(t, 0), DUR);
   for (let k = 0; k < SAMPLES; k++) {
     let ts = t - SHUTTER * k / (SAMPLES - 1);
-    if (ts < 0) ts += DUR; // the loop: just before 0 is just before 15
+    if (ts < 0) ts += DUR; // the loop: just before 0 is just before the end
     frame(bctx, ts);
     mctx.globalAlpha = 1 / (k + 1);
     mctx.drawImage(buf, 0, 0);
@@ -562,9 +777,47 @@ window.renderAudio = async function () {
       s.connect(lp).connect(sg).connect(p).connect(out); s.start(t0); s.stop(t1);
     });
   }
-  for (let b = 0; b < 30; b++) kick(b * 0.5, 0.85);
-  [[0, 0.75, 1], [3, 0.8, 1], [6, 0.8, 1], [9, 0.8, 1], [12, 1.25, 1.6], [14, 0.85, 1.1]].forEach(([t, a, l]) => hit(t, a, l));
-  riser(10, 12);
+  // UI sounds, placed from the same event times the picture uses
+  function tick(t, amp, f = 4200, pan = 0) { // a key or a click
+    const n = ac.createBufferSource(), bp = ac.createBiquadFilter(), g = ac.createGain(), p = ac.createStereoPanner();
+    n.buffer = noise(Math.round(t * 1000) + 3, 0.03); bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = 1.2; p.pan.value = pan;
+    env(g, t, amp, 0.028, 0.0008); n.connect(bp).connect(g).connect(p).connect(out); n.start(t);
+  }
+  function blip(t, f, amp, dur = 0.07, pan = 0) {
+    const o = ac.createOscillator(), g = ac.createGain(), p = ac.createStereoPanner();
+    o.frequency.value = f; p.pan.value = pan; env(g, t, amp, dur, 0.003);
+    o.connect(g).connect(p).connect(out); o.start(t); o.stop(t + dur + 0.02);
+  }
+  function whoosh(t0, t1, f0, f1, amp) {
+    const n = ac.createBufferSource(), bp = ac.createBiquadFilter(), g = ac.createGain();
+    n.buffer = noise(Math.round(t0 * 100) + 11, t1 - t0 + 0.05); bp.type = 'bandpass'; bp.Q.value = 1.4;
+    bp.frequency.setValueAtTime(f0, t0); bp.frequency.exponentialRampToValueAtTime(f1, t1);
+    g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(amp, t0 + (t1 - t0) * 0.7); g.gain.exponentialRampToValueAtTime(0.0001, t1);
+    n.connect(bp).connect(g).connect(out); n.start(t0); n.stop(t1 + 0.05);
+  }
+  const click = t => { tick(t, 0.5, 2600); blip(t, 1900, 0.06, 0.03); };
+  whoosh(8.6, 9.0, 500, 2400, 0.25);                       // website scrolls into the app
+  click(EV.tryClick);
+  for (let j = 0; j < 3; j++) blip(EV.pins - 0.04 * (2 - j), 1320 + 160 * j, 0.09, 0.09); // the three pins land
+  click(EV.threadClick);
+  whoosh(10.75, EV.threadIn, 1600, 500, 0.18);              // room page gives way to the thread
+  for (let i = 0; i < DRAFT.length; i += 1) {               // typing, one key per character
+    const t = lerp(EV.typeA, EV.typeB, i / DRAFT.length) + (mulberry(i + 40)() - 0.5) * 0.008;
+    tick(t, DRAFT[i] === ' ' ? 0.22 : 0.32, DRAFT[i] === ' ' ? 2200 : 3600 + mulberry(i)() * 1400, (mulberry(i + 9)() - 0.5) * 0.5);
+  }
+  tick(EV.send - 0.12, 0.5, 1800);                           // Enter
+  whoosh(EV.send - 0.12, EV.send + 0.04, 900, 5200, 0.35); // send
+  for (let j = 0; j < 3; j++) blip(EV.ctx - 0.1 + j * 0.05, 1760, 0.05, 0.05, -0.3 + 0.3 * j); // context recalled
+  REPLY_WORDS.forEach((w, i) => { const t = lerp(EV.replyA, EV.replyB, (i + 1) / REPLY_WORDS.length) - 0.01; blip(t, w.hl ? 1480 : 990, w.hl ? 0.06 : 0.025, 0.035, (i % 3 - 1) * 0.25); });
+  whoosh(EV.menuOpen - 0.35, EV.menuOpen, 400, 1800, 0.18); // zoom to the mode menu
+  click(EV.highClick); blip(EV.highOn, 660, 0.12, 0.18); blip(EV.highOn + 0.06, 990, 0.1, 0.22);
+  whoosh(EV.menuShut, EV.menuShut + 0.4, 1800, 400, 0.14);
+  click(EV.rememberClick); blip(EV.saved, 1175, 0.1, 0.16); blip(EV.saved + 0.08, 1568, 0.09, 0.22); // saved to Memory
+
+  for (let b = 0; b < DUR * 2; b++) kick(b * 0.5, 0.85);
+  // scene hits; 18 s is the old 12 s full-bleed NIBIE, the strongest
+  [[0, 0.75, 1], [3, 0.8, 1], [6, 0.8, 1], [9, 0.8, 1], [12, 0.7, 1], [15, 0.75, 1], [18, 1.25, 1.6], [20, 0.85, 1.1]].forEach(([t, a, l]) => hit(t, a, l));
+  riser(16, 18);
 
   const r = await ac.startRendering();
   const L = r.getChannelData(0), R = r.getChannelData(1);
@@ -583,8 +836,9 @@ window.renderAudio = async function () {
   return btoa(bin);
 };
 
-window.seek(0);
-window.ready = true;
+const FONTS = [['Bricolage Grotesque', 'BricolageGrotesque-600.ttf', '600'], ['Onest', 'Onest-400.ttf', '400'], ['Onest', 'Onest-500.ttf', '500']];
+Promise.all(FONTS.map(([f, u, w]) => new FontFace(f, `url(${u})`, { weight: w }).load().then(ff => document.fonts.add(ff))))
+  .then(() => { window.seek(0); window.ready = true; });
 </script>
 </body>
 </html>

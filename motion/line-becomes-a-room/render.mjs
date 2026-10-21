@@ -1,6 +1,6 @@
 // Renders index.html over http with headless Chromium.
-//   node render.mjs beats  [dir]   31 beat frames (t = 0, 0.5, ... 15)
-//   node render.mjs frames [dir]   900 frames at 60 fps (t = i / 60)
+//   node render.mjs beats  [dir]   a frame on every beat (t = 0, 0.5, ... DUR)
+//   node render.mjs frames [dir]   every frame at 60 fps (t = i / 60, DUR * 60 frames)
 //   node render.mjs audio          writes audio.wav
 //   node render.mjs at <t> <file>  one frame
 // Env: PW_NODE_MODULES (folder holding playwright-core), CHROMIUM (browser binary).
@@ -29,6 +29,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
   await page.goto(url);
   await page.waitForFunction(() => window.ready === true);
+  const dur = await page.evaluate(() => DUR);
   const shot = async (t, file) => {
     await page.evaluate(t => window.seek(t), t);
     await page.screenshot({ path: file, type: 'png', clip: { x: 0, y: 0, width: 1920, height: 1080 } });
@@ -37,14 +38,14 @@ try {
   if (mode === 'beats') {
     const dir = path.resolve(arg1 ?? path.join(here, 'beats'));
     fs.mkdirSync(dir, { recursive: true });
-    for (let b = 0; b <= 30; b++) {
+    for (let b = 0; b <= dur * 2; b++) {
       const t = b * 0.5;
       await shot(t, path.join(dir, `beat-${String(b).padStart(2, '0')}-${t.toFixed(2)}s.png`));
     }
   } else if (mode === 'frames') {
     const dir = path.resolve(arg1 ?? path.join(here, 'frames'));
     fs.mkdirSync(dir, { recursive: true });
-    for (let i = 0; i < 900; i++) {
+    for (let i = 0; i < dur * 60; i++) {
       await shot(i / 60, path.join(dir, `f${String(i).padStart(4, '0')}.png`));
       if (i % 60 === 0) console.log(`frame ${i}`);
     }
