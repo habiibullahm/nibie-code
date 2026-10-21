@@ -1,0 +1,590 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nibie, a line becomes a room</title>
+<style>
+  html, body { margin: 0; background: #F4F1EA; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// "A line becomes a room": a 15s, 120 BPM loop.
+// window.seek(t) draws every pixel from t alone: no timers, no CSS animation,
+// no state carried between frames. Letters are Syne 700 outlines taken from
+// Syne-700.ttf (see README), so they can be split into stems and counters.
+
+const W = 1920, H = 1080, DUR = 15;
+const C = { white: '#F4F1EA', black: '#141414', indigo: '#1B3A4B', orange: '#E24E1B', stone: '#D6D1C7' };
+const G = {"upm":1000,"cap":650,"g":{"A":{"adv":789,"d":"M178 -141V-252H606V-141ZM17 0 321 -647H465L772 0H627L361 -583H425L161 0Z","bb":[17,0,772,647]},"B":{"adv":780,"d":"M77 0V-647H450Q580 -647 647.5 -603.5Q715 -560 715 -474Q715 -419 688 -387.5Q661 -356 611.5 -341Q562 -326 495 -322L499 -329Q548 -328 591.5 -322Q635 -316 668 -300Q701 -284 720 -255.5Q739 -227 739 -181Q739 -121 707 -81.5Q675 -42 618 -22Q561 -2 486 0ZM210 -110H472Q535 -110 569 -130.5Q603 -151 603 -196Q603 -229 583 -244Q563 -259 530 -262.5Q497 -266 459 -266H210ZM210 -373H445Q508 -373 542 -391.5Q576 -410 576 -455Q576 -500 542 -518.5Q508 -537 452 -537H210Z","bb":[77,0,739,647]},"C":{"adv":885,"d":"M832 -233Q823 -155 777 -100Q731 -45 652 -16Q573 13 464 13Q373 13 297.5 -8Q222 -29 167.5 -71Q113 -113 83 -175.5Q53 -238 53 -322Q53 -406 83 -469Q113 -532 167.5 -574.5Q222 -617 297.5 -638.5Q373 -660 464 -660Q573 -660 652.5 -630Q732 -600 778 -544.5Q824 -489 832 -410H700Q687 -452 656.5 -482.5Q626 -513 578 -529Q530 -545 464 -545Q382 -545 320 -519.5Q258 -494 224 -444.5Q190 -395 190 -322Q190 -250 224 -201Q258 -152 320 -126.5Q382 -101 464 -101Q530 -101 577.5 -117Q625 -133 655.5 -163Q686 -193 700 -233Z","bb":[53,-13,832,660]},"D":{"adv":879,"d":"M447 -647Q556 -647 629 -621Q702 -595 745.5 -550.5Q789 -506 807.5 -448Q826 -390 826 -326Q826 -262 805.5 -203Q785 -144 740.5 -98.5Q696 -53 623.5 -26.5Q551 0 447 0H77V-647ZM210 -114H444Q516 -114 563.5 -131.5Q611 -149 639 -179Q667 -209 679 -247Q691 -285 691 -326Q691 -367 679 -404Q667 -441 639 -470Q611 -499 563.5 -516Q516 -533 444 -533H210Z","bb":[77,0,826,647]},"E":{"adv":769,"d":"M210 -270V-111H709V0H77V-647H708V-536H210V-375H618V-270Z","bb":[77,0,709,647]},"F":{"adv":741,"d":"M708 -647V-536H210V-362H618V-258H210V0H77V-647Z","bb":[77,0,708,647]},"G":{"adv":914,"d":"M449 13Q359 13 286.5 -8Q214 -29 161.5 -71Q109 -113 81 -175Q53 -237 53 -318Q53 -400 82.5 -463.5Q112 -527 166.5 -571Q221 -615 296.5 -637.5Q372 -660 464 -660Q573 -660 652 -629.5Q731 -599 776.5 -544Q822 -489 828 -413H700Q687 -453 657.5 -482.5Q628 -512 580 -528.5Q532 -545 464 -545Q377 -545 315.5 -517Q254 -489 222 -438Q190 -387 190 -318Q190 -251 218 -202.5Q246 -154 304.5 -128Q363 -102 454 -102Q524 -102 577.5 -120.5Q631 -139 667 -170.5Q703 -202 718 -241L770 -260Q757 -131 672.5 -59Q588 13 449 13ZM736 0Q736 -31 740 -71.5Q744 -112 750 -153.5Q756 -195 761 -230H465V-315H851V0Z","bb":[53,-13,851,660]},"H":{"adv":895,"d":"M194 -380H707V-269H194ZM685 -647H818V0H685ZM77 -647H210V0H77Z","bb":[77,0,818,647]},"I":{"adv":324,"d":"M96 -647H229V0H96Z","bb":[96,0,229,647]},"K":{"adv":814,"d":"M354 -315 353 -371 789 0H597L209 -340L554 -647H743ZM77 -647H210V0H77Z","bb":[77,0,789,647]},"L":{"adv":687,"d":"M210 -647V-111H640V0H77V-647Z","bb":[77,0,640,647]},"M":{"adv":1099,"d":"M580 -66H517L889 -647H1022V0H889V-470L921 -461L624 0H475L178 -459L210 -468V0H77V-647H210Z","bb":[77,0,1022,647]},"N":{"adv":901,"d":"M733 -132 691 -115V-647H824V0H691L168 -511L210 -528V0H77V-647H210Z","bb":[77,0,824,647]},"O":{"adv":924,"d":"M462 13Q333 13 241.5 -27.5Q150 -68 101.5 -143Q53 -218 53 -323Q53 -429 101.5 -504Q150 -579 241.5 -619.5Q333 -660 462 -660Q592 -660 683 -619.5Q774 -579 822.5 -504Q871 -429 871 -323Q871 -218 822.5 -143Q774 -68 683 -27.5Q592 13 462 13ZM462 -102Q542 -102 602.5 -126Q663 -150 697.5 -199Q732 -248 732 -323Q732 -398 697.5 -447Q663 -496 602.5 -520.5Q542 -545 462 -545Q383 -545 321 -520.5Q259 -496 224 -447Q189 -398 189 -323Q189 -248 224 -199Q259 -150 321 -126Q383 -102 462 -102Z","bb":[53,-13,871,660]},"P":{"adv":784,"d":"M192 -210V-316H488Q541 -316 572 -344.5Q603 -373 603 -424Q603 -477 572 -505Q541 -533 488 -533H208V0H75V-647H476Q530 -647 577.5 -634Q625 -621 660.5 -594Q696 -567 716 -525Q736 -483 736 -424Q736 -366 716 -325Q696 -284 660.5 -258.5Q625 -233 577.5 -221.5Q530 -210 476 -210Z","bb":[75,0,736,647]},"R":{"adv":826,"d":"M77 0V-647H516Q591 -647 646.5 -626.5Q702 -606 733 -562.5Q764 -519 764 -451Q764 -405 748 -373Q732 -341 703.5 -321Q675 -301 638 -290.5Q601 -280 559 -277L545 -285Q615 -284 660 -273.5Q705 -263 727.5 -235.5Q750 -208 750 -154V0H617V-145Q617 -182 604 -202.5Q591 -223 557.5 -231Q524 -239 461 -239H210V0ZM210 -343H516Q572 -343 601.5 -370Q631 -397 631 -443Q631 -487 601.5 -510Q572 -533 516 -533H210Z","bb":[77,0,764,647]},"S":{"adv":694,"d":"M34 -218H169Q173 -184 200.5 -156.5Q228 -129 273 -113.5Q318 -98 374 -98Q425 -98 458 -109Q491 -120 507 -140Q523 -160 523 -188Q523 -215 503 -229.5Q483 -244 440 -253.5Q397 -263 327 -273Q272 -281 223 -295.5Q174 -310 136.5 -333Q99 -356 77.5 -389.5Q56 -423 56 -469Q56 -526 88.5 -569Q121 -612 185 -636Q249 -660 342 -660Q482 -660 557.5 -600.5Q633 -541 631 -437H501Q497 -496 451.5 -522Q406 -548 337 -548Q273 -548 231.5 -529Q190 -510 190 -464Q190 -446 200 -432.5Q210 -419 234 -409Q258 -399 299 -390Q340 -381 401 -372Q458 -364 504.5 -350.5Q551 -337 584.5 -315.5Q618 -294 636 -261Q654 -228 654 -180Q654 -121 623.5 -77.5Q593 -34 529.5 -10Q466 14 365 14Q293 14 238 -1.5Q183 -17 143 -43Q103 -69 78 -100Q53 -131 42.5 -162Q32 -193 34 -218Z","bb":[34,-14,654,660]},"T":{"adv":722,"d":"M20 -647H702V-536H20ZM295 -550H428V0H295Z","bb":[20,0,702,647]},"X":{"adv":780,"d":"M576 -647H738L432 -290L428 -286L201 0H39L354 -375L357 -378ZM211 -647 427 -376 429 -373 741 0H572L348 -290L345 -292L49 -647Z","bb":[39,0,741,647]}},"hasKern":true};
+const CAP = 647, MID = CAP / 2;
+
+const PATH = {}, SUB = {};
+for (const ch in G.g) {
+  PATH[ch] = new Path2D(G.g[ch].d);
+  SUB[ch] = G.g[ch].d.split(/(?<=Z)/).filter(s => s.trim()).map(s => new Path2D(s));
+}
+
+// ---------- easing: exponential and critically damped spring, all closed form
+const clamp = (x, a = 0, b = 1) => x < a ? a : x > b ? b : x;
+const lerp = (a, b, p) => a + (b - a) * p;
+const P2 = k => Math.pow(2, k);
+function expoInOut(p, k = 10) {
+  p = clamp(p); if (p === 0 || p === 1) return p;
+  const m = P2(-k), f = q => (P2(k * (2 * q - 1)) - m) / (2 * (1 - m));
+  return p < 0.5 ? f(p) : 1 - f(1 - p);
+}
+const expoIn = (p, k = 6) => (P2(k * clamp(p)) - 1) / (P2(k) - 1);
+const expoOut = (p, k = 7) => (1 - P2(-k * clamp(p))) / (1 - P2(-k));
+function spring(p, w = 9) { // critically damped, normalised so it lands exactly at p = 1
+  const s = x => 1 - (1 + w * x) * Math.exp(-w * x);
+  return s(clamp(p)) / s(1);
+}
+const EASE = { io: p => expoInOut(p, 8), in: expoIn, out: expoOut, spring };
+
+// Keyframes: [[time, value, dur = 0.4, ease = 'io'], ...]. The move into a key
+// runs over [time - dur, time], so every key lands exactly on its time.
+function K(t, keys) {
+  let prev = keys[0];
+  if (t <= prev[0]) return prev[1];
+  for (let i = 1; i < keys.length; i++) {
+    const k = keys[i], d = Math.min(k[2] ?? 0.4, k[0] - prev[0]), t0 = k[0] - d;
+    if (t < t0) return prev[1];
+    if (t < k[0]) return lerp(prev[1], k[1], EASE[k[3] ?? 'io']((t - t0) / d));
+    prev = k;
+  }
+  return prev[1];
+}
+
+// Orthographic dolly on Z: a uniform scale about the frame centre.
+const S = 1.3;
+const cam = t => t <= 12 ? lerp(1, S, expoInOut(t / 12, 5)) : lerp(S, 1, expoInOut((t - 12) / 3, 5));
+
+// ---------- type
+function layout(word, cap, track = 0) {
+  const e = cap / CAP, L = [];
+  let x = 0;
+  for (let i = 0; i < word.length; i++) {
+    const g = G.g[word[i]];
+    if (i === 0) x = -g.bb[0] * e;
+    L.push({ ch: word[i], x });
+    x += (g.adv + track) * e;
+  }
+  const last = L[L.length - 1];
+  return { word, cap, e, L, w: last.x + G.g[last.ch].bb[2] * e };
+}
+const centers = lay => lay.L.map(l => -lay.w / 2 + l.x + (G.g[l.ch].bb[0] + G.g[l.ch].bb[2]) / 2 * lay.e);
+
+let ctx;
+function fill(color) { ctx.fillStyle = color; }
+function rect(x, y, w, h, color) { fill(color); ctx.fillRect(x, y, w, h); }
+function hairline(half, th, y) { rect(-half, y - th / 2, half * 2, th, C.black); }
+function quad(q, color) {
+  fill(color); ctx.beginPath(); ctx.moveTo(q[0][0], q[0][1]);
+  for (let i = 1; i < q.length; i++) ctx.lineTo(q[i][0], q[i][1]);
+  ctx.closePath(); ctx.fill();
+}
+// glyph with origin x, caps centred on yc, scaled about the caps' middle
+function glyph(ch, x, yc, e, sx, sy, color, path = PATH[ch]) {
+  ctx.save(); ctx.transform(e * sx, 0, 0, e * sy, x, yc + MID * e * sy);
+  fill(color); ctx.fill(path); ctx.restore();
+}
+function glyphC(ch, cx, yc, e, sx, sy, color) {
+  const g = G.g[ch];
+  glyph(ch, cx - (g.bb[0] + g.bb[2]) / 2 * e * sx, yc, e, sx, sy, color);
+}
+function word(lay, cx, yc, sx = 1, sy = 1, color = C.black) {
+  if (sy <= 0.0005 || sx <= 0.0005) return;
+  const left = cx - lay.w * sx / 2;
+  for (const l of lay.L) glyph(l.ch, left + l.x * sx, yc, lay.e, sx, sy, color);
+}
+
+// ---------- 3D: an orthographic projection of the room; only the object turns
+const PR = { th: 0, ph: 0, oy: 0 };
+const rad = d => d * Math.PI / 180;
+function proj(x, y, z) {
+  const c = Math.cos(PR.th), s = Math.sin(PR.th), cp = Math.cos(PR.ph), sp = Math.sin(PR.ph);
+  const xr = x * c - y * s, yr = x * s + y * c;
+  return [xr, yr * cp - z * sp + PR.oy, yr * sp + z * cp];
+}
+function facing(nx, ny, nz) {
+  const yr = nx * Math.sin(PR.th) + ny * Math.cos(PR.th);
+  return yr * Math.sin(PR.ph) + nz * Math.cos(PR.ph) > 1e-6;
+}
+function boxFaces(b) {
+  const { x0, x1, y0, y1, z0 = 0, z1 } = b, F = [];
+  F.push({ n: [0, 0, 1], c: b.top, p: [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]] });
+  F.push({ n: [0, 1, 0], c: b.front, p: [[x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0]], front: true });
+  F.push({ n: [0, -1, 0], c: b.front, p: [[x0, y0, z1], [x1, y0, z1], [x1, y0, z0], [x0, y0, z0]] });
+  F.push({ n: [-1, 0, 0], c: b.side, p: [[x0, y0, z1], [x0, y1, z1], [x0, y1, z0], [x0, y0, z0]] });
+  F.push({ n: [1, 0, 0], c: b.side, p: [[x1, y0, z1], [x1, y1, z1], [x1, y1, z0], [x1, y0, z0]] });
+  return F;
+}
+function drawBox(b) {
+  if (b.x1 - b.x0 < 0.01 || b.y1 - b.y0 < 0.01) return;
+  for (const f of boxFaces(b)) {
+    if (f.n[2] ? false : (b.z1 - (b.z0 || 0)) < 0.01) continue;
+    if (!facing(...f.n)) continue;
+    const q = f.p.map(p => proj(...p));
+    quad(q, f.c);
+    ctx.strokeStyle = f.c; ctx.lineWidth = 1; ctx.lineJoin = 'round'; ctx.stroke(); // hide seams
+  }
+  if (b.after) b.after(b);
+}
+function drawBoxes(list) {
+  list.forEach(b => { const c = proj((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, ((b.z0 || 0) + b.z1) / 2); b.depth = c[2]; });
+  list.sort((a, b) => a.depth - b.depth).forEach(drawBox);
+}
+const bilerp = (q, u, v) => {
+  const a = [lerp(q[0][0], q[1][0], u), lerp(q[0][1], q[1][1], u)];
+  const b = [lerp(q[3][0], q[2][0], u), lerp(q[3][1], q[2][1], u)];
+  return [lerp(a[0], b[0], v), lerp(a[1], b[1], v)];
+};
+const subQuad = (q, u0, u1, v0, v1) => [bilerp(q, u0, v0), bilerp(q, u1, v0), bilerp(q, u1, v1), bilerp(q, u0, v1)];
+
+// ---------- fixed layouts
+const L_N = layout('N', 300);
+const L_TIGHT = layout('NIBIE', 260, -10), C_TIGHT = centers(L_TIGHT);
+const L_WIDE = layout('NIBIE', 170, 260), C_WIDE = centers(L_WIDE);
+const W_CAP = 170;
+const L_CHAT = layout('CHAT', W_CAP), L_THINK = layout('THINKING', W_CAP);
+const L_ROOMS = layout('ROOMS', W_CAP), L_CONTEXT = layout('CONTEXT', W_CAP);
+const LABELS = ['FAST', 'BALANCED', 'HIGH'];
+const L_SLAB = LABELS.map(w => layout(w, 70));
+const L_SEG = LABELS.map(w => layout(w, 46));
+
+// plan: a 1300 x 560 room, three bays stacked front to back
+const RW = 650, RD = 280, TW = 44, TP = 28;
+const PART = [-(RD - TW - (2 * RD - 2 * TW - 2 * TP) / 3 - TP / 2), RD - TW - (2 * RD - 2 * TW - 2 * TP) / 3 - TP / 2];
+const BAYS = [[PART[1] + TP / 2, RD - TW], [PART[0] + TP / 2, PART[1] - TP / 2], [-RD + TW, PART[0] - TP / 2]]; // front, middle, back
+const SLAB_H = [120, 240, 360];
+const COR = { far: -470, near: 1700, half: 330, wall: 50, h: 260 };
+
+// full-bleed word: 1840 px wide when the dolly peaks at t = 12
+const BIG_TRACK = 30;
+const BIG_CAP = (1840 / S) * CAP / (3098 + 4 * BIG_TRACK - 77 - 60);
+const L_BIG = layout('NIBIE', BIG_CAP, BIG_TRACK);
+const STEMS = []; // [x0, x1] world, left to right: N, N, I, B, I, E
+L_BIG.L.forEach(l => {
+  const x = -L_BIG.w / 2 + l.x, e = L_BIG.e;
+  const st = { N: [[77, 210], [691, 824]], I: [[96, 229]], B: [[77, 210]], E: [[77, 210]] }[l.ch];
+  st.forEach(s => STEMS.push([x + s[0] * e, x + s[1] * e]));
+});
+
+// UI, laid out in world units so the dolly keeps pushing through it
+const VW = 960 / S;
+const HW = 960 / cam(8.5) + 40, HH = 540 / cam(8.5) + 40;
+const UI = { side: -VW + 120, x0: -560, x1: 700, head: -330, comp: 120 };
+const SEG = (() => {
+  const pad = 60, ws = L_SEG.map(l => l.w + pad * 2), tot = ws.reduce((a, b) => a + b, 0);
+  let x = (UI.x0 + UI.x1) / 2 - tot / 2;
+  return { y: 230, h: 110, x0: x, x1: x + tot, cells: ws.map(w => { const c = [x, x + w]; x += w; return c; }) };
+})();
+
+// ---------- the shared word moves of 2.0 to 3.0 (also feed the walls)
+function slotWord(t, kind) {
+  if (kind === 'ROOMS' || kind === 'CONTEXT') {
+    const sgn = kind === 'ROOMS' ? -1 : 1, lay = kind === 'ROOMS' ? L_ROOMS : L_CONTEXT;
+    const yc = K(t, [[2.0, -sgn * 130], [2.5, sgn * 125], [3.0, sgn * (RD - 4), 0.4, 'in']]);
+    const sy = K(t, [[2.5, 1], [3.0, 0, 0.4, 'in']]);
+    const w = K(t, [[2.5, lay.w], [3.0, RW * 2, 0.4, 'in']]);
+    return { lay, yc, sy, sx: w / lay.w, w };
+  }
+}
+
+// ---------- scene A: line, letter, words, rule (0 to 3)
+function sceneA(t) {
+  if (t < 0.5) hairline(K(t, [[0.08, 2400], [0.5, 0, 0.42, 'in']]), 2, 0);
+
+  if (t < 2.05) {
+    const cap = K(t, [[0.5, 300], [1.0, 260], [1.5, 170]]), e = cap / CAP;
+    const yc = K(t, [[1.0, 0], [1.5, -75], [2.0, -900, 0.4, 'in']]);
+    for (let i = 0; i < 5; i++) {
+      const cx = i === 0 ? K(t, [[0.5, 0], [1.0, C_TIGHT[0]], [1.5, C_WIDE[0]]]) : K(t, [[1.0, C_TIGHT[i]], [1.5, C_WIDE[i]]]);
+      const sy = i === 0 ? K(t, [[0.12, 0], [0.5, 1, 0.38]]) : K(t, [[0.55, 0], [1.0, 1, 0.42 - 0.05 * (i - 1)]]);
+      if (sy > 0.0005) glyphC('NIBIE'[i], cx, yc, e, 1, sy, C.black);
+    }
+  }
+
+  // orange rule, later the thread across the plan
+  const ry = K(t, [[1.5, 50], [2.0, 0]]);
+  const th = K(t, [[2.5, 12], [3.0, 8], [3.5, 6]]);
+  if (t > 1.1 && t < 5.5) {
+    const xl = K(t, [[1.1, 0], [1.5, -L_WIDE.w / 2], [2.0, -800], [2.5, -800], [3.0, -RW + 8, 0.4, 'in'], [4.05, -RW + 8], [4.5, -RW + TW]]);
+    const xr = K(t, [[1.1, 0], [1.5, L_WIDE.w / 2], [2.0, 800], [2.5, 800], [3.0, -RW + 26, 0.4, 'in'], [3.5, RW - 8], [4.05, RW - 8], [4.5, RW - TW], [5.0, RW - TW], [5.4, -RW + TW, 0.4, 'in']]);
+    if (xr - xl > 0.2) rect(xl, ry - th / 2, xr - xl, th, C.orange);
+  }
+  // pins
+  if (t > 3.55 && t < 5.4) for (let j = 0; j < 3; j++) {
+    const sc = K(t, [[3.6, 0], [4.0, 1, 0.4 - 0.07 * j, 'out'], [5.0, 1], [5.4, 0, 0.4 - 0.07 * (2 - j), 'in']]);
+    const s = 40 * sc;
+    if (s > 0.2) rect(-400 + 400 * j - s / 2, -s / 2, s, s, C.indigo);
+  }
+
+  // word slots above and below the rule
+  if (t > 1.1 && t < 3.0) {
+    const slot = (above, fn) => {
+      ctx.save(); ctx.beginPath();
+      if (above) ctx.rect(-4000, -4000, 8000, 4000 + ry - th / 2); else ctx.rect(-4000, ry + th / 2, 8000, 4000);
+      ctx.clip(); fn(); ctx.restore();
+    };
+    if (t < 2.5) {
+      slot(true, () => word(L_CHAT, 0, ry + K(t, [[1.5, 130], [2.0, -125], [2.5, -900, 0.4, 'in']])));
+      slot(false, () => word(L_THINK, 0, ry + K(t, [[1.5, -130], [2.0, 125], [2.5, 900, 0.4, 'in']])));
+    }
+    if (t > 1.5) for (const k of ['ROOMS', 'CONTEXT']) {
+      const s = slotWord(t, k);
+      slot(k === 'ROOMS', () => word(s.lay, 0, s.yc, s.sx, s.sy));
+    }
+  }
+}
+
+// ---------- scene B: plan, axonometric turn, slabs, corridor, panel (2.6 to 8.5)
+let panelQ0 = null;
+function sceneB(t) {
+  PR.th = rad(K(t, [[5.55, 0], [6.0, -15, 0.45, 'in']]));
+  PR.ph = rad(K(t, [[5.55, 0], [6.0, 50, 0.45, 'in']]));
+  PR.oy = K(t, [[5.55, 0], [6.0, 40, 0.45, 'in'], [6.5, 150], [7.0, 150], [7.5, 250]]);
+
+  const T = K(t, [[4.05, 8], [4.5, TW], [6.55, TW], [7.0, 0]]);
+  const hw = K(t, [[5.55, 0], [6.0, 90, 0.45, 'in'], [6.5, 0]]);
+  const B = [];
+  const wall = (x0, x1, y0, y1) => B.push({ x0, x1, y0, y1, z1: hw, top: C.black, front: C.indigo, side: C.stone });
+
+  if (t < 7.0 && T > 0.5) {
+    if (t < 3.0) {
+      for (const k of ['ROOMS', 'CONTEXT']) {
+        const s = slotWord(t, k), th = 8 * (1 - s.sy);
+        if (th > 0.05) wall(-s.w / 2, s.w / 2, s.yc - th / 2, s.yc + th / 2);
+      }
+    } else {
+      wall(-RW, RW, -RD, -RD + T);
+      wall(-RW, RW, RD - T, RD);
+    }
+    const g = K(t, [[2.65, 0], [3.0, 1, 0.35, 'in']]);
+    if (g > 0) {
+      const y0 = -RD + T, len = g * (2 * RD - 2 * T);
+      wall(-RW, -RW + T, y0, y0 + len);
+      wall(RW - T, RW, y0, y0 + len);
+    }
+    const p5 = K(t, [[4.6, 0], [5.0, 1]]);
+    const tp = T * TP / TW;
+    if (p5 > 0) for (const y of PART) wall(-RW + T, -RW + T + p5 * (2 * RW - 2 * T), y - tp / 2, y + tp / 2);
+  }
+
+  // slabs FAST / BALANCED / HIGH grow out of the bays, then become the corridor
+  if (t > 6.05) {
+    const m = K(t, [[6.65, 0], [7.0, 1, 0.35]]);
+    const lsy = K(t, [[6.1, 0], [6.5, 1, 0.35], [6.55, 1], [6.8, 0, 0.25, 'in']]);
+    const L = COR.near - COR.far;
+    for (let i = 0; i < 3; i++) {
+      const h = K(t, [[6.05, 0], [6.5, SLAB_H[i]], [7.0, COR.h]]);
+      const seg = [COR.far + L * (2 - i) / 3, COR.far + L * (3 - i) / 3];
+      const y0 = lerp(BAYS[i][0], seg[0], m), y1 = lerp(BAYS[i][1], seg[1], m);
+      const look = { top: C.stone, front: C.indigo, side: C.black };
+      const parts = m === 0 ? [[-RW + TW, RW - TW]]
+        : [[lerp(-RW + TW, -COR.half - COR.wall, m), lerp(0, -COR.half, m)], [lerp(0, COR.half, m), lerp(RW - TW, COR.half + COR.wall, m)]];
+      const hBelow = i === 0 ? 0 : K(t, [[6.05, 0], [6.5, SLAB_H[i - 1]], [7.0, COR.h]]);
+      parts.forEach((p, pi) => B.push({
+        x0: p[0], x1: p[1], y0, y1, z1: h, ...look,
+        after: lsy > 0.0005 && pi === parts.length - 1 ? () => slabLabel(i, parts, y1, hBelow, h, lsy) : null,
+      }));
+    }
+  }
+
+  // far end panel
+  let panel = null;
+  if (t > 7.05) {
+    const hp = K(t, [[7.05, 0], [7.5, COR.h + 20]]);
+    const y = COR.far;
+    panel = [proj(-COR.half, y, hp), proj(COR.half, y, hp), proj(COR.half, y, 0), proj(-COR.half, y, 0)].map(p => [p[0], p[1]]);
+  }
+  drawBoxes(B);
+  return panel;
+}
+
+function slabLabel(i, parts, y1, z0, z1, lsy) {
+  // clip to the slab's front face, then draw the label flat on that face
+  ctx.save(); ctx.beginPath();
+  for (const p of parts) {
+    const q = [proj(p[0], y1, z1), proj(p[1], y1, z1), proj(p[1], y1, 0), proj(p[0], y1, 0)];
+    ctx.moveTo(q[0][0], q[0][1]); q.slice(1).forEach(v => ctx.lineTo(v[0], v[1])); ctx.closePath();
+  }
+  ctx.clip();
+  const lay = L_SLAB[i], e = lay.e, zc = (z0 + z1) / 2;
+  const O = proj(0, y1, 0), ex = proj(1, y1, 0), ez = proj(0, y1, 1);
+  const ax = [ex[0] - O[0], ex[1] - O[1]], az = [ez[0] - O[0], ez[1] - O[1]];
+  // face coords (u along x, w up): u = x, w = zc - (gy + MID) * e * lsy
+  const left = -lay.w / 2;
+  for (const l of lay.L) {
+    const u0 = left + l.x;
+    ctx.save();
+    ctx.transform(ax[0] * e, ax[1] * e, -az[0] * e * lsy, -az[1] * e * lsy,
+      O[0] + ax[0] * u0 + az[0] * (zc - MID * e * lsy), O[1] + ax[1] * u0 + az[1] * (zc - MID * e * lsy));
+    fill(C.white); ctx.fill(PATH[l.ch]); ctx.restore();
+  }
+  ctx.restore();
+}
+
+// ---------- the panel becomes a screen, then flat UI (7.5 to 8.5)
+function scenePanel(t, q0) {
+  const pA = K(t, [[7.55, 0], [8.0, 1]]), pB = K(t, [[8.05, 0], [8.5, 1]]);
+  const c0 = q0.reduce((a, p) => [a[0] + p[0] / 4, a[1] + p[1] / 4], [0, 0]);
+  const c1 = [lerp(c0[0], 0, 0.75), lerp(c0[1], 0, 0.75)];
+  const q1 = [[-380, -235], [380, -235], [455, 235], [-455, 235]].map(p => [c1[0] + p[0], c1[1] + p[1]]);
+  const q2 = [[-HW, -HH], [HW, -HH], [HW, HH], [-HW, HH]];
+  const q = q0.map((p, i) => [lerp(lerp(p[0], q1[i][0], pA), q2[i][0], pB), lerp(lerp(p[1], q1[i][1], pA), q2[i][1], pB)]);
+  quad(q, C.black);
+  const eps = K(t, [[7.6, 0.5], [8.0, 0.065], [8.5, 0]]);
+  if (eps < 0.4999) {
+    const inner = subQuad(q, eps, 1 - eps, eps, 1 - eps);
+    if (pB > 0) {
+      quad(inner, C.white);
+      const r = lerp(1, (UI.side + HW) / (2 * HW), pB);
+      quad(subQuad(inner, 0, r, 0, 1), C.indigo);
+    } else quad(inner, C.indigo);
+  }
+}
+
+// ---------- scene C: flat UI (8.5 to 11.5)
+function rrect(x0, y0, x1, y1, r, color) {
+  if (x1 - x0 < 0.1 || y1 - y0 < 0.1) return;
+  fill(color); ctx.beginPath(); ctx.roundRect(x0, y0, x1 - x0, y1 - y0, Math.min(r, (x1 - x0) / 2, (y1 - y0) / 2)); ctx.fill();
+}
+function sceneUI(t) {
+  const pc = K(t, [[11.1, 0], [11.5, 1, 0.4]]);
+  const sq = 1 - pc; // everything but the grid squashes flat
+  const squash = (y0, y1) => { const m = (y0 + y1) / 2, h = (y1 - y0) * sq; return [m - h / 2, m + h / 2]; };
+
+  // sidebar
+  rect(-HW, -HH, lerp(UI.side, -HW, pc) + HW, HH * 2, C.indigo);
+
+  // grid: six columns that become the six letter stems
+  for (let j = 0; j < 6; j++) {
+    const g = K(t, [[8.55, 0], [9.0, 1, 0.42 - 0.04 * j]]);
+    const x = lerp(lerp(UI.x0, UI.x1, j / 5), (STEMS[j][0] + STEMS[j][1]) / 2, pc);
+    const y0 = lerp(-HH, -BIG_CAP / 2, pc), y1 = lerp(lerp(-HH, HH, g), BIG_CAP / 2, pc);
+    rect(x - 1.5, y0, 3, y1 - y0, C.stone);
+    const sw = (STEMS[j][1] - STEMS[j][0]) * pc;
+    if (sw > 0.05) rect(x - sw / 2, y0, sw, y1 - y0, C.black);
+  }
+  for (const y of [UI.head, UI.comp]) {
+    const g = K(t, [[8.6, 0], [9.0, 1]]), mid = (UI.x0 + UI.x1) / 2, half = (UI.x1 - UI.x0) / 2 * g * sq;
+    if (half > 0.1) rect(mid - half, y - 1.5, half * 2, 3, C.stone);
+  }
+
+  // message row one
+  const w1 = K(t, [[8.6, 0], [9.0, 1]]);
+  if (w1 > 0) {
+    const [a0, a1] = squash(-272, -228); rrect(UI.x0 + 20, a0, UI.x0 + 20 + 44 * w1, a1, 6, C.indigo);
+    let [b0, b1] = squash(-274, -250); rrect(UI.x0 + 90, b0, UI.x0 + 90 + 760 * w1, b1, 12, C.black);
+    [b0, b1] = squash(-234, -210); rrect(UI.x0 + 90, b0, UI.x0 + 90 + 520 * w1, b1, 12, C.black);
+  }
+  // message row two, right aligned
+  const w2 = K(t, [[9.1, 0], [9.5, 1]]);
+  const bx1 = UI.x1 - 20, bx0 = bx1 - 600;
+  if (w2 > 0) {
+    const [y0, y1] = squash(-170, -80);
+    rrect(lerp(bx1, bx0, w2), y0, bx1, y1, 22, C.stone);
+    const [c0, c1] = squash(-137, -113);
+    rrect(lerp(bx1, bx0 + 36, w2), c0, lerp(bx1, bx0 + 436, w2), c1, 12, C.black);
+  }
+  // pin chip on row two
+  const pin = K(t, [[9.65, 0], [10.0, 1, 0.35, 'spring']]);
+  if (pin > 0) {
+    const cx = bx0 - 24 - 60, cy = -125, w = 120 * pin, h = 54 * pin * sq;
+    rrect(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2, 27, C.indigo);
+    rrect(cx - 34 * pin, cy - 9 * pin * sq, cx - 16 * pin, cy + 9 * pin * sq, 2, C.white);
+    rrect(cx - 6 * pin, cy - 5 * pin * sq, cx + 34 * pin, cy + 5 * pin * sq, 5, C.white);
+  }
+  // segmented control FAST / BALANCED / HIGH
+  const cw = K(t, [[10.1, 0], [10.5, 1]]);
+  if (cw > 0 && sq > 0.001) {
+    const mid = (SEG.x0 + SEG.x1) / 2, half = (SEG.x1 - SEG.x0) / 2 * cw;
+    const [y0, y1] = squash(SEG.y - SEG.h / 2, SEG.y + SEG.h / 2);
+    ctx.save(); ctx.beginPath(); ctx.rect(mid - half - 4, y0 - 4, half * 2 + 8, y1 - y0 + 8); ctx.clip();
+    rrect(SEG.x0, y0, SEG.x1, y1, 18, C.black);
+    rrect(SEG.x0 + 4, y0 + 4, SEG.x1 - 4, y1 - 4, 14, C.white);
+    const of = K(t, [[10.65, 0], [11.0, 1]]);
+    const cell = SEG.cells[1];
+    const ox1 = lerp(cell[0] + 2, cell[1] - 2, of);
+    if (of > 0) rect(cell[0] + 2, y0 + 4, ox1 - cell[0] - 2, y1 - y0 - 8, C.orange);
+    for (const x of [SEG.cells[0][1], SEG.cells[1][1]]) rect(x - 2, y0, 4, y1 - y0, C.black);
+    SEG.cells.forEach((c, i) => {
+      const lay = L_SEG[i], cx = (c[0] + c[1]) / 2;
+      if (i !== 1 || of === 0) return word(lay, cx, SEG.y, 1, sq);
+      ctx.save(); ctx.beginPath(); ctx.rect(ox1, -4000, 8000, 8000); ctx.clip(); word(lay, cx, SEG.y, 1, sq); ctx.restore();
+      ctx.save(); ctx.beginPath(); ctx.rect(-4000, -4000, ox1 + 4000, 8000); ctx.clip(); word(lay, cx, SEG.y, 1, sq, C.white); ctx.restore();
+    });
+    ctx.restore();
+  }
+}
+
+// ---------- scene D: full-bleed word, rooms, rule, back to the hairline (11.5 to 15)
+function sceneD(t) {
+  const lay = L_BIG, e = lay.e, left = -lay.w / 2, base = BIG_CAP / 2;
+  const p = K(t, [[11.55, 0], [12.0, 1, 0.45, 'in']]);
+  const sy = K(t, [[13.05, 1], [13.5, 0, 0.4]]);
+  const ro = K(t, [[12.05, 0], [12.5, 1], [13.0, 0]]);
+  if (sy > 0.0005) for (const l of lay.L) {
+    const x = left + l.x, g = G.g[l.ch];
+    ctx.save(); ctx.beginPath();
+    if (l.ch === 'N') {
+      ctx.rect(x + 77 * e, -4000, (lerp(210, 450.5, p) - 77) * e, 8000);
+      ctx.rect(x + lerp(691, 450.5, p) * e, -4000, (824 - lerp(691, 450.5, p)) * e, 8000);
+    } else {
+      const s0 = l.ch === 'I' ? 96 : 77, s1 = s0 + 133;
+      ctx.rect(x + s0 * e, -4000, (lerp(s1, g.bb[2], p) - s0) * e, 8000);
+    }
+    ctx.clip();
+    const yc = base - BIG_CAP / 2 * sy;
+    glyph(l.ch, x, yc, e, 1, sy, C.black);
+    if (ro > 0 && (l.ch === 'B' || l.ch === 'E')) {
+      ctx.beginPath(); ctx.rect(x + 210 * e, -4000, (lerp(210, 760, ro) - 210) * e, 8000); ctx.clip();
+      if (l.ch === 'B') { glyph('B', x, yc, e, 1, sy, C.orange, SUB.B[1]); glyph('B', x, yc, e, 1, sy, C.orange, SUB.B[2]); }
+      else {
+        ctx.save(); ctx.transform(e, 0, 0, e, x, yc + MID * e);
+        fill(C.orange); ctx.fillRect(210, -536, 499, 161); ctx.fillRect(210, -270, 499, 159); ctx.restore();
+      }
+    }
+    ctx.restore();
+  }
+  // orange floor line under the rooms
+  const oh = K(t, [[12.05, 0], [12.5, lay.w / 2], [13.05, lay.w / 2], [13.4, 0, 0.35, 'in']]);
+  if (oh > 0.1) rect(-oh, base + 26, oh * 2, 16, C.orange);
+
+  // the word collapses into a rule, the rule becomes the hairline again
+  if (t > 13.05) {
+    const rt = K(t, [[13.05, 0], [13.5, 12, 0.4], [14.0, 8], [14.5, 4], [15.0, 2]]);
+    const ry = t <= 13.5 ? base - rt / 2 : K(t, [[13.5, base - 6], [14.0, 46], [14.5, 20], [15.0, 0]]);
+    const half = K(t, [[13.5, lay.w / 2], [14.0, 300], [14.5, 2400], [15.0, 2400]]);
+    hairline(half, rt, ry);
+    const tsy = K(t, [[13.6, 0], [14.0, 1]]);
+    const tcap = K(t, [[14.0, 64], [14.5, 26], [15.0, 0, 0.45, 'in']]);
+    if (tsy > 0.0005 && tcap > 0.05) {
+      const tl = layout('NIBIE', tcap, 60), b = ry - rt / 2 - 0.35 * tcap;
+      word(tl, 0, b - tcap / 2 * tsy, 1, tsy);
+    }
+  }
+}
+
+// ---------- one frame at time t (no motion blur)
+function frame(c, t) {
+  ctx = c;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  rect(0, 0, W, H, C.white);
+  const s = cam(t);
+  ctx.setTransform(s, 0, 0, s, W / 2, H / 2);
+  if (t < 3.05 || (t < 5.5)) sceneA(t);
+  if (t >= 2.6 && t < 8.5) {
+    const q0 = sceneB(t);
+    if (q0) scenePanel(t, q0);
+  }
+  if (t >= 8.5 && t < 11.5) sceneUI(t);
+  if (t >= 11.5) sceneD(t);
+}
+
+// ---------- motion blur: the shutter is integrated inside seek(t)
+// Eight samples over the last half frame, averaged. A moving shape leaves a
+// straight streak along its own path; still shapes are untouched.
+const main = document.getElementById('c'), mctx = main.getContext('2d');
+const buf = document.createElement('canvas'); buf.width = W; buf.height = H;
+const bctx = buf.getContext('2d');
+const SAMPLES = 8, SHUTTER = 0.5 / 60;
+window.seek = function (t) {
+  t = Math.min(Math.max(t, 0), DUR);
+  for (let k = 0; k < SAMPLES; k++) {
+    let ts = t - SHUTTER * k / (SAMPLES - 1);
+    if (ts < 0) ts += DUR; // the loop: just before 0 is just before 15
+    frame(bctx, ts);
+    mctx.globalAlpha = 1 / (k + 1);
+    mctx.drawImage(buf, 0, 0);
+  }
+  mctx.globalAlpha = 1;
+};
+
+// ---------- audio: OfflineAudioContext, 15 s, 48 kHz stereo, synthesised only
+function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+window.renderAudio = async function () {
+  const sr = 48000, len = DUR * sr, ac = new OfflineAudioContext(2, len, sr);
+  const out = ac.createGain(); out.gain.value = 0.8; out.connect(ac.destination);
+  const noise = (seed, secs) => {
+    const b = ac.createBuffer(2, Math.ceil(secs * sr), sr);
+    for (let ch = 0; ch < 2; ch++) { const r = mulberry(seed * 7 + ch), d = b.getChannelData(ch); for (let i = 0; i < d.length; i++) d[i] = r() * 2 - 1; }
+    return b;
+  };
+  const env = (g, t, peak, decay, attack = 0.002) => {
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(peak, t + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + decay);
+  };
+  function kick(t, amp) {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(44, t + 0.12);
+    env(g, t, amp, 0.42); o.connect(g).connect(out); o.start(t); o.stop(t + 0.45);
+    const n = ac.createBufferSource(), hp = ac.createBiquadFilter(), ng = ac.createGain();
+    n.buffer = noise(Math.round(t * 100) + 1, 0.02); hp.type = 'highpass'; hp.frequency.value = 3000;
+    env(ng, t, amp * 0.25, 0.015, 0.0005); n.connect(hp).connect(ng).connect(out); n.start(t);
+  }
+  function hit(t, amp, long) {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.frequency.setValueAtTime(95, t); o.frequency.exponentialRampToValueAtTime(30, t + 0.6 * long);
+    env(g, t, amp * 0.9, 1.1 * long); o.connect(g).connect(out); o.start(t); o.stop(t + 1.2 * long);
+    const n = ac.createBufferSource(), bp = ac.createBiquadFilter(), ng = ac.createGain();
+    n.buffer = noise(Math.round(t * 10) + 50, 0.5 * long); bp.type = 'bandpass'; bp.frequency.value = 1800; bp.Q.value = 0.7;
+    env(ng, t, amp * 0.55, 0.3 * long, 0.001); n.connect(bp).connect(ng).connect(out); n.start(t);
+    [[55, -0.45], [82.4, 0.45], [110, 0], [164.8, 0]].forEach(([f, pan]) => {
+      const s = ac.createOscillator(), lp = ac.createBiquadFilter(), sg = ac.createGain(), p = ac.createStereoPanner();
+      s.type = 'sawtooth'; s.frequency.value = f; lp.type = 'lowpass';
+      lp.frequency.setValueAtTime(2600, t); lp.frequency.exponentialRampToValueAtTime(180, t + 0.5 * long);
+      p.pan.value = pan; env(sg, t, amp * 0.07, 0.7 * long, 0.003);
+      s.connect(lp).connect(sg).connect(p).connect(out); s.start(t); s.stop(t + 0.8 * long);
+    });
+    if (long > 1.2) {
+      const c = ac.createBufferSource(), hp = ac.createBiquadFilter(), cg = ac.createGain();
+      c.buffer = noise(99, 2); hp.type = 'highpass'; hp.frequency.value = 6000;
+      env(cg, t, amp * 0.22, 1.8, 0.002); c.connect(hp).connect(cg).connect(out); c.start(t);
+    }
+  }
+  function riser(t0, t1) {
+    const n = ac.createBufferSource(), bp = ac.createBiquadFilter(), g = ac.createGain();
+    n.buffer = noise(7, t1 - t0); bp.type = 'bandpass'; bp.Q.value = 1.6;
+    bp.frequency.setValueAtTime(350, t0); bp.frequency.exponentialRampToValueAtTime(8000, t1);
+    g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(0.55, t1); g.gain.setValueAtTime(0, t1);
+    n.connect(bp).connect(g).connect(out); n.start(t0); n.stop(t1);
+    [[-0.5, 0], [0.5, 3]].forEach(([pan, det]) => {
+      const s = ac.createOscillator(), lp = ac.createBiquadFilter(), sg = ac.createGain(), p = ac.createStereoPanner();
+      s.type = 'sawtooth'; s.detune.value = det * 4; p.pan.value = pan;
+      s.frequency.setValueAtTime(70, t0); s.frequency.exponentialRampToValueAtTime(560, t1);
+      lp.type = 'lowpass'; lp.frequency.setValueAtTime(700, t0); lp.frequency.exponentialRampToValueAtTime(5200, t1);
+      sg.gain.setValueAtTime(0, t0); sg.gain.linearRampToValueAtTime(0.12, t1); sg.gain.setValueAtTime(0, t1);
+      s.connect(lp).connect(sg).connect(p).connect(out); s.start(t0); s.stop(t1);
+    });
+  }
+  for (let b = 0; b < 30; b++) kick(b * 0.5, 0.85);
+  [[0, 0.75, 1], [3, 0.8, 1], [6, 0.8, 1], [9, 0.8, 1], [12, 1.25, 1.6], [14, 0.85, 1.1]].forEach(([t, a, l]) => hit(t, a, l));
+  riser(10, 12);
+
+  const r = await ac.startRendering();
+  const L = r.getChannelData(0), R = r.getChannelData(1);
+  let peak = 0; for (let i = 0; i < len; i++) peak = Math.max(peak, Math.abs(L[i]), Math.abs(R[i]));
+  const gain = 0.89 / peak;
+  const bytes = new Uint8Array(44 + len * 4), dv = new DataView(bytes.buffer);
+  const str = (o, s) => [...s].forEach((c, i) => dv.setUint8(o + i, c.charCodeAt(0)));
+  str(0, 'RIFF'); dv.setUint32(4, 36 + len * 4, true); str(8, 'WAVE'); str(12, 'fmt ');
+  dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 2, true); dv.setUint32(24, sr, true);
+  dv.setUint32(28, sr * 4, true); dv.setUint16(32, 4, true); dv.setUint16(34, 16, true); str(36, 'data'); dv.setUint32(40, len * 4, true);
+  for (let i = 0; i < len; i++) {
+    dv.setInt16(44 + i * 4, Math.round(clamp(L[i] * gain, -1, 1) * 32767), true);
+    dv.setInt16(46 + i * 4, Math.round(clamp(R[i] * gain, -1, 1) * 32767), true);
+  }
+  let bin = ''; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+};
+
+window.seek(0);
+window.ready = true;
+</script>
+</body>
+</html>
