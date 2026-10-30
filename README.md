@@ -6,7 +6,8 @@
 
 > Nibie is not another ChatGPT clone. It's a context-aware workspace where you can organize work into **Rooms**, keep explicit **Memory** across conversations, retrieve from uploaded files, and continue projects without repeatedly explaining yourself.
 
-<!-- TODO: Add product screenshot here -->
+![Nibie Chat Interface](docs/screenshots/hero.png)
+*Nibie's main interface showing chat with Rooms sidebar, conversation history, and the composer*
 
 ## What is Nibie?
 
@@ -278,7 +279,9 @@ This is a personal portfolio project by Muhammad ([@habiibullahm](https://github
 
 ## License
 
-_No license currently specified._ Contributors should contact the repository owner before forking or reusing code.
+MIT License - see [LICENSE](LICENSE) file for details.
+
+Copyright (c) 2026 Muhammad Habiibullah
 
 ---
 
