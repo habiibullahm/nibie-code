@@ -2,8 +2,8 @@
 
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { PanelLeftClose, PanelLeftOpen, SquarePen, X } from "lucide-react";
-import { addUserMessageAction, archiveConversationAction, editLastUserMessageAction, moveConversationAction, renameConversationAction, restoreConversationAction, startConversationAction, updateConversationModelAction } from "@/app/actions/chat";
+import { Ghost, PanelLeftClose, PanelLeftOpen, SquarePen, X } from "lucide-react";
+import { addUserMessageAction, archiveConversationAction, discardTemporaryConversationAction, editLastUserMessageAction, moveConversationAction, renameConversationAction, restoreConversationAction, startConversationAction, updateConversationModelAction } from "@/app/actions/chat";
 import { createWorkbenchFromAssistantAction } from "@/app/actions/workbench";
 import { WORKBENCH_UI_ENABLED } from "@/lib/workbench/flags";
 import { ChatComposer, type ComposerHandle } from "@/components/chat-composer";
@@ -23,6 +23,7 @@ import type { AttachmentSummary } from "@/lib/attachments/types";
 import type { ModelChoice, ModelOption } from "@/lib/chat/models";
 import { roomContextFromRows } from "@/lib/rooms/map";
 import { conversationPath } from "@/lib/routes";
+import { TEMPORARY_CHAT_TTL_MS } from "@/lib/chat/temporary";
 import { clearStoredConversationReference } from "@/lib/privacy/local-state";
 import { modelForComposer } from "@/lib/preferences/model";
 import { accountDisplayName } from "@/lib/auth/display-name";
@@ -92,6 +93,11 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const [renameSaving, setRenameSaving] = useState(false);
   const [localConversations, setLocalConversations] = useState<ConversationSummary[]>([]);
   const [locallyArchivedIds, setLocallyArchivedIds] = useState<string[]>([]);
+  // Temporary chats (see lib/chat/temporary.ts): the toggle for the next new chat, the one started in this view, and the ones
+  // already left (deleted), so a stale server payload cannot bring one back before the next refresh.
+  const [temporaryDraft, setTemporaryDraft] = useState(false);
+  const [localTemporary, setLocalTemporary] = useState<ConversationSummary | null>(null);
+  const [discardedTemporaryIds, setDiscardedTemporaryIds] = useState<string[]>([]);
   const [welcomeGreetingIndex, setWelcomeGreetingIndex] = useState(0);
   // A conversation's saved mode is only used while that mode is still configured; otherwise the first available one is shown.
   const availableModes = useMemo(() => models.map((option) => option.id), [models]);
@@ -161,6 +167,9 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const shownConversations = useMemo(() => [...new Map([...conversations, ...localConversations].map((item) => [item.id, item])).values()]
     .filter((item) => !locallyArchivedIds.includes(item.id))
     .sort((left, right) => compareText(right.updated_at, left.updated_at) || compareText(left.id, right.id)), [conversations, localConversations, locallyArchivedIds]);
+  // A temporary chat can be open, but it is never part of history: the sidebar, search and restore only see shownConversations.
+  const temporaryConversation = [localTemporary, preview ? null : initialData?.temporaryConversation ?? null].find((item): item is ConversationSummary => Boolean(item) && !discardedTemporaryIds.includes(item!.id)) ?? null;
+  const knownConversations = useMemo(() => temporaryConversation && !shownConversations.some((item) => item.id === temporaryConversation.id) ? [...shownConversations, temporaryConversation] : shownConversations, [shownConversations, temporaryConversation]);
   const { previewActiveId, setPreviewActiveId, pendingId, setPendingId, pendingRoomId, setPendingRoomId, pendingDraft, setPendingDraft, openConversation, openConversationAtMessage, newChat, openRoom, newThreadInRoom, chooseDraftRoom } = useConversationNavigation({ preview, initialActiveId: demo ? demoChatId : null, conversationParam, roomParam, draftParam, router, pinLatestRef, getLatestData: () => latestData.current, beforeConversation, beforeRoom, beforeNewChat, beforeDraftRoom, focusComposer: () => requestAnimationFrame(() => composerRef.current?.focus()) });
   function resetNavigationView() {
     setNotice(""); setDrawerOpen(false); setEditingId(null); setRecovery(null); setContextDiagnostics(null);
@@ -168,6 +177,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   function beforeConversation(id: string | null, options?: { focusMessageId?: string }) {
     setModelChoice("Auto");
     if (busy.current && !streamController.current && liveChatConversationId() !== id) return false;
+    setTemporaryDraft(false);
     if (id !== liveChatConversationId()) abortLiveChatStream();
     resetNavigationView();
     setFocusMessageId(options?.focusMessageId ?? null);
@@ -177,11 +187,13 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   }
   function beforeNewChat() {
     if (busy.current) return false;
+    setTemporaryDraft(false);
     setWelcomeGreetingIndex((index) => (index + 1) % welcomeGreetings.length);
     composerRef.current?.clear();
     return true;
   }
   function beforeRoom(draft: boolean) {
+    setTemporaryDraft(false);
     if (draft) {
       setModelChoice("Auto");
       if (busy.current) return false;
@@ -204,7 +216,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     });
     if (activeRoom?.id === id) openConversation(null);
   }
-  const paramActiveId = shownConversations.some((item) => item.id === conversationParam) ? conversationParam : null;
+  const paramActiveId = knownConversations.some((item) => item.id === conversationParam) ? conversationParam : null;
   const activeId = preview ? previewActiveId : pendingId !== undefined ? pendingId : paramActiveId;
   // Keep an unavailable draft room selected until the user explicitly changes it; never silently send in General.
   const paramRoomId = draftParam || rooms.some((room) => room.id === roomParam) ? roomParam : null;
@@ -212,7 +224,10 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const drafting = (pendingDraft !== undefined ? pendingDraft : draftParam) && Boolean(selectedRoomId) && !activeId;
   const showRoom = Boolean(selectedRoomId) && !activeId && !drafting;
   const activeRoom = rooms.find((room) => room.id === selectedRoomId) ?? null;
-  const activeConversation = shownConversations.find((item) => item.id === activeId);
+  const activeConversation = knownConversations.find((item) => item.id === activeId);
+  const temporaryActive = Boolean(activeId) && temporaryConversation?.id === activeId;
+  // The toggle applies to a new General chat only; a Room draft or Room page is never temporary.
+  const temporary = temporaryActive || (!activeId && !drafting && !showRoom && temporaryDraft);
   const selectedModel = modelChoice !== "Auto" && availableModes.includes(modelChoice) ? modelChoice : "Auto";
   const mode = selectedModel === "Auto" ? modeFor(activeConversation?.selected_model, Boolean(activeId)) : selectedModel;
   const { sending, setSending, streaming, setStreaming, assistantActivity, streamController, userStopEpoch, stoppedReplies, generate, stopStream } = useChatStream({ busyRef: busy, mode, researchMode, localMessages, latestData, activeId, router, setLocalMessages, setRemovedIds, setContextDiagnostics, setNotice, beginRecovery });
@@ -304,6 +319,19 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     if (preview || !activeId || !shownConversations.some((item) => item.id === activeId)) return;
     writeLastConversationId(activeId);
   }, [activeId, preview, shownConversations]);
+  // Leaving a temporary chat (another chat, a Room, New chat) deletes it. Closing the tab leaves it to its expiry.
+  const openTemporaryRef = useRef<string | null>(null);
+  const discardTemporary = useStableCallback((id: string) => {
+    setDiscardedTemporaryIds((ids) => ids.includes(id) ? ids : [...ids, id]);
+    setLocalTemporary((item) => item?.id === id ? null : item);
+    setLocalMessages((items) => { const next = { ...items }; delete next[id]; return next; });
+    if (!preview) void discardTemporaryConversationAction(id).catch(() => undefined);
+  });
+  useEffect(() => {
+    const previous = openTemporaryRef.current;
+    openTemporaryRef.current = temporaryActive ? activeId : null;
+    if (previous && previous !== activeId) discardTemporary(previous);
+  }, [activeId, temporaryActive, discardTemporary]);
   useEffect(() => {
     if (!drawerOpen) return;
     closeMenuRef.current?.focus();
@@ -369,9 +397,10 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     try {
       if (preview) {
         const id = activeId ?? `preview-local-${crypto.randomUUID()}`;
-        const item = activeConversation ?? { id, title: content.slice(0, 42), selected_model: mode, room_id: selectedRoomId, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+        const item = activeConversation ?? { id, title: content.slice(0, 42), selected_model: mode, room_id: temporary ? null : selectedRoomId, temporary_expires_at: temporary ? new Date(Date.now() + TEMPORARY_CHAT_TTL_MS).toISOString() : null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
         const row: PersistedMessage = { id: `local-${crypto.randomUUID()}`, role: "user", content, position: messages.length + 1, created_at: new Date().toISOString() };
-        if (!activeConversation) setLocalConversations((items) => [item, ...items]);
+        if (!activeConversation && temporary) setLocalTemporary(item);
+        else if (!activeConversation) setLocalConversations((items) => [item, ...items]);
         if (demo) {
           const canned = cannedDemoReply(content);
           const reply: PersistedMessage = {
@@ -411,12 +440,15 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
       let saved: { id: string; position: number };
       if (!id) {
         // The first message of a new chat creates the conversation and saves the message in a single round trip.
-        const started = await startConversationAction(mode, messageId, content, drafting ? selectedRoomId : null, ...withAttachments);
+        const started = temporary
+          ? await startConversationAction(mode, messageId, content, null, attachmentIds.length ? attachmentIds : undefined, true)
+          : await startConversationAction(mode, messageId, content, drafting ? selectedRoomId : null, ...withAttachments);
         if (started.error || !started.data) { rollback(started.error ?? "Conversation couldn't be created.", key); return; }
         const { conversation } = started.data;
         saved = started.data.message;
         id = conversation.id;
-        setLocalConversations((items) => [conversation, ...items]);
+        if (conversation.temporary_expires_at) setLocalTemporary(conversation);
+        else setLocalConversations((items) => [conversation, ...items]);
         setLocalMessages((items) => { const { "": rows = [], ...rest } = items; return { ...rest, [conversation.id]: rows }; });
         setPendingId(conversation.id);
         setPendingRoomId(null);
@@ -661,7 +693,15 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const startEdit = useStableCallback((id: string) => setEditingId(id));
 
   const history = activeId ? activeId : null;
-  const caption = demo ? "Demo mode · Recorded replies. Nothing is saved." : preview ? "Mock workspace · Messages stay in this tab and are not saved." : drafting && activeRoom ? `New thread in ${activeRoom.name}.` : null;
+  const caption = demo ? "Demo mode · Recorded replies. Nothing is saved." : preview ? "Mock workspace · Messages stay in this tab and are not saved." : temporary ? "Temporary chat · Not saved to history or Memory, and deleted when you leave." : drafting && activeRoom ? `New thread in ${activeRoom.name}.` : null;
+  // Turning the toggle on starts a new temporary chat from anywhere; turning it off in an open temporary chat leaves (deletes) it.
+  const toggleTemporary = useStableCallback(() => {
+    if (controlsDisabled || recovering) return;
+    if (temporaryActive) { newChat(); return; }
+    if (activeId || drafting || showRoom) { newChat(); setTemporaryDraft(true); return; }
+    setTemporaryDraft((on) => !on);
+    requestAnimationFrame(() => composerRef.current?.focus());
+  });
   const threadRoomId = activeId ? activeConversation?.room_id ?? null : drafting ? selectedRoomId : null;
   const threadRoom = rooms.find((room) => room.id === threadRoomId) ?? null;
   const roomItems = [{ value: "", label: "General" }, ...rooms.map((room) => ({ value: room.id, label: room.name }))];
@@ -677,6 +717,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     setFilePickerOpen(false);
   }
   const toggleRoomFiles = useStableCallback(() => setFilePickerOpen((open) => !open));
+  const attachUnavailable = useStableCallback(() => setNotice("Files can't be attached to a temporary chat."));
   const attach = useStableCallback(() => {
     if (preview || !threadRoom) {
       setNotice(preview ? "This preview isn't connected." : "Add a file on the room page, then choose it from a thread in that room.");
@@ -696,7 +737,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const greetingSource = savedPreferences.preferredName?.trim() || metadataName?.trim() || null;
   const greetingName = greetingSource?.split(/\s+/)[0] ?? null;
   const welcomeGreeting = welcomeGreetings[welcomeGreetingIndex](greetingName);
-  const headerRoomName = (showRoom ? activeRoom?.name : threadRoom?.name) ?? null;
+  const headerRoomName = temporaryActive ? "Temporary chat" : (showRoom ? activeRoom?.name : threadRoom?.name) ?? null;
   const roomThreads = activeRoom ? shownConversations.filter((item) => item.room_id === activeRoom.id) : [];
   const searchCorpus = useMemo(() => {
     if (!preview) return undefined;
@@ -709,7 +750,8 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     ];
   }, [preview, previewConversations, previewArchivedConversations, localConversations]);
   const sidebarProps = { conversations: shownConversations, archivedConversations: preview ? previewArchivedConversations.filter((item) => !localConversations.some((entry) => entry.id === item.id)) : archivedConversations, rooms, activeId: history, activeRoomId: showRoom ? selectedRoomId : threadRoom?.id ?? null, busy: controlsDisabled || recovering, activity: assistantActivity, preview, demo, email, name: accountName, releasePreview, renderedAt, settingsActive: settingsOpen, searchCorpus, onClose: closeDrawer, onOpen: openConversation, onOpenMessage: openConversationAtMessage, onOpenRoom: openRoom, onNewThreadInRoom: newThreadInRoom, onDeleteRoom: deleteRoomFromSidebar, onCreateRoom: openRoomSetup, onNewChat: newChat, onOpenSettings: openSettings, onRename: rename, onArchive: archive, onRestore: restore, onMove: moveThread, onCopyTranscript: copyTranscript };
-  const composerProps = { ref: composerRef, dockRef: composerDockRef, sending: sending || recovering || movingThread !== null, streaming, mode, models, onModelChange: changeModel, researchMode, onResearchModeChange: setResearchMode, savingMode, caption, diagnostics: contextDiagnostics ?? contextPreview, onEditProfile: editProfile, onSubmit: submitMessage, onStop: stopStream, onAttach: attach, attachmentsEnabled: !preview, onRoomFiles: threadRoom && !preview ? toggleRoomFiles : undefined, roomItems, roomId: threadRoomId ?? "", roomLabel, roomSelectionNotice, roomsLoading, onRoomChange: activeId ? rooms.length ? changeComposerRoom : undefined : chooseDraftRoom, attachmentPanel: filePickerOpen && threadRoom ? <RoomFilePicker roomId={threadRoom.id} selectedIds={selectedFileIds} disabled={controlsDisabled || sending || streaming} onChange={setSelectedFileIds} /> : null };
+  // A temporary chat is General only and takes no attachments (their bytes would outlive the chat).
+  const composerProps = { ref: composerRef, dockRef: composerDockRef, sending: sending || recovering || movingThread !== null, streaming, mode, models, onModelChange: changeModel, researchMode, onResearchModeChange: setResearchMode, savingMode, caption, diagnostics: contextDiagnostics ?? contextPreview, onEditProfile: editProfile, onSubmit: submitMessage, onStop: stopStream, onAttach: temporary ? attachUnavailable : attach, attachmentsEnabled: !preview && !temporary, onRoomFiles: threadRoom && !preview && !temporary ? toggleRoomFiles : undefined, roomItems, roomId: threadRoomId ?? "", roomLabel, roomSelectionNotice, roomsLoading, onRoomChange: temporary ? undefined : activeId ? rooms.length ? changeComposerRoom : undefined : chooseDraftRoom, attachmentPanel: filePickerOpen && threadRoom ? <RoomFilePicker roomId={threadRoom.id} selectedIds={selectedFileIds} disabled={controlsDisabled || sending || streaming} onChange={setSelectedFileIds} /> : null };
 
   return <main className={`chat-workspace${workbenchDocumentId ? " has-workbench" : ""}`}>
     <ChatSidebar {...sidebarProps} collapsed={desktopSidebarCollapsed} desktopToggleRef={desktopCollapseButtonRef} desktopExpandRef={desktopExpandButtonRef} onCollapse={collapseDesktopSidebar} onExpand={expandDesktopSidebar} />
@@ -718,10 +760,13 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
       <header className="chat-header">
         <button ref={menuButtonRef} type="button" className="icon-button mobile-menu-button" aria-label={drawerOpen ? "Close conversation menu" : "Open conversation menu"} title="Toggle sidebar" aria-haspopup="dialog" aria-expanded={drawerOpen} onClick={() => setDrawerOpen((open) => !open)}>{drawerOpen ? <PanelLeftClose size={18} aria-hidden="true" /> : <PanelLeftOpen size={18} aria-hidden="true" />}</button>
         <div className="header-model">{headerRoomName ? <span className="header-context is-room-name">{headerRoomName}</span> : null}</div>
-        <button type="button" className="header-new-chat" aria-label="New chat" title="New chat" disabled={controlsDisabled} onClick={newChat}><SquarePen size={17} /></button>
+        <div className="header-actions">
+          <button type="button" className={`header-temporary-chat${temporary ? " is-active" : ""}`} aria-label="Temporary chat" title={temporary ? "Temporary chat is on" : "Temporary chat"} aria-pressed={temporary} disabled={controlsDisabled || recovering} onClick={toggleTemporary}><Ghost size={17} aria-hidden="true" /></button>
+          <button type="button" className="header-new-chat" aria-label="New chat" title="New chat" disabled={controlsDisabled} onClick={newChat}><SquarePen size={17} /></button>
+        </div>
       </header>
       <div ref={scrollRef} onScroll={handleScroll} className={`conversation-scroll ${showRoom ? "is-room" : messages.length || loadingConversation ? "has-messages" : "is-empty"}`}>
-        {showRoom && activeRoom ? <RoomDetail key={activeRoom.id} room={activeRoom} threads={roomThreads} busy={controlsDisabled} preview={preview} onOpenThread={openConversation} onNewThread={() => newThreadInRoom(activeRoom.id)} onSaveRoom={saveRoom} onSaveBrief={saveBrief} onCreatePin={createPin} onUpdatePin={updatePin} onDeletePin={removePin} onDelete={removeRoom} /> : loadingConversation ? <div className="message-list conversation-skeleton" role="status" aria-busy="true" aria-label="Loading conversation"><div className="skeleton-line is-short" /><div className="skeleton-line" /><div className="skeleton-line" /><div className="skeleton-line is-medium" /></div> : messages.length ? <div className="message-list" aria-live="polite">{messages.map((message) => <MessageRow key={message.id} message={message} initial={initial} isLast={message.id === lastMessage?.id} isLastUser={message.id === lastUser?.id} waitLabel={message.id === lastMessage?.id ? waitLabel : undefined} canMutate={!preview} disabled={messageActionsLocked} editing={editingId === message.id} responseFailed={notice === failureNotice} highlighted={focusMessageId === message.id} onRegenerate={regenerate} onStartEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} onEditInWorkbench={WORKBENCH_UI_ENABLED && !preview ? editInWorkbench : undefined} workbenchPending={workbenchPending} />)}{notice && <p className="local-notice" role="status">{notice}</p>}</div> : <div className="welcome-state"><div className="welcome-panel">{notice && <p className="local-notice" role="status">{notice}</p>}<div className="welcome-copy-group"><h1 data-testid={drafting ? undefined : "welcome-greeting"}>{drafting && activeRoom ? activeRoom.name : welcomeGreeting}</h1>{drafting && activeRoom ? <><p className="welcome-eyebrow">NEW THREAD</p><p className="welcome-copy">This thread starts inside the room. Nibie will use its instructions, brief, and pins.</p></> : null}</div></div>{centeredComposer ? <ChatComposer {...composerProps} centered /> : null}</div>}
+        {showRoom && activeRoom ? <RoomDetail key={activeRoom.id} room={activeRoom} threads={roomThreads} busy={controlsDisabled} preview={preview} onOpenThread={openConversation} onNewThread={() => newThreadInRoom(activeRoom.id)} onSaveRoom={saveRoom} onSaveBrief={saveBrief} onCreatePin={createPin} onUpdatePin={updatePin} onDeletePin={removePin} onDelete={removeRoom} /> : loadingConversation ? <div className="message-list conversation-skeleton" role="status" aria-busy="true" aria-label="Loading conversation"><div className="skeleton-line is-short" /><div className="skeleton-line" /><div className="skeleton-line" /><div className="skeleton-line is-medium" /></div> : messages.length ? <div className="message-list" aria-live="polite">{messages.map((message) => <MessageRow key={message.id} message={message} initial={initial} isLast={message.id === lastMessage?.id} isLastUser={message.id === lastUser?.id} waitLabel={message.id === lastMessage?.id ? waitLabel : undefined} canMutate={!preview} disabled={messageActionsLocked} editing={editingId === message.id} responseFailed={notice === failureNotice} highlighted={focusMessageId === message.id} onRegenerate={regenerate} onStartEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} onEditInWorkbench={WORKBENCH_UI_ENABLED && !preview && !temporaryActive ? editInWorkbench : undefined} workbenchPending={workbenchPending} />)}{notice && <p className="local-notice" role="status">{notice}</p>}</div> : <div className="welcome-state"><div className="welcome-panel">{notice && <p className="local-notice" role="status">{notice}</p>}<div className="welcome-copy-group"><h1 data-testid={drafting || temporary ? undefined : "welcome-greeting"}>{drafting && activeRoom ? activeRoom.name : temporary ? "Temporary chat" : welcomeGreeting}</h1>{drafting && activeRoom ? <><p className="welcome-eyebrow">NEW THREAD</p><p className="welcome-copy">This thread starts inside the room. Nibie will use its instructions, brief, and pins.</p></> : temporary ? <p className="welcome-copy" data-testid="temporary-chat-intro">This chat won&apos;t appear in your history, and Nibie won&apos;t use or update Memory. It&apos;s deleted when you leave it.</p> : null}</div></div>{centeredComposer ? <ChatComposer {...composerProps} centered /> : null}</div>}
       </div>
       {!showRoom && !centeredComposer ? <ChatComposer {...composerProps} /> : null}    </section>
     {renaming && <dialog ref={renameDialogRef} className="room-setup-dialog" aria-labelledby={renameTitleId} aria-busy={renameSaving} onCancel={(event) => { event.preventDefault(); if (!renameSaving) setRenaming(null); }}>

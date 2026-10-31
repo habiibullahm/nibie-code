@@ -10,9 +10,10 @@ import { logError, logInfo } from "@/lib/observability/logger";
 import { operationalCodes } from "@/lib/observability/codes";
 import { attachmentErrors, parseAttachmentIds } from "@/lib/attachments/rules";
 import { parseStopRequest, parseStopRequests, stopDecision, stoppedContent, type StopRequest } from "@/lib/chat/stop";
+import { temporaryChatExpiry, temporaryChatUnavailable } from "@/lib/chat/temporary";
 
 export type ChatActionResult<T = undefined> = { data?: T; error?: string };
-type ConversationRow = { id: string; title: string; selected_model: string; room_id: string | null; created_at: string; updated_at: string };
+type ConversationRow = { id: string; title: string; selected_model: string; room_id: string | null; temporary_expires_at?: string | null; created_at: string; updated_at: string };
 type SavedMessage = { id: string; position: number };
 type Supabase = Awaited<ReturnType<typeof createSupabaseServerClient>>;
 
@@ -33,7 +34,16 @@ function failure<T>(): ChatActionResult<T> {
   return { error: saveFailed };
 }
 
-async function insertConversation(supabase: Supabase, userId: string, model: ChatModel, roomId: string | null) {
+async function insertConversation(supabase: Supabase, userId: string, model: ChatModel, roomId: string | null, temporary = false) {
+  if (temporary) {
+    // A temporary chat is always General. It never falls back to an ordinary insert: one that cannot be marked temporary is not created.
+    return supabase.from("conversations").insert({
+      user_id: userId,
+      title: "Temporary chat",
+      selected_model: model,
+      temporary_expires_at: temporaryChatExpiry(),
+    }).select("id,title,selected_model,room_id,temporary_expires_at,created_at,updated_at").single<ConversationRow>();
+  }
   const inserted = await supabase.from("conversations").insert({
     user_id: userId,
     title: "New chat",
@@ -134,9 +144,13 @@ export async function createConversationAction(model: unknown): Promise<ChatActi
 
 // The first message of a new chat: creates the conversation and saves the message in one round trip from the browser.
 // If the message cannot be saved, the empty conversation is removed again so history is not left with a blank "New chat".
-export async function startConversationAction(model: unknown, messageId: unknown, content: unknown, roomId: unknown = null, attachmentIds: unknown = undefined): Promise<ChatActionResult<{ conversation: ConversationRow; message: SavedMessage }>> {
+// A temporary chat (see lib/chat/temporary.ts) is General only and is hidden from history, search, recall and Memory.
+export async function startConversationAction(model: unknown, messageId: unknown, content: unknown, roomId: unknown = null, attachmentIds: unknown = undefined, temporary: unknown = false): Promise<ChatActionResult<{ conversation: ConversationRow; message: SavedMessage }>> {
   const parsedAttachments = parseAttachmentIds(attachmentIds);
   if (!parsedAttachments.ok) return { error: attachmentErrors.tooMany };
+  if (typeof temporary !== "boolean") return { error: "Choose a valid chat type." };
+  if (temporary && roomId !== null && roomId !== undefined) return { error: "Temporary chats can't be started in a room." };
+  if (temporary && parsedAttachments.ids.length) return { error: temporaryAttachmentsUnavailable };
   const parsedModel = modelInputSchema.safeParse(model);
   const parsedMessageId = validateConversationId(messageId);
   const parsedContent = validateMessage(content);
@@ -148,7 +162,9 @@ export async function startConversationAction(model: unknown, messageId: unknown
   if (!isModeAvailable(parsedModel.data)) return modelUnavailable;
   try {
     const { supabase, user } = await authenticatedClient();
-    const { data: conversation, error } = await insertConversation(supabase, user.id, parsedModel.data, parsedRoom.data);
+    if (temporary) await purgeExpiredTemporaryConversations(supabase);
+    const { data: conversation, error } = await insertConversation(supabase, user.id, parsedModel.data, parsedRoom.data, temporary);
+    if (temporary && schemaUnavailable(error)) return { error: temporaryChatUnavailable };
     if (error?.code === "23503") return { error: "That room is no longer available." };
     if (error || !conversation) return failure();
     const saved = await appendMessage(supabase, conversation.id, parsedMessageId.data, parsedContent.data, [], parsedAttachments.ids);
@@ -192,6 +208,7 @@ export async function addUserMessageAction(id: unknown, content: unknown, messag
   if (!parsedMessageId.success) return { error: "Choose a valid message." };
   try {
     const { supabase } = await authenticatedClient();
+    if (parsedAttachments.ids.length && await isTemporary(supabase, parsedId.data)) return { error: temporaryAttachmentsUnavailable };
     const saved = await appendMessage(supabase, parsedId.data, parsedMessageId.data, parsedContent.data, stopped, parsedAttachments.ids);
     return "error" in saved ? { error: saved.error } : { data: saved.data };
   } catch {
@@ -265,6 +282,35 @@ export async function deleteConversationAction(id: unknown): Promise<ChatActionR
   } catch {
     return { error: "Your session has expired or the service is unavailable. Please try again." };
   }
+}
+
+// Attached file bytes live in Storage, which the conversation cascade does not reach, so a temporary chat takes none.
+const temporaryAttachmentsUnavailable = "Files can't be attached to a temporary chat.";
+async function isTemporary(supabase: Supabase, conversationId: string) {
+  const { data, error } = await supabase.from("conversations").select("temporary_expires_at").eq("id", conversationId).maybeSingle<{ temporary_expires_at: string | null }>();
+  // A database without temporary chats yet has none; any other failed read is left to the append, which reports it.
+  return !error && Boolean(data?.temporary_expires_at);
+}
+
+// Leaving a temporary chat deletes it. Only a temporary chat can be removed this way, so a stale or wrong id can never
+// delete an ordinary conversation. Messages, attachments and usage rows go with it through the conversation cascade.
+export async function discardTemporaryConversationAction(id: unknown): Promise<ChatActionResult> {
+  const parsedId = validateConversationId(id);
+  if (!parsedId.success) return { error: "Choose a valid conversation." };
+  try {
+    const { supabase } = await authenticatedClient();
+    const { error } = await supabase.from("conversations").delete().eq("id", parsedId.data).not("temporary_expires_at", "is", null);
+    // Nothing to discard when the column does not exist yet: there are no temporary chats.
+    if (error && !schemaUnavailable(error)) return failure();
+    return {};
+  } catch {
+    return failure();
+  }
+}
+
+// Expired temporary chats of the signed-in owner (RLS scopes the delete). Best effort: the scheduled sweep catches the rest.
+async function purgeExpiredTemporaryConversations(supabase: Supabase) {
+  await supabase.from("conversations").delete().lt("temporary_expires_at", new Date().toISOString()).then(() => undefined, () => undefined);
 }
 
 export async function archiveConversationAction(id: unknown): Promise<ChatActionResult> {

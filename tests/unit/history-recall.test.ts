@@ -175,6 +175,8 @@ describe("authenticated PostgREST lookup", () => {
     expect(messages.get("conversations.user_id")).toBe(`eq.${owner}`);
     expect(messages.get("conversations.room_id")).toBe(`eq.${room}`);
     expect(messages.get("conversations.archived_at")).toBe("is.null");
+    // Temporary chats are never recalled, in the candidate read or the recheck.
+    expect(db.urls.filter((url) => url.pathname.endsWith("/messages")).map((url) => url.searchParams.get("conversations.temporary_expires_at"))).toEqual(["is.null", "is.null"]);
     expect(messages.get("status")).toBe("eq.complete");
     expect(messages.get("conversation_id")).toBe(`neq.${current}`);
     expect(messages.get("limit")).toBe(String(HISTORY_RECALL_LIMITS.candidates));
