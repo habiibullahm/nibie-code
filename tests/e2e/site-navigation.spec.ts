@@ -25,7 +25,7 @@ for (const width of [320, 390]) {
       await expect(page).toHaveURL(/\/docs$/);
       await expect(toggle).toHaveAttribute("aria-expanded", "false");
       await toggle.click();
-      await page.locator("main").click({ position: { x: 16, y: 40 } });
+      await page.getByText("Your first conversation", { exact: true }).click();
       await expect(toggle).toHaveAttribute("aria-expanded", "false");
       await page.setViewportSize({ width: 1024, height: 900 });
       await expect(toggle).toBeHidden();

@@ -16,8 +16,8 @@ test("the public landing page does not require authentication", async ({ page })
   await expect(page.getByRole("heading", { name: "Rooms" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "How it's built" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "See it in 30 seconds." })).toBeVisible();
-  await expect(page.getByText("Help me tighten this before I send it to the team.")).toBeVisible();
-  await expect(page.getByText("Lead with the decision, then the reason. One sentence on what changed is enough.")).toBeVisible();
+  await expect(page.getByText("Help me tighten this before I send it to the team.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Lead with the decision, then the reason. One sentence on what changed is enough.", { exact: true })).toBeVisible();
 });
 
 test("landing page has no horizontal overflow", async ({ page }) => {
