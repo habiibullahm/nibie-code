@@ -155,7 +155,10 @@
 .landing-frame .composer-dock { position: relative; right: auto; bottom: auto; left: auto; flex: none; }
 .landing-frame .composer { display: block; }
 .landing-frame .conversation-scroll { padding-bottom: 24px; }
-.landing-frame .user-avatar { font-size: 12px; }
+.landing-frame .user-avatar,
+.landing-frame .message-author { font-size: 12px; font-weight: 550; line-height: 1.4; }
+.landing-frame .new-chat-button,
+.landing-frame .header-model { font-size: 12px; font-weight: 550; }
 .landing-composer-placeholder { margin: 0; padding: 4px 2px 6px; color: var(--text-4); font-size: 14px; line-height: 1.5; }
 .landing-frame-modes { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
 .landing-frame-modes span {

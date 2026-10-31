@@ -37,7 +37,13 @@ Tokens live in `app/globals.css` under `:root, :root[data-theme="dark"]`, which 
 | `--text-3` | `#a6a6a6` | Labels, metadata |
 | `--text-4` | `#8f8f8f` | Captions, footer meta. This is the lowest text color allowed. |
 | `--accent` | `#d97757` | **Primary button and logo fold only** |
+| `--accent-hover` | `#c4684a` | Primary hover. Darker than `--accent`, not lighter. |
+| `--accent-active` | `#bf694d` | Primary active. Darkest allowed value (AA). |
 | `--accent-fg` | `#171717` | Text on the accent |
+| `--landing-primary` | `#d97757` | Landing primary fill in both themes |
+| `--landing-primary-hover` | `#c4684a` | Landing primary hover |
+| `--landing-primary-active` | `#bf694d` | Landing primary active |
+| `--landing-primary-fg` | `#171717` | Landing primary label in both themes |
 | `--brand-terracotta` | `#d97757` | Logo fold (`--logo-fold`) |
 | `--logo-body` | `#f0efec` | Logo body |
 | `--link` | `#c8c8c8` | Inline links |
@@ -49,8 +55,8 @@ Tokens live in `app/globals.css` under `:root, :root[data-theme="dark"]`, which 
 
 - `--accent #d97757` is reserved for **the single primary button** and **the logo**. Do not use it for icons, links, kickers, borders, or glows.
 - Primary button: background `#d97757`, text `#171717`. On hover the background is `#c4684a`. On active it is `#bf694d`, about 12% darker.
-- **Code change needed:** today `.landing-button` uses `--primary-bg #e7e7e7`, which is a light-grey primary, and `--accent-hover` is `#e18768`, which is *lighter*. Point the primary button at the accent, set the hover to `#c4684a`, and add `--accent-active: #bf694d`.
-- **Light theme:** keep the primary button at `#d97757` with `#171717` text (5.74:1). Do not use light-theme `--brand-terracotta #c4623a` as the button fill. `#171717` on it measures only 4.40:1, and `#fcfbf9` on it measures 3.94:1. Both fail AA.
+- `.landing-button` uses `--landing-primary` / `--landing-primary-fg` so the fill stays `#d97757` with `#171717` text in both themes. Dark `--accent-hover` is `#c4684a`. `--accent-active` is `#bf694d`.
+- **Light theme:** keep the primary button at `#d97757` with `#171717` text (5.74:1). Do not use light-theme `--accent` (olive) or `--brand-terracotta #c4623a` as the button fill. `#171717` on `#c4623a` measures only 4.40:1, and `#fcfbf9` on it measures 3.94:1. Both fail AA.
 - Secondary buttons use a transparent background, `--text` for the label, a 1px `--border-strong` border, and `--hover` fill on hover.
 
 ### Measured contrast (WCAG 2.x)
@@ -132,7 +138,7 @@ Use this fixed scale and nothing else:
 - Wrap the mock in `aria-hidden="true"`. Real content lives in the surrounding headings and copy.
 - If the mock contains text that a screen reader needs, add an sr-only (`.landing-sr`) equivalent outside it. Labels inside the mock are icons plus short text, with sr-only text where needed.
 - `--bg-sidebar` background, 1px `--border`, 20px radius, `--shadow-frame`. No glow. Remove `.landing-showcase-glow`.
-- All text in the mock is at least 12px. Today `.history-group p` uses 10px, which must be fixed.
+- All text in the mock is at least 12px, including `.history-group p`.
 - The send button inside the mock stays grey. The mock never uses the accent.
 - Show a short, plausible conversation (one user turn, one Nibie turn). The mock is never wider than the content column.
 
@@ -148,7 +154,7 @@ Use this fixed scale and nothing else:
 
 ## 7. Accessibility
 
-- Keep the global focus style in `globals.css`: `outline: 3px solid var(--focus); outline-offset: 2px`. Do not override it per component. For example, `.site-menu-toggle` currently uses 2px, which needs to be aligned.
+- Keep the global focus style in `globals.css`: `outline: 3px solid var(--focus); outline-offset: 2px`. Do not override it per component.
 - Tap targets are at least 44×44px on mobile.
 - **Skip link** (`.skip-link`, "Skip to content" → `#content`) is the first focusable element. When it is focused, it shows at `top: 72px`, just below the header, and is left-aligned to the content column.
 - Wrap all motion in `@media (prefers-reduced-motion: no-preference)`, and give it a `reduce` fallback with no transform.
@@ -190,7 +196,7 @@ Mobile rules, checked at **390px** wide:
    - Sub: **Pick fast or deep models per question, keep context in Rooms, and pick up any conversation where you left it.**
    - Buttons: primary **Try the demo** (`/demo`) and secondary **View on GitHub** (repo URL).
    - Note (14px, `--text-4`): **No sign-up. The demo uses recorded replies.**
-3. **Product mock.** A dark chat window on the content column with a sidebar of recent chats, one user turn, one Nibie reply, and a composer with Fast / Balanced / High chips.
+3. **Product mock.** A dark chat window on the content column with a sidebar of recent chats, the four messages from `lib/chat/demo-data.ts`, and a composer with Fast / Balanced / High chips.
 4. **Features: "What Nibie does."** Three cards:
    - **Rooms**: keep a project's context, files, and threads together.
    - **Fast or deep, per question**: choose Fast, Balanced, or High for each message.
