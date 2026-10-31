@@ -8,6 +8,7 @@ What's new in Nibie.
 
 ### Added
 
+- Try Nibie on the landing page opens a public /demo workspace with recorded chat and cited-research replies, no account and no live model calls.
 - Ask what you decided about a topic to see dated excerpts and original conversation links from this Room's active chats; historical lookup stays separate from saved Memory.
 - Workbench version history: save a checkpoint, preview prior versions (manual or AI-applied), and restore atomically with confirmation and recoverable text, keeping up to 50 versions per document; download Markdown or plain text, or copy formatted for Word/Docs (UI stays behind `WORKBENCH_UI_ENABLED`).
 - Open a finished reply in Workbench beside chat, edit Markdown with autosave, and Ask Nibie on selected text to change that span inline (credits apply).

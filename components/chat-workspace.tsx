@@ -27,6 +27,7 @@ import { clearStoredConversationReference } from "@/lib/privacy/local-state";
 import { modelForComposer } from "@/lib/preferences/model";
 import { accountDisplayName } from "@/lib/auth/display-name";
 import { defaultUserPreferences, type UserPreferences } from "@/lib/preferences/types";
+import { cannedDemoReply, createDemoConversations, demoChatId, withDemoMemoryContext } from "@/lib/chat/demo-data";
 import { createPreviewArchivedConversations, createPreviewConversations } from "@/lib/chat/preview-data";
 import {
   TRANSCRIPT_LOAD_ERROR,
@@ -65,7 +66,9 @@ const mockRooms: RoomSummary[] = [
 
 const noModels: ModelOption[] = [];
 
-export function ChatWorkspace({ email, metadataName = null, initialData, preview = false, models = noModels, renderedAt, preferences, preferencesError = null, releasePreview = null }: { email: string; metadataName?: string | null; initialData?: WorkspaceData; preview?: boolean; models?: ModelOption[]; renderedAt?: number; preferences?: UserPreferences; preferencesError?: string | null; releasePreview?: WhatsNewPreview | null }) {
+const demoWriteNotice = "Demo mode is read-only. Create an account to save this change.";
+
+export function ChatWorkspace({ email, metadataName = null, initialData, preview = false, demo = false, models = noModels, renderedAt, preferences, preferencesError = null, releasePreview = null }: { email: string; metadataName?: string | null; initialData?: WorkspaceData; preview?: boolean; demo?: boolean; models?: ModelOption[]; renderedAt?: number; preferences?: UserPreferences; preferencesError?: string | null; releasePreview?: WhatsNewPreview | null }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const conversationParam = searchParams.get("conversation");
@@ -73,8 +76,8 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const draftParam = searchParams.get("draft") === "1";
   // Server history captured at delete-all. It stays hidden until a newer server payload arrives, so deleted chats do not flash back.
   const [droppedServerHistory, setDroppedServerHistory] = useState<WorkspaceData | null>(null);
-  const previewConversations = useMemo(() => createPreviewConversations(renderedAt ?? 0), [renderedAt]);
-  const previewArchivedConversations = useMemo(() => createPreviewArchivedConversations(renderedAt ?? 0), [renderedAt]);
+  const previewConversations = useMemo(() => demo ? createDemoConversations(renderedAt ?? 0) : createPreviewConversations(renderedAt ?? 0), [demo, renderedAt]);
+  const previewArchivedConversations = useMemo(() => demo ? [] : createPreviewArchivedConversations(renderedAt ?? 0), [demo, renderedAt]);
   const conversations = preview ? previewConversations : initialData && initialData === droppedServerHistory ? noConversations : (initialData?.conversations ?? noConversations);
   const archivedConversations = preview ? previewArchivedConversations : initialData?.archivedConversations ?? noConversations;
   const [focusMessageId, setFocusMessageId] = useState<string | null>(null);
@@ -158,7 +161,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const shownConversations = useMemo(() => [...new Map([...conversations, ...localConversations].map((item) => [item.id, item])).values()]
     .filter((item) => !locallyArchivedIds.includes(item.id))
     .sort((left, right) => compareText(right.updated_at, left.updated_at) || compareText(left.id, right.id)), [conversations, localConversations, locallyArchivedIds]);
-  const { previewActiveId, setPreviewActiveId, pendingId, setPendingId, pendingRoomId, setPendingRoomId, pendingDraft, setPendingDraft, openConversation, openConversationAtMessage, newChat, openRoom, newThreadInRoom, chooseDraftRoom } = useConversationNavigation({ preview, conversationParam, roomParam, draftParam, router, pinLatestRef, getLatestData: () => latestData.current, beforeConversation, beforeRoom, beforeNewChat, beforeDraftRoom, focusComposer: () => requestAnimationFrame(() => composerRef.current?.focus()) });
+  const { previewActiveId, setPreviewActiveId, pendingId, setPendingId, pendingRoomId, setPendingRoomId, pendingDraft, setPendingDraft, openConversation, openConversationAtMessage, newChat, openRoom, newThreadInRoom, chooseDraftRoom } = useConversationNavigation({ preview, initialActiveId: demo ? demoChatId : null, conversationParam, roomParam, draftParam, router, pinLatestRef, getLatestData: () => latestData.current, beforeConversation, beforeRoom, beforeNewChat, beforeDraftRoom, focusComposer: () => requestAnimationFrame(() => composerRef.current?.focus()) });
   function resetNavigationView() {
     setNotice(""); setDrawerOpen(false); setEditingId(null); setRecovery(null); setContextDiagnostics(null);
   }
@@ -192,7 +195,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     setContextDiagnostics(null); setNotice("");
     return true;
   }
-  const { rooms, createRoom, saveRoom, saveBrief, createPin, updatePin, removePin, removeRoom, deleteRoomFromSidebar } = useRoomManagement({ preview, serverRooms: initialData?.rooms, mockRooms, router, getActiveRoom: () => activeRoom, onCreated: (id) => openRoom(id), onDeleted: roomDeleted, setNotice });
+  const { rooms, createRoom, saveRoom, saveBrief, createPin, updatePin, removePin, removeRoom, deleteRoomFromSidebar } = useRoomManagement({ preview, serverRooms: initialData?.rooms, mockRooms: demo ? [] : mockRooms, router, getActiveRoom: () => activeRoom, onCreated: (id) => openRoom(id), onDeleted: roomDeleted, setNotice });
   function roomDeleted(id: string) {
     setLocalConversations((items) => {
       const map = new Map(items.map((item) => [item.id, item]));
@@ -369,8 +372,24 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
         const item = activeConversation ?? { id, title: content.slice(0, 42), selected_model: mode, room_id: selectedRoomId, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
         const row: PersistedMessage = { id: `local-${crypto.randomUUID()}`, role: "user", content, position: messages.length + 1, created_at: new Date().toISOString() };
         if (!activeConversation) setLocalConversations((items) => [item, ...items]);
-        setLocalMessages((items) => ({ ...items, [id]: [...(items[id] ?? []), row] }));
-        setPreviewActiveId(id); composerRef.current?.clear(); setNotice("Your message is shown in this local preview. Replies are not connected yet.");
+        if (demo) {
+          const canned = cannedDemoReply(content);
+          const reply: PersistedMessage = {
+            id: `local-${crypto.randomUUID()}`,
+            role: "assistant",
+            content: canned.content,
+            position: messages.length + 2,
+            status: "complete",
+            created_at: new Date().toISOString(),
+            ...(canned.sources ? { sources: canned.sources } : {}),
+            ...(canned.actionLabel ? { actionLabel: canned.actionLabel } : {}),
+          };
+          setLocalMessages((items) => ({ ...items, [id]: [...(items[id] ?? []), row, reply] }));
+        } else {
+          setLocalMessages((items) => ({ ...items, [id]: [...(items[id] ?? []), row] }));
+          setNotice("Your message is shown in this local preview. Replies are not connected yet.");
+        }
+        setPreviewActiveId(id); composerRef.current?.clear();
         return;
       }
       // The same submission keeps the same message id, so a retry after a failure can never save the message twice.
@@ -513,6 +532,8 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
       status: message.status ?? "complete",
       position: message.position ?? index + 1,
       created_at: message.created_at ?? previewStamp,
+      ...(message.sources ? { sources: message.sources } : {}),
+      ...(message.actionLabel ? { actionLabel: message.actionLabel } : {}),
     }));
   });
   const copyTranscript = useStableCallback(async (item: ConversationSummary) => {
@@ -545,6 +566,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     }
   });
   const moveThread = useStableCallback(async (item: ConversationSummary, roomId: string | null) => {
+    if (demo) { setNotice(demoWriteNotice); return; }
     if (busy.current || recovery || movePending.current) return;
     const previous = shownConversations.find((entry) => entry.id === item.id);
     if (!previous || previous.room_id === roomId || previous.archived_at) return;
@@ -607,7 +629,10 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     }
   });
   const expandDesktopSidebar = useStableCallback(() => { setDesktopSidebarCollapsed(false); requestAnimationFrame(() => desktopCollapseButtonRef.current?.focus()); });
-  const openRoomSetup = useStableCallback(() => { setDrawerOpen(false); setCreatingRoom(true); });
+  const openRoomSetup = useStableCallback(() => {
+    if (demo) { setNotice(demoWriteNotice); return; }
+    setDrawerOpen(false); setCreatingRoom(true);
+  });
   const closeRoomSetup = useStableCallback(() => setCreatingRoom(false));
   const openSettings = useStableCallback(() => { setDrawerOpen(false); setSettingsSection("general"); setSettingsOpen(true); });
   const editProfile = useStableCallback(() => { setDrawerOpen(false); setSettingsSection("personalization"); setSettingsOpen(true); });
@@ -636,7 +661,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   const startEdit = useStableCallback((id: string) => setEditingId(id));
 
   const history = activeId ? activeId : null;
-  const caption = preview ? "Mock workspace · Messages stay in this tab and are not saved." : drafting && activeRoom ? `New thread in ${activeRoom.name}.` : null;
+  const caption = demo ? "Demo mode · Recorded replies. Nothing is saved." : preview ? "Mock workspace · Messages stay in this tab and are not saved." : drafting && activeRoom ? `New thread in ${activeRoom.name}.` : null;
   const threadRoomId = activeId ? activeConversation?.room_id ?? null : drafting ? selectedRoomId : null;
   const threadRoom = rooms.find((room) => room.id === threadRoomId) ?? null;
   const roomItems = [{ value: "", label: "General" }, ...rooms.map((room) => ({ value: room.id, label: room.name }))];
@@ -660,13 +685,13 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
     setFilePickerOpen((open) => !open);
   });
   const contextRoom = threadRoom ? roomContextFromRows({ name: threadRoom.name, instructions: threadRoom.instructions }, threadRoom.brief, threadRoom.pins) : null;
-  const contextPreview = previewContextDiagnostics({
+  const contextPreview = withDemoMemoryContext(previewContextDiagnostics({
     preferences: savedPreferences,
     preferenceReadFailed: Boolean(preferencesError),
     hasEarlierMessages: messages.some((message) => message.role === "user" || message.role === "assistant"),
     room: contextRoom,
     selectedFileCount: selectedFileIds.length,
-  });
+  }), demo ? activeId : null);
   const accountName = accountDisplayName({ email, metadataName, preferredName: savedPreferences.preferredName });
   const greetingSource = savedPreferences.preferredName?.trim() || metadataName?.trim() || null;
   const greetingName = greetingSource?.split(/\s+/)[0] ?? null;
@@ -683,7 +708,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
       ...localConversations,
     ];
   }, [preview, previewConversations, previewArchivedConversations, localConversations]);
-  const sidebarProps = { conversations: shownConversations, archivedConversations: preview ? previewArchivedConversations.filter((item) => !localConversations.some((entry) => entry.id === item.id)) : archivedConversations, rooms, activeId: history, activeRoomId: showRoom ? selectedRoomId : threadRoom?.id ?? null, busy: controlsDisabled || recovering, activity: assistantActivity, preview, email, name: accountName, releasePreview, renderedAt, settingsActive: settingsOpen, searchCorpus, onClose: closeDrawer, onOpen: openConversation, onOpenMessage: openConversationAtMessage, onOpenRoom: openRoom, onNewThreadInRoom: newThreadInRoom, onDeleteRoom: deleteRoomFromSidebar, onCreateRoom: openRoomSetup, onNewChat: newChat, onOpenSettings: openSettings, onRename: rename, onArchive: archive, onRestore: restore, onMove: moveThread, onCopyTranscript: copyTranscript };
+  const sidebarProps = { conversations: shownConversations, archivedConversations: preview ? previewArchivedConversations.filter((item) => !localConversations.some((entry) => entry.id === item.id)) : archivedConversations, rooms, activeId: history, activeRoomId: showRoom ? selectedRoomId : threadRoom?.id ?? null, busy: controlsDisabled || recovering, activity: assistantActivity, preview, demo, email, name: accountName, releasePreview, renderedAt, settingsActive: settingsOpen, searchCorpus, onClose: closeDrawer, onOpen: openConversation, onOpenMessage: openConversationAtMessage, onOpenRoom: openRoom, onNewThreadInRoom: newThreadInRoom, onDeleteRoom: deleteRoomFromSidebar, onCreateRoom: openRoomSetup, onNewChat: newChat, onOpenSettings: openSettings, onRename: rename, onArchive: archive, onRestore: restore, onMove: moveThread, onCopyTranscript: copyTranscript };
   const composerProps = { ref: composerRef, dockRef: composerDockRef, sending: sending || recovering || movingThread !== null, streaming, mode, models, onModelChange: changeModel, researchMode, onResearchModeChange: setResearchMode, savingMode, caption, diagnostics: contextDiagnostics ?? contextPreview, onEditProfile: editProfile, onSubmit: submitMessage, onStop: stopStream, onAttach: attach, attachmentsEnabled: !preview, onRoomFiles: threadRoom && !preview ? toggleRoomFiles : undefined, roomItems, roomId: threadRoomId ?? "", roomLabel, roomSelectionNotice, roomsLoading, onRoomChange: activeId ? rooms.length ? changeComposerRoom : undefined : chooseDraftRoom, attachmentPanel: filePickerOpen && threadRoom ? <RoomFilePicker roomId={threadRoom.id} selectedIds={selectedFileIds} disabled={controlsDisabled || sending || streaming} onChange={setSelectedFileIds} /> : null };
 
   return <main className={`chat-workspace${workbenchDocumentId ? " has-workbench" : ""}`}>
