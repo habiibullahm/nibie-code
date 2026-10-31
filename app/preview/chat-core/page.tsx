@@ -46,8 +46,11 @@ export default async function ChatCorePreview({ searchParams }: { searchParams: 
         );
       }
     }
-    return <ChatWorkspace email="acceptance@nibie.local" models={workspaceModels} renderedAt={requestTime()}
-      initialData={{ conversations: query.navigation === "1" ? [conversation, { ...conversation, id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", title: "Other thread" }] : [conversation], archivedConversations: [], rooms: [], messages, activeId: conversation.id, error: null }} />;
+    return <>
+      <span hidden data-testid="chat-core-stop-partial">{stopState ?? ""}</span>
+      <ChatWorkspace email="acceptance@nibie.local" models={workspaceModels} renderedAt={requestTime()}
+        initialData={{ conversations: query.navigation === "1" ? [conversation, { ...conversation, id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", title: "Other thread" }] : [conversation], archivedConversations: [], rooms: [], messages, activeId: conversation.id, error: null }} />
+    </>;
   }
   return <ChatCoreComposerFixture />;
 }
