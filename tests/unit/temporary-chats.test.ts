@@ -152,10 +152,19 @@ describe("expired temporary chat cleanup", () => {
   beforeEach(() => { createActionAuditClient.mockReset(); delete process.env.CRON_SECRET; vi.spyOn(console, "info").mockImplementation(() => undefined); vi.spyOn(console, "error").mockImplementation(() => undefined); });
   const request = (token?: string) => new Request("http://localhost/api/cron/purge-temporary-chats", { method: "POST", headers: token ? { authorization: `Bearer ${token}` } : {} });
 
-  it("requires the cron secret", async () => {
+  it("returns 503 when CRON_SECRET is unset", async () => {
     expect((await purge(request("x"))).status).toBe(503);
+    expect(createActionAuditClient).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 when the Authorization header is missing", async () => {
     process.env.CRON_SECRET = "expected-secret";
     expect((await purge(request())).status).toBe(401);
+    expect(createActionAuditClient).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 for a wrong bearer token", async () => {
+    process.env.CRON_SECRET = "expected-secret";
     expect((await purge(request("wrong"))).status).toBe(401);
     expect(createActionAuditClient).not.toHaveBeenCalled();
   });

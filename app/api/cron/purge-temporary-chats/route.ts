@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { createActionAuditClient } from "@/lib/supabase/service-role";
 import { logError, logInfo } from "@/lib/observability/logger";
@@ -23,7 +24,9 @@ export async function POST(request: Request) {
 
   const auth = request.headers.get("authorization") ?? "";
   const presented = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length).trim() : "";
-  if (!presented || presented !== expected) {
+  const presentedBytes = Buffer.from(presented);
+  const expectedBytes = Buffer.from(expected);
+  if (presentedBytes.length !== expectedBytes.length || !timingSafeEqual(presentedBytes, expectedBytes)) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
