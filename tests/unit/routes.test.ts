@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { chatPath, conversationPath, legacyConversationPath, workbenchDocumentPath, workbenchPath } from "../../lib/routes";
+import { chatPath, conversationPath, demoPath, githubRepoUrl, legacyConversationPath, signupPath, workbenchDocumentPath, workbenchPath } from "../../lib/routes";
 
 const id = "6f0c1c3e-9a0b-4d1e-8f2a-1b2c3d4e5f60";
 
 describe("chat routes", () => {
   it("keeps the workspace at /chat", () => {
     expect(chatPath).toBe("/chat");
+  });
+
+  it("keeps the public demo and account entry points stable", () => {
+    expect(demoPath).toBe("/demo");
+    expect(signupPath).toBe("/signup");
+    expect(githubRepoUrl).toBe("https://github.com/habiibullahm/nibie-code");
   });
 
   it("opens a conversation on /chat without changing the id", () => {

@@ -5,7 +5,7 @@ import { Brand, BrandMark } from "@/components/brand";
 import { SiteHeader } from "@/components/site-header";
 import { getCurrentDevelopmentPreview } from "@/lib/changelog";
 import { loadChangelog } from "@/lib/changelog-source";
-import { chatPath } from "@/lib/routes";
+import { chatPath, demoPath } from "@/lib/routes";
 
 const useCases: { title: string; copy: string; visual: ReactNode }[] = [
   {
@@ -141,7 +141,7 @@ export function LandingPage() {
         <h1 id="landing-hero-title">A quieter place to think with AI.</h1>
         <p className="landing-lede">Nibie is a personal AI workspace that helps you think, research, and continue your work—with less repetition.</p>
         <div className="landing-actions">
-          <Link className="landing-button" href={chatPath}>Try Nibie</Link>
+          <Link className="landing-button" href={demoPath}>Try Nibie</Link>
           <a className="landing-button landing-button-secondary" href="#product">See how it works</a>
         </div>
       </section>
@@ -240,7 +240,7 @@ export function LandingPage() {
       <section className="landing-final landing-shell" aria-labelledby="landing-final-title">
         <h2 id="landing-final-title">Make some room to think.</h2>
         <p>Start a conversation with Nibie.</p>
-        <Link className="landing-button" href={chatPath}>Try Nibie</Link>
+        <Link className="landing-button" href={demoPath}>Try Nibie</Link>
       </section>
     </main>
     <footer className="landing-footer landing-shell">

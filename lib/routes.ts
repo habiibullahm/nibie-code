@@ -1,7 +1,10 @@
 import { validateConversationId } from "@/lib/chat/validation";
 
 export const chatPath = "/chat";
+export const demoPath = "/demo";
+export const signupPath = "/signup";
 export const workbenchPath = "/workbench";
+export const githubRepoUrl = "https://github.com/habiibullahm/nibie-code";
 
 export function workbenchDocumentPath(id: string) {
   return `${workbenchPath}/${encodeURIComponent(id)}`;

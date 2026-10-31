@@ -10,6 +10,7 @@ import { chatPath, conversationPath, roomDraftPath, roomPath } from "@/lib/route
 
 type NavigationInput = {
   preview: boolean;
+  initialActiveId?: string | null;
   conversationParam: string | null;
   roomParam: string | null;
   draftParam: boolean;
@@ -23,8 +24,8 @@ type NavigationInput = {
   focusComposer: () => void;
 };
 
-export function useConversationNavigation({ preview, conversationParam, roomParam, draftParam, router, pinLatestRef, getLatestData, beforeConversation, beforeRoom, beforeNewChat, beforeDraftRoom, focusComposer }: NavigationInput) {
-  const [previewActiveId, setPreviewActiveId] = useState<string | null>(null);
+export function useConversationNavigation({ preview, initialActiveId = null, conversationParam, roomParam, draftParam, router, pinLatestRef, getLatestData, beforeConversation, beforeRoom, beforeNewChat, beforeDraftRoom, focusComposer }: NavigationInput) {
+  const [previewActiveId, setPreviewActiveId] = useState<string | null>(initialActiveId);
   // The conversation the user just chose, applied immediately while the server renders it. undefined = follow the URL.
   const [pendingId, setPendingId] = useState<string | null | undefined>(undefined);
   const [pendingRoomId, setPendingRoomId] = useState<string | null | undefined>(undefined);
