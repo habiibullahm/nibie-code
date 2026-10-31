@@ -2,9 +2,11 @@
 
 **A personal AI workspace for thinking, research, and continued work—with less repetition.**
 
+[Try the demo](https://nibie-ai.vercel.app/demo)
+
 🔗 **Live App:** [https://nibie-ai.vercel.app/](https://nibie-ai.vercel.app/)
 
-> Nibie is not another ChatGPT clone. It's a context-aware workspace where you can organize work into **Rooms**, keep explicit **Memory** across conversations, retrieve from uploaded files, and continue projects without repeatedly explaining yourself.
+> It's a context-aware workspace where you can organize work into **Rooms**, keep explicit **Memory** across conversations, retrieve from uploaded files, and continue projects without repeatedly explaining yourself.
 
 ![Nibie Chat Interface](docs/screenshots/hero.png)
 *Nibie's main interface showing chat with Rooms sidebar, conversation history, and the composer*
@@ -106,8 +108,8 @@ graph TD
 Nibie has comprehensive test coverage across multiple layers:
 
 ### Test Suites
-- **119+ Unit Tests** (Vitest) — business logic, validation, context engine, AI routing
-- **38+ E2E Tests** (Playwright) — chat flows, room creation, settings, file upload, research
+- **1,473 Unit Tests** (Vitest) — business logic, validation, context engine, AI routing
+- **E2E Tests** (Playwright) — chat flows, room creation, settings, file upload, research
 - **RLS Integration Tests** — PostgreSQL Docker container with automated reset
 - **AI Quality Evaluations** — response quality checks and Deep Research eval fixtures
 
@@ -276,12 +278,6 @@ nibie-code/
 ## Contributing
 
 This is a personal portfolio project by Muhammad ([@habiibullahm](https://github.com/habiibullahm)), but feedback and suggestions are welcome via [issues](https://github.com/habiibullahm/nibie-code/issues).
-
-## License
-
-MIT License - see [LICENSE](LICENSE) file for details.
-
-Copyright (c) 2026 Muhammad Habiibullah
 
 ---
 
