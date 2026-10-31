@@ -3,16 +3,21 @@ import { expect, test } from "@playwright/test";
 test("the public landing page does not require authentication", async ({ page }) => {
   await page.goto("/");
   await expect(page).toHaveURL((url) => url.pathname === "/");
-  await expect(page).toHaveTitle("Nibie — A quieter place to think with AI");
-  await expect(page.getByRole("heading", { level: 1, name: "A quieter place to think with AI." })).toBeVisible();
-  const opens = page.getByRole("link", { name: "Open Nibie" });
-  await expect(opens).toHaveCount(2);
-  for (const link of await opens.all()) await expect(link).toHaveAttribute("href", "/chat");
-  const tries = page.getByRole("link", { name: "Try Nibie" });
-  await expect(tries).toHaveCount(2);
+  await expect(page).toHaveTitle("Nibie — A personal AI workspace for thinking, writing, and code");
+  await expect(page.getByRole("heading", { level: 1, name: "A personal AI workspace for thinking, writing, and code." })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open Nibie" })).toHaveCount(0);
+  const tries = page.getByRole("link", { name: "Try the demo" });
+  expect(await tries.count()).toBeGreaterThanOrEqual(3);
   for (const link of await tries.all()) await expect(link).toHaveAttribute("href", "/demo");
-  await expect(page.locator(".landing-hero").getByRole("link", { name: "Try Nibie" })).toHaveAttribute("href", "/demo");
-  await expect(page.getByRole("link", { name: "See how it works" })).toHaveAttribute("href", "#product");
+  await expect(page.locator(".landing-hero").getByRole("link", { name: "Try the demo" })).toHaveAttribute("href", "/demo");
+  await expect(page.getByRole("link", { name: "View on GitHub" })).toHaveAttribute("href", "https://github.com/habiibullahm/nibie-code");
+  await expect(page.getByText("No sign-up. The demo uses recorded replies.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "What Nibie does." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Rooms" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "How it's built" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "See it in 30 seconds." })).toBeVisible();
+  await expect(page.getByText("Help me tighten this before I send it to the team.")).toBeVisible();
+  await expect(page.getByText("Lead with the decision, then the reason. One sentence on what changed is enough.")).toBeVisible();
 });
 
 test("landing page has no horizontal overflow", async ({ page }) => {
@@ -49,7 +54,7 @@ test("an authenticated session can still open the landing page", async ({ page }
   await expect(page).toHaveURL((url) => url.pathname === "/chat", { timeout: 20_000 });
   await page.goto("/");
   await expect(page).toHaveURL((url) => url.pathname === "/");
-  await expect(page.getByRole("heading", { level: 1, name: "A quieter place to think with AI." })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "A personal AI workspace for thinking, writing, and code." })).toBeVisible();
 });
 
 
