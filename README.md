@@ -4,6 +4,8 @@
 
 [Try the demo](https://nibie-ai.vercel.app/demo)
 
+![Nibie demo](docs/screenshots/nibie-demo.gif)
+
 🔗 **Live App:** [https://nibie-ai.vercel.app/](https://nibie-ai.vercel.app/)
 
 > It's a context-aware workspace where you can organize work into **Rooms**, keep explicit **Memory** across conversations, retrieve from uploaded files, and continue projects without repeatedly explaining yourself.
