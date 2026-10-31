@@ -30,7 +30,8 @@
   --text-label: #a6a6a6;
   --text-placeholder: #a0a0a0;
   --accent: #d97757;
-  --accent-hover: #e18768;
+  --accent-hover: #c4684a;
+  --accent-active: #bf694d;
   --accent-fg: #171717;
   --emphasis: #c8c8c8;
   --disabled-bg: #303030;
@@ -86,6 +87,7 @@
   --text-placeholder: var(--text-4);
   --accent: #626a53;
   --accent-hover: #4f5842;
+  --accent-active: #45503c;
   --accent-fg: #fcfbf9;
   --emphasis: var(--accent);
   --disabled-bg: #deddd6;
@@ -120,6 +122,10 @@
 }
 
 :root {
+  --landing-primary: #d97757;
+  --landing-primary-hover: #c4684a;
+  --landing-primary-active: #bf694d;
+  --landing-primary-fg: #171717;
   --font-ui: var(--font-sans), Arial, Helvetica, sans-serif;
   --font-brand: var(--font-display), Georgia, "Times New Roman", serif;
   background: var(--bg-app);
@@ -500,6 +506,7 @@ a.account-menu-action { font: inherit; text-decoration: none; }
 .composer-icon:hover { color: var(--text); background: var(--hover); }
 .send-button { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border: 0; border-radius: 9px; color: var(--accent-fg); background: var(--accent); cursor: pointer; transition: background .15s,opacity .15s; }
 .send-button:hover:not(:disabled) { background: var(--accent-hover); }
+.send-button:active:not(:disabled) { background: var(--accent-active); }
 .send-button:disabled { background: var(--disabled-bg); color: var(--disabled-fg); cursor: default; }
 .send-spinner { width: 14px; height: 14px; border: 2px solid color-mix(in srgb, var(--accent-fg) 40%, transparent); border-top-color: var(--accent-fg); border-radius: 50%; animation: spin .65s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

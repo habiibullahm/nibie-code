@@ -12,15 +12,15 @@ for (const width of [320, 390]) {
       await page.screenshot({ path: testInfo.outputPath("mobile-header.png"), animations: "disabled" });
       await toggle.click();
       await expect(toggle).toHaveAttribute("aria-expanded", "true");
-      await expect(primary.getByRole("link", { name: "Open Nibie", exact: true })).toBeVisible();
+      await expect(primary.getByRole("link", { name: "Try the demo", exact: true })).toBeVisible();
       await page.screenshot({ path: testInfo.outputPath("mobile-menu.png"), animations: "disabled" });
       await page.keyboard.press("Escape");
       await expect(toggle).toHaveAttribute("aria-expanded", "false");
-      await expect(primary.getByRole("link", { name: "Open Nibie", exact: true })).toBeHidden();
+      await expect(primary.getByRole("link", { name: "Try the demo", exact: true })).toBeHidden();
       await expect(toggle).toBeFocused();
       await toggle.press("Enter");
       await page.keyboard.press("Tab");
-      await expect(primary.getByRole("link", { name: "Product", exact: true })).toBeFocused();
+      await expect(primary.getByRole("link", { name: "Features", exact: true })).toBeFocused();
       await primary.getByRole("link", { name: "Docs", exact: true }).click();
       await expect(page).toHaveURL(/\/docs$/);
       await expect(toggle).toHaveAttribute("aria-expanded", "false");
