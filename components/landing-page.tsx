@@ -10,7 +10,7 @@ const demoMessages = demoConversations.flatMap((conversation) => conversation.me
 
 const features = [
   { title: "Rooms", copy: "Keep a project's context, files, and threads together.", icon: Folder },
-  { title: "Fast or deep, per question", copy: "Choose Fast, Balanced, or High for each message.", icon: Gauge },
+  { title: "Choose the depth per question", copy: "Fast for quick answers, Balanced for everyday work, High when you need deeper reasoning.", icon: Gauge },
   { title: "Pick up where you left off", copy: "Conversations are saved, so you can return to the same thread.", icon: Clock },
 ] as const;
 
@@ -84,7 +84,7 @@ export function LandingPage() {
     <main id="content">
       <section className="landing-hero landing-shell" aria-labelledby="landing-hero-title">
         <h1 id="landing-hero-title">A personal AI workspace for thinking, writing, and code.</h1>
-        <p className="landing-lede">Pick fast or deep models per question, keep context in Rooms, and pick up any conversation where you left it.</p>
+        <p className="landing-lede">Choose Fast, Balanced, or High per question, keep context in Rooms, and pick up any conversation where you left it.</p>
         <div className="landing-actions">
           <Link className="landing-button" href={demoPath}>Try the demo <ArrowRight size={16} aria-hidden="true" /></Link>
           <a className="landing-button landing-button-secondary" href={githubRepoUrl} target="_blank" rel="noopener noreferrer">View on GitHub <Github size={16} aria-hidden="true" /></a>
