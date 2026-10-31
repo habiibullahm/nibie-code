@@ -1,71 +1,285 @@
 # Nibie
 
-Nibie is a personal AI workspace that helps you think, research, and continue your work—with less repetition.
+**A personal AI workspace for thinking, research, and continued work—with less repetition.**
 
-Use a conversation to continue a task, a Room to keep its brief and files together, and explicit Memory for facts you want to reuse. Product requirements and implementation guidance are maintained in [`docs/`](docs/).
+[Try the demo](https://nibie-ai.vercel.app/demo)
 
-## Local development
+🔗 **Live App:** [https://nibie-ai.vercel.app/](https://nibie-ai.vercel.app/)
 
-Use Node.js 22.12+ from the 22.x line and npm to match CI. Node.js 24.x is also supported by the current test toolchain.
+> It's a context-aware workspace where you can organize work into **Rooms**, keep explicit **Memory** across conversations, retrieve from uploaded files, and continue projects without repeatedly explaining yourself.
+
+![Nibie Chat Interface](docs/screenshots/hero.png)
+*Nibie's main interface showing chat with Rooms sidebar, conversation history, and the composer*
+
+## What is Nibie?
+
+Nibie is a full-stack personal AI workspace built with:
+
+- **Rooms** — Organized workspaces with briefs, instructions, and pinned context
+- **Explicit Memory** — Save, edit, and reuse facts across conversations
+- **File Intelligence** — Upload text, PDF, DOCX, CSV, and code files with hybrid lexical + vector retrieval
+- **Research Orchestrator** — Deep Research with Web Search, citations, and truthful incomplete/failed states
+- **Chat Core** — Streaming responses with Fast/Balanced/High modes, stop/retry/regenerate controls
+- **Usage Limits** — Weekly 500-credit allowance with provider spend guards
+- **Privacy First** — Owner-scoped PostgreSQL RLS, account export, conversation deletion
+
+## Key Features
+
+### Context & Organization
+- **Rooms** for project-specific context with editable briefs and instructions
+- **Pins** to mark important information for reuse
+- **Thread Summaries** that preserve continuity without sending full history
+- **Explicit Memory** that you control (save, edit, forget)
+
+### Files & Retrieval
+- Upload text, Markdown, CSV, JSON, PDF, DOCX, and source code (5 MB limit)
+- Hybrid retrieval: lexical search + optional semantic embeddings (pgvector)
+- Automatic Room-scoped file selection for relevant context
+- Chat attachments (up to 3 files, 10 MB each)
+
+### AI & Research
+- Fast (DeepSeek V4.1 Flash), Balanced (GPT-6 Luna), High (GPT-6.1 Sol) modes
+- Deep Research with bounded Web Search and citation tracking
+- Actions framework: GitHub read access, Web Search (more coming)
+- Streaming with SSE, stop/retry/regenerate, edit and resend
+
+### Quality & Safety
+- Row-level security (RLS) with owner-scoped data access
+- Cookie-bound Supabase clients (no service-role in browser)
+- Weekly usage limits (500 credits) and estimated spend guards
+- Untrusted external content handling (web/tool results never treated as instructions)
+
+## Architecture
+
+Nibie uses a **modular monolith** architecture with Next.js for the UI/API and a Fastify backend in active development.
+
+```mermaid
+graph TD
+    Browser[Browser Client]
+    NextJS[Next.js App Router]
+    Fastify[Fastify API<br/>in development]
+    Supabase[Supabase Auth]
+    Postgres[(PostgreSQL + pgvector<br/>RLS Enabled)]
+    Providers[AI Providers<br/>OpenAI, DeepSeek]
+    Storage[Supabase Storage<br/>File Uploads]
+
+    Browser -->|HTTPS| NextJS
+    NextJS -->|Server Actions & Routes| Postgres
+    NextJS -->|Auth Callbacks| Supabase
+    NextJS -->|Streaming Chat| Providers
+    NextJS -->|File Upload| Storage
+    
+    Fastify -.->|Future: Proxied Routes| NextJS
+    Fastify -.->|JWT Verification| Supabase
+    Fastify -.->|RLS with User Token| Postgres
+
+    style Fastify stroke-dasharray: 5 5
+```
+
+### Tech Stack
+
+**Frontend**
+- Next.js 16 (App Router)
+- React 19
+- TypeScript
+- Tailwind CSS
+- Server Actions + SSE streaming
+
+**Backend**
+- Next.js API Routes (current production)
+- Fastify 5 + TypeScript (implemented, not yet production—see [Status](#status))
+- Drizzle ORM for migrations
+- Server-side AI provider abstraction
+
+**Database & Auth**
+- Supabase Auth (email + Google OAuth)
+- PostgreSQL with `pgvector` extension
+- Row-Level Security (RLS) for all user tables
+- OpenAI embeddings (optional for semantic search)
+
+**Infrastructure**
+- Vercel (Next.js hosting, Seoul region)
+- Supabase (managed Postgres + Auth)
+- GitHub Actions (CI/CD, migrations)
+- Docker (local test database)
+
+## Testing & Quality
+
+Nibie has comprehensive test coverage across multiple layers:
+
+### Test Suites
+- **1,473 Unit Tests** (Vitest) — business logic, validation, context engine, AI routing
+- **E2E Tests** (Playwright) — chat flows, room creation, settings, file upload, research
+- **RLS Integration Tests** — PostgreSQL Docker container with automated reset
+- **AI Quality Evaluations** — response quality checks and Deep Research eval fixtures
+
+### CI Workflows
+- **PR Guard** — lint, typecheck, unit tests, release consistency checks
+- **Integration DB** — Drizzle migrations + RLS tests on PostgreSQL 17 + pgvector
+- **Fastify & Contracts** — independent package validation with Vitest
+- **Changelog Guard** — release note validation
+- **Preview Smoke Tests** — automated QA on Vercel Preview deployments
+- **AI Quality V2** — response quality regression checks
+
+### Code Quality
+- ESLint with Next.js config
+- TypeScript strict mode
+- Zod validation for all API boundaries
+- Content-based ESLint caching for CI performance
+
+## Status
+
+**Production:** Next.js serves all production traffic at [nibie-ai.vercel.app](https://nibie-ai.vercel.app/).
+
+**In Progress:** A Fastify API (`apps/api`) with health checks, request IDs, JWT auth verification, preference routes, and account export is implemented and tested (using `inject()`), but **not yet cut over to production**. Production traffic will remain on Next.js route handlers until operational migration gates are met. See [`docs/architecture/BACKEND_V2.md`](docs/architecture/BACKEND_V2.md) for the full migration plan.
+
+**Hidden:** Workbench V2 backend/preview exists but is hidden in production (`WORKBENCH_UI_ENABLED=false`).
+
+**Documentation:** Product direction in [`docs/product/PERSONAL_AI_WORKSPACE.md`](docs/product/PERSONAL_AI_WORKSPACE.md), V1 scope in [`docs/product/V1_RELEASE.md`](docs/product/V1_RELEASE.md).
+
+## Development Setup
+
+### Prerequisites
+
+- Node.js 22.12+ (from the 22.x line) or Node.js 24.x
+- npm (from the Node.js install)
+- PostgreSQL (via Supabase or local)
+
+### Quick Start
 
 ```bash
 npm ci
 npm run dev
 ```
 
-Available checks: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, and `npm run test:e2e`.
+Visit `http://localhost:3000`. Without provider keys, use `/preview` or `/preview/chat-core` for synthetic UI flows (no live generation).
 
-Copy `.env.example` to `.env.local` and fill the existing Supabase public URL/key
-and server-only provider variables for authenticated generation. Without those,
-`/preview` and the development-only `/preview/chat-core` exercise synthetic UI
-flows. They do not establish signed-in or live-provider acceptance. Keep private
-keys out of browser variables and version control.
+### Environment Variables
 
-For the existing local Supabase setup, use `npm run dev:local` and
-`npm run local:down`; see [local setup script](scripts/dev-local.mjs) and
-[branching/migration guidance](docs/engineering/BRANCHING_STRATEGY.md). Root DB/RLS
-checks use a dedicated Docker database through `npm run test:integration:local`.
+Copy `.env.example` to `.env.local` and configure:
 
-The independent Fastify/contracts packages use their own lockfiles:
+```bash
+# Required
+NEXT_PUBLIC_APP_URL=https://your-app-url.com
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
+DATABASE_URL=postgresql://user:pass@host:port/database
 
-```sh
+# AI Providers (server-only)
+SUMOPOD_API_KEY=your-sumopod-key           # Fast mode (DeepSeek)
+SUMOPOD_BASE_URL=https://sumopod-url
+OPENAI_API_KEY=your-openai-key             # Balanced + High modes
+
+# Optional
+TAVILY_API_KEY=your-tavily-key             # Web Search / Deep Research
+WEB_SEARCH_PROVIDER=tavily
+SUPABASE_SERVICE_ROLE_KEY=your-service-key # Action audit only
+```
+
+### Available Commands
+
+```bash
+# Development
+npm run dev                        # Start Next.js dev server
+npm run dev:local                  # Start with local Supabase
+npm run local:down                 # Stop local Supabase
+
+# Quality Checks
+npm run lint                       # ESLint
+npm run typecheck                  # TypeScript
+npm test                           # Vitest unit tests
+npm run test:integration:local     # RLS integration tests (Docker)
+npm run test:e2e                   # Playwright E2E tests
+npm run build                      # Next.js production build
+
+# Database
+npm run db:generate                # Generate Drizzle migration
+npm run db:migrate                 # Apply migrations
+
+# Fastify Packages (independent)
 npm ci --prefix packages/contracts
 npm run typecheck --prefix packages/contracts
 npm run build --prefix packages/contracts
+
 npm ci --prefix apps/api
 npm run typecheck --prefix apps/api
 npm test --prefix apps/api
 ```
 
-Build contracts before installing the API's local file dependency. Next.js still
-serves production traffic; implemented Fastify preference/account routes do not
-imply a production cutover. See [current architecture](docs/architecture/BACKEND_V2.md)
-and [architecture delivery status](docs/engineering/ARCHITECTURE_CLOSEOUT.md).
+### Supabase Setup
 
+1. Create a Supabase project and copy credentials to `.env.local`
+2. Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+3. Configure `DATABASE_URL` for Drizzle migrations (server-side only)
+4. Add `${NEXT_PUBLIC_APP_URL}/auth/callback` to Supabase Auth redirect allowlist
+5. Enable Email auth and configure Google OAuth provider
+6. Run `npm run db:migrate` to apply schema
 
-## Development workflow
+### Testing
 
-Nibie uses lightweight trunk-based development: `main` stays production-ready, normal work uses short-lived `feat/*`, `fix/*`, `refactor/*`, `chore/*`, and similar branches, and pull requests use Vercel Preview instead of a permanent staging branch. Large coordinated releases may temporarily use `release/vX.Y.Z` and delete it after release.
+**Integration Tests** require a local PostgreSQL database named exactly `nibie_ai` and the explicit opt-in `ALLOW_TEST_DATABASE_RESET=1`. These tests reset the database on every run.
 
-See [`docs/engineering/BRANCHING_STRATEGY.md`](docs/engineering/BRANCHING_STRATEGY.md) for the full workflow, branch naming rules, agent/worktree guidance, release flow, and merge policy.
+```bash
+# Easiest: Use the provided Docker setup
+npm run test:integration:local
 
-## Supabase and database setup
+# Or configure manually
+TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/nibie_ai
+ALLOW_TEST_DATABASE_RESET=1
+npm run test:integration
+```
 
-1. Create or select a Supabase project and copy `.env.example` to `.env.local`.
-2. Set `NEXT_PUBLIC_APP_URL` to the app's canonical origin, and set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` from the Nibie Supabase project API settings. Do not use a secret/service-role key in the app.
-3. Add `${NEXT_PUBLIC_APP_URL}/auth/callback` to the Supabase Auth redirect URL allowlist so email confirmation can return to the server callback.
-4. Set `DATABASE_URL` to the project's PostgreSQL connection string. It is used only by Drizzle migrations; keep it server-side.
-5. Apply schema changes locally with `npm run db:migrate`. Production migrations run in the Production DB Migration GitHub Actions workflow on every push to `main`; the Vercel build does not migrate.
+**E2E Tests** require environment configuration:
 
-The initial migration creates the user, conversation, and message tables, creates user rows from Supabase Auth sign-ups, and enables owner-scoped RLS. Normal application data access must use the cookie-bound Supabase client and publishable key so Postgres evaluates RLS as the signed-in user. Do not use service-role or privileged direct database connections for user-data requests.
+```bash
+E2E_USER_EMAIL=test@example.com
+E2E_USER_PASSWORD=testpassword
+E2E_BASE_URL=http://localhost:3000
+npm run test:e2e
+```
 
-RLS integration tests require a loopback PostgreSQL database named exactly `nibie_ai` and the explicit opt-in `ALLOW_TEST_DATABASE_RESET=1`; they reset its app/auth schemas. Configure `TEST_DATABASE_URL` only for that dedicated local test database. The suite rejects remote hosts even if they use the same database name. Never point this variable at staging or production. `npm run test:integration:local` starts and cleans up the dedicated Docker test database.
+### Development Workflow
 
+Nibie uses **trunk-based development** with `main` staying production-ready:
 
-## Product direction
+1. Update `main` before starting: `git pull origin main`
+2. Create a feature branch: `git checkout -b feat/your-feature`
+3. Commit and push: `git push -u origin HEAD`
+4. Open a pull request to `main`
+5. Merge after CI passes and review approval
 
-Nibie's product direction is documented in [`docs/product/PERSONAL_AI_WORKSPACE.md`](docs/product/PERSONAL_AI_WORKSPACE.md), with backend boundaries in [`docs/architecture/BACKEND_V2.md`](docs/architecture/BACKEND_V2.md).
+See [`docs/engineering/BRANCHING_STRATEGY.md`](docs/engineering/BRANCHING_STRATEGY.md) for the complete workflow, including release branches and worktree guidance.
 
+## Project Structure
 
+```
+nibie-code/
+├── app/                    # Next.js App Router (pages, layouts, routes)
+├── components/             # React components and UI
+├── lib/                    # Core business logic
+│   ├── ai/                # Provider abstraction, SSE, model registry
+│   ├── chat/              # Chat orchestration, streaming, persistence
+│   ├── context/           # Context engine (Room, files, Memory, profile)
+│   ├── files/             # File upload, parsing, hybrid retrieval
+│   ├── rooms/             # Room management and generation
+│   ├── research/          # Deep Research orchestrator
+│   ├── actions/           # GitHub/Web actions runtime
+│   └── db/                # Drizzle schema and types
+├── drizzle/               # Database migrations
+├── tests/
+│   ├── unit/              # Vitest unit tests
+│   ├── integration/       # RLS integration tests
+│   └── e2e/               # Playwright E2E tests
+├── apps/api/              # Fastify backend (not yet production)
+├── packages/contracts/    # Zod shared contracts
+└── docs/                  # Architecture, product direction, features
+```
 
-The implemented chat scope and release boundaries are in [`docs/product/V1_RELEASE.md`](docs/product/V1_RELEASE.md). Beta acceptance is tracked in [`docs/engineering/CHAT_V1_BETA_ACCEPTANCE.md`](docs/engineering/CHAT_V1_BETA_ACCEPTANCE.md). Original starter documents remain historical references under [`docs/archive/starter/`](docs/archive/starter/).
+## Contributing
+
+This is a personal portfolio project by Muhammad ([@habiibullahm](https://github.com/habiibullahm)), but feedback and suggestions are welcome via [issues](https://github.com/habiibullahm/nibie-code/issues).
+
+---
+
+Built by **Muhammad** • Backend & Full-Stack Developer  
+🌐 [nibie-ai.vercel.app](https://nibie-ai.vercel.app/) | 📧 Open to remote full-stack and AI engineering opportunities
