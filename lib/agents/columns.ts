@@ -1,0 +1,1 @@
+export const agentPublicColumns = "id,name,description,avatar,system_instructions,provider_binding,provider_config_id,system_mode,model,temperature,max_output_tokens,is_enabled,is_default,created_at,updated_at";

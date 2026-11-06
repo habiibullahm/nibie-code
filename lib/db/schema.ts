@@ -8,6 +8,7 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   pgEnum,
   pgTable,
   text,
@@ -168,6 +169,81 @@ export const roomFileChunks = pgTable("room_file_chunks", {
   check("room_file_chunks_content_bounds", sql`char_length(${table.content}) between 1 and 3000`),
 ]);
 
+// User-owned provider connection. secret_ciphertext is never readable by the authenticated role; use read_own_provider_secret.
+export const providerConfigs = pgTable(
+  "provider_configs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    providerType: text("provider_type").notNull(),
+    name: text("name").notNull(),
+    baseUrl: text("base_url").notNull(),
+    secretCiphertext: text("secret_ciphertext").notNull(),
+    keyHint: text("key_hint").notNull(),
+    configuration: jsonb("configuration").notNull().default(sql`'{}'::jsonb`),
+    isDefault: boolean("is_default").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("provider_configs_id_user_id_key").on(table.id, table.userId),
+    index("provider_configs_user_updated_idx").on(table.userId, table.updatedAt),
+    uniqueIndex("provider_configs_one_default_idx").on(table.userId).where(sql`${table.isDefault}`),
+    check("provider_configs_type_check", sql`${table.providerType} in ('nibie_router', 'openai_compatible')`),
+    check("provider_configs_name_length", sql`char_length(${table.name}) between 1 and 80 and ${table.name} = btrim(${table.name})`),
+    check("provider_configs_base_url_length", sql`char_length(${table.baseUrl}) between 8 and 300 and ${table.baseUrl} = btrim(${table.baseUrl}) and ${table.baseUrl} like 'https://%'`),
+    check("provider_configs_hint_length", sql`char_length(${table.keyHint}) between 2 and 8`),
+    check("provider_configs_configuration_empty", sql`${table.configuration} = '{}'::jsonb`),
+  ],
+);
+
+// User-owned custom agent. Routing is either a system mode or a user provider model.
+export const agents = pgTable(
+  "agents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    avatar: text("avatar").notNull().default("spark"),
+    systemInstructions: text("system_instructions"),
+    providerBinding: text("provider_binding").notNull(),
+    providerConfigId: uuid("provider_config_id"),
+    systemMode: text("system_mode"),
+    model: text("model"),
+    temperature: numeric("temperature", { precision: 3, scale: 2 }),
+    maxOutputTokens: integer("max_output_tokens"),
+    isEnabled: boolean("is_enabled").notNull().default(true),
+    isDefault: boolean("is_default").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("agents_id_user_id_key").on(table.id, table.userId),
+    index("agents_user_updated_idx").on(table.userId, table.updatedAt),
+    uniqueIndex("agents_one_default_idx").on(table.userId).where(sql`${table.isDefault}`),
+    foreignKey({
+      name: "agents_provider_owner_fk",
+      columns: [table.providerConfigId, table.userId],
+      foreignColumns: [providerConfigs.id, providerConfigs.userId],
+    }).onDelete("restrict"),
+    check("agents_name_length", sql`char_length(${table.name}) between 1 and 80 and ${table.name} = btrim(${table.name})`),
+    check("agents_description_length", trimmedText(table.description, 1, 500)),
+    check("agents_avatar_check", sql`${table.avatar} in ('spark', 'code', 'search', 'write', 'book')`),
+    check("agents_instructions_length", trimmedText(table.systemInstructions, 1, 8000)),
+    check("agents_binding_check", sql`${table.providerBinding} in ('system', 'explicit', 'default_provider')`),
+    check("agents_model_length", trimmedText(table.model, 1, 128)),
+    check("agents_temperature_check", sql`${table.temperature} is null or ${table.temperature} between 0 and 2`),
+    check("agents_max_tokens_check", sql`${table.maxOutputTokens} is null or ${table.maxOutputTokens} between 1 and 8192`),
+    check(
+      "agents_route_shape",
+      sql`(${table.providerBinding} = 'system' AND ${table.providerConfigId} IS NULL AND ${table.systemMode} in ('Fast', 'Balanced', 'High') AND ${table.model} IS NULL AND ${table.temperature} IS NULL AND ${table.maxOutputTokens} IS NULL)
+        OR (${table.providerBinding} = 'explicit' AND ${table.providerConfigId} IS NOT NULL AND ${table.systemMode} IS NULL AND ${table.model} IS NOT NULL)
+        OR (${table.providerBinding} = 'default_provider' AND ${table.providerConfigId} IS NULL AND ${table.systemMode} IS NULL AND ${table.model} IS NOT NULL)`,
+    ),
+  ],
+);
+
 export const conversations = pgTable(
   "conversations",
   {
@@ -177,13 +253,40 @@ export const conversations = pgTable(
     title: text("title").notNull().default("New chat"),
     selectedModel: text("selected_model").notNull().default("default"),
     archivedAt: timestamp("archived_at", { withTimezone: true, mode: "date" }),
+    agentId: uuid("agent_id"),
+    agentNameSnapshot: text("agent_name_snapshot"),
+    routingKind: text("routing_kind"),
+    systemModeSnapshot: text("system_mode_snapshot"),
+    providerConfigId: uuid("provider_config_id"),
+    modelSnapshot: text("model_snapshot"),
+    instructionsSnapshot: text("instructions_snapshot"),
+    temperatureSnapshot: numeric("temperature_snapshot", { precision: 3, scale: 2 }),
+    maxOutputTokensSnapshot: integer("max_output_tokens_snapshot"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
   },
   (table) => [
     index("conversations_user_updated_idx").on(table.userId, table.updatedAt),
     index("conversations_user_room_idx").on(table.userId, table.roomId),
+    index("conversations_user_agent_idx").on(table.userId, table.agentId),
     unique("conversations_id_user_id_key").on(table.id, table.userId),
+    // Same-owner link. The migration nulls only agent_id when the agent is deleted (ON DELETE SET NULL (agent_id)); user_id stays.
+    foreignKey({
+      name: "conversations_agent_owner_fk",
+      columns: [table.agentId, table.userId],
+      foreignColumns: [agents.id, agents.userId],
+    }).onDelete("set null"),
+    foreignKey({
+      name: "conversations_provider_owner_fk",
+      columns: [table.providerConfigId, table.userId],
+      foreignColumns: [providerConfigs.id, providerConfigs.userId],
+    }).onDelete("restrict"),
+    check(
+      "conversations_routing_shape",
+      sql`${table.routingKind} is null
+        OR (${table.routingKind} = 'system_mode' AND ${table.systemModeSnapshot} in ('Fast', 'Balanced', 'High') AND ${table.providerConfigId} is null AND ${table.modelSnapshot} is null AND ${table.agentNameSnapshot} is not null)
+        OR (${table.routingKind} = 'user_provider' AND ${table.systemModeSnapshot} is null AND ${table.providerConfigId} is not null AND ${table.modelSnapshot} is not null AND ${table.agentNameSnapshot} is not null)`,
+    ),
     // Same-owner link. The migration nulls only room_id when the room is deleted; user_id stays.
     foreignKey({
       name: "conversations_room_owner_fk",
