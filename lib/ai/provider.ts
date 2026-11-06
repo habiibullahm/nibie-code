@@ -79,13 +79,7 @@ async function readErrorCode(response: Response): Promise<string | null> {
 
 export const openAiCompatibleProvider: ChatProvider = {
   async stream(mode, messages, signal) {
-    const route = resolveRoute(mode, getAiConfig());
-    try {
-      return await streamRoute(route, messages, signal);
-    } catch (error) {
-      if (route.provider !== "openai_compatible" && error instanceof ProviderRequestError) throw new Error("AI provider request failed.");
-      throw error;
-    }
+    return streamRoute(resolveRoute(mode, getAiConfig()), messages, signal);
   },
 };
 

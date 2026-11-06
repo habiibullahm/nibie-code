@@ -69,9 +69,9 @@ describe("provider adapter routes each mode server-side", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("hides provider failures behind a generic error", async () => {
+  it("maps fetch network failures to unavailable ProviderRequestError", async () => {
     configure(); vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("socket detail with secret"); }));
-    await expect(openAiCompatibleProvider.stream("Fast", messages, new AbortController().signal)).rejects.toThrow("AI provider request failed.");
+    await expect(openAiCompatibleProvider.stream("Fast", messages, new AbortController().signal)).rejects.toMatchObject({ code: "unavailable" });
   });
 
   it("Fast still reaches Sumopod when the OpenAI configuration is broken, while Balanced and High fail closed without any request", async () => {
