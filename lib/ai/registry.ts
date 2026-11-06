@@ -12,7 +12,7 @@ const modeOrder: readonly ChatModel[] = ["Fast", "Balanced", "High"];
 
 export type ReasoningEffortSetting = "low" | "medium" | "high";
 // Which backend serves a mode. Each has its own adapter in lib/ai/provider.ts.
-export type ProviderId = "sumopod" | "openai";
+export type ProviderId = "sumopod" | "openai" | "openai_compatible";
 // One authoritative server-side route per mode. Nothing here is ever sent to the browser.
 export type ModelRoute = {
   provider: ProviderId;
@@ -24,6 +24,7 @@ export type ModelRoute = {
   reasoningEffort?: ReasoningEffortSetting;
   // Explicit output ceiling, counting hidden reasoning tokens. Set only where the provider's own default is too low to finish a long request.
   maxOutputTokens?: number;
+  temperature?: number;
 };
 
 export type AiConfig = {
