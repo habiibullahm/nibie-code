@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status (2026-11-07):** Tasks 1–3 are on `origin/feat/custom-agents`. Tasks 4–9 are implemented on `feature/custom-agents-routing-53cd` (provider save, model test, agent CRUD, conversation snapshot, untrusted instructions, snapshotted send). Tasks 10–12 (settings UI and the chat picker) are not done. See `docs/engineering/CUSTOM_AGENTS_HANDOFF.md`. The source-order sentence was shortened so the existing 1,450-token context fixture still fits.
+
 **Goal:** Let each user own multiple custom agents, each with its own instructions and provider route, and add Nibie Router as one OpenAI-compatible provider, without replacing Fast / Balanced / High.
 
 **Architecture:** Keep the existing server route table in `lib/ai/registry.ts` and the single Chat Completions stream in `lib/ai/provider.ts`. Add owner-scoped `provider_configs` and `agents`. Copy the chosen route onto the conversation at creation time. Later edits to an agent do not rewrite conversations that already exist. A conversation with no agent snapshot keeps today's mode behavior. Nibie Router and custom OpenAI-compatible hosts share that same stream. They do not get a second client.
