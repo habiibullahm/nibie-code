@@ -7,7 +7,7 @@ import type { WebContextInput } from "@/lib/web/types";
 export type { RoomContextInput } from "@/lib/context/room-context";
 export type { WebContextInput } from "@/lib/web/types";
 
-export type ContextSourceType = "core" | "profile" | "room" | "pins" | "file" | "attachment" | "web" | "memory" | "thread_summary" | "recent_messages" | "current_request";
+export type ContextSourceType = "core" | "agent" | "profile" | "room" | "pins" | "file" | "attachment" | "web" | "memory" | "thread_summary" | "recent_messages" | "current_request";
 
 export type ContextAuthority = "policy" | "untrusted_data";
 
@@ -28,8 +28,8 @@ export type ContextBlock = {
 };
 
 export type ContextSourceDiagnostic = {
-  type: "profile" | "room" | "pins" | "file" | "attachment" | "web" | "memory" | "thread_summary" | "recent_messages";
-  label: "Your profile" | "This room" | "Pinned context" | "File context" | "Attachments" | "Web sources" | "Saved memories" | "Thread summary" | "Recent conversation";
+  type: "agent" | "profile" | "room" | "pins" | "file" | "attachment" | "web" | "memory" | "thread_summary" | "recent_messages";
+  label: "This agent" | "Your profile" | "This room" | "Pinned context" | "File context" | "Attachments" | "Web sources" | "Saved memories" | "Thread summary" | "Recent conversation";
   state: "included" | "not_used";
   reason: string;
 };
@@ -135,6 +135,8 @@ export type BuildContextInput = {
   recallOperation?: RecallOperationStatus | null;
   // Optional authoritative product instruction (e.g. Deep Research synthesis guidance). Not untrusted web text.
   extraPolicyInstruction?: string | null;
+  // Frozen agent instructions for this conversation. Untrusted user data, never product policy.
+  agentInstructions?: string | null;
 };
 
 export class ContextBuildError extends Error {

@@ -5,9 +5,13 @@ import { schemaUnavailable } from "@/lib/chat/schema-error";
 import { validateConversationId, validateMessage, type ChatModel } from "@/lib/chat/validation";
 import { resolveMode } from "@/lib/chat/models";
 import { modelChoiceInputSchema, normalizeSavedMode } from "@/lib/chat/legacy-mode";
-import { chatProvider, configuredModelLabel } from "@/lib/ai/provider";
+import { chatProvider, configuredModelLabel, streamRoute } from "@/lib/ai/provider";
+import { ProviderRequestError } from "@/lib/ai/provider-error";
 import { toProviderMessages } from "@/lib/ai/provider-messages";
-import { contextCapabilitiesFor, getModelOptions, providerFor } from "@/lib/ai/registry";
+import { assertProviderBaseUrl } from "@/lib/ai/provider-url";
+import { contextCapabilitiesFor, getAiConfig, getModelOptions, providerFor, resolveRoute, type ModelRoute } from "@/lib/ai/registry";
+import { planFromSnapshot } from "@/lib/agents/resolve-turn";
+import { decryptSecret } from "@/lib/crypto/secret-box";
 import { sanitizeModelOutput } from "@/lib/ai/sanitize-model-output";
 import { citationSourcesIncludedInContext } from "@/lib/citations/included";
 import { citationViewsFromPrepared } from "@/lib/citations/persist";
@@ -59,6 +63,22 @@ export const maxDuration = 180;
 
 const encoder = new TextEncoder();
 const safeError = "Nibie couldn't complete that response. Please try again.";
+const conversationSnapshotColumns = "agent_name_snapshot,routing_kind,system_mode_snapshot,provider_config_id,model_snapshot,instructions_snapshot,temperature_snapshot,max_output_tokens_snapshot";
+
+type ChatConversation = {
+  id: string;
+  selected_model: string;
+  room_id: string | null;
+  temporary_expires_at?: string | null;
+  routing_kind?: "system_mode" | "user_provider" | null;
+  agent_name_snapshot?: string | null;
+  system_mode_snapshot?: string | null;
+  provider_config_id?: string | null;
+  model_snapshot?: string | null;
+  instructions_snapshot?: string | null;
+  temperature_snapshot?: number | string | null;
+  max_output_tokens_snapshot?: number | null;
+};
 
 /**
  * Shared HTTP usage gate for paths that open SSE before synthesis
@@ -164,7 +184,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   // The thread summary is optional context: a failed read is logged and the reply continues without it.
   // A temporary chat never uses its thread summary; one is never written for it, so the read below simply finds none.
   const [{ data: loadedConversation, error: loadedConversationError }, { data: userMessage, error: messageError }, { data: recent, error: readError }, preferenceState, attachmentResult, loadedSummary] = await Promise.all([
-    supabase.from("conversations").select("id,selected_model,room_id,temporary_expires_at").eq("id", parsedId.data).maybeSingle<{ id: string; selected_model: string; room_id: string | null; temporary_expires_at?: string | null }>(),
+    supabase.from("conversations").select(`id,selected_model,room_id,temporary_expires_at,${conversationSnapshotColumns}`).eq("id", parsedId.data).maybeSingle<ChatConversation>(),
     supabase.from("messages").select("id,position,content").eq("id", parsedMessageId.data).eq("conversation_id", parsedId.data).eq("role", "user").eq("status", "complete").maybeSingle(),
     supabase.from("messages").select("id,role,content,status,position").eq("conversation_id", parsedId.data).eq("status", "complete").order("position", { ascending: false }).limit(34),
     loadOwnerPreferences(supabase),
@@ -178,12 +198,12 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   if (schemaUnavailable(conversationError)) {
     const ordinary = await supabase.from("conversations").select("id,selected_model,room_id").eq("id", parsedId.data).maybeSingle();
     conversationError = ordinary.error;
-    conversation = ordinary.data ? { ...(ordinary.data as unknown as { id: string; selected_model: string; room_id: string | null }), temporary_expires_at: null } : null;
+    conversation = ordinary.data ? { ...(ordinary.data as unknown as { id: string; selected_model: string; room_id: string | null }), temporary_expires_at: null, routing_kind: null } : null;
   }
   if (schemaUnavailable(conversationError)) {
     const legacy = await supabase.from("conversations").select("id,selected_model").eq("id", parsedId.data).maybeSingle();
     conversationError = legacy.error;
-    conversation = legacy.data ? { ...(legacy.data as unknown as { id: string; selected_model: string }), room_id: null } : null;
+    conversation = legacy.data ? { ...(legacy.data as unknown as { id: string; selected_model: string }), room_id: null, routing_kind: null } : null;
   }
   if (conversationError) return NextResponse.json({ error: safeError }, { status: 503 });
   // An expired temporary chat is treated as already deleted.
@@ -194,7 +214,9 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   const summary = temporary ? null : loadedSummary;
   const historyIntent = !temporary && !deepResearch && typeof userMessage?.content === "string"
     ? detectHistoryRecallIntent(userMessage.content) : null;
-  if (!historyIntent && requestedModel && requestedModel.data !== "Auto" && !availableModes.includes(requestedModel.data)) return NextResponse.json({ error: "That model isn't available." }, { status: 400 });
+  const routingKind = conversation.routing_kind === "system_mode" || conversation.routing_kind === "user_provider" ? conversation.routing_kind : null;
+  if (routingKind && deepResearch) return NextResponse.json({ error: "Deep Research stays on Nibie's built-in modes." }, { status: 400 });
+  if (!routingKind && !historyIntent && requestedModel && requestedModel.data !== "Auto" && !availableModes.includes(requestedModel.data)) return NextResponse.json({ error: "That model isn't available." }, { status: 400 });
   let room: RoomContextInput | null = null;
   if (conversation.room_id) {
     const [{ data: roomRow, error: roomError }, { data: briefRow, error: briefError }, { data: pinRows, error: pinError }] = await Promise.all([
@@ -229,7 +251,11 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
     );
     if (matches.length) files = prioritizeRoomFileMatches(files ?? [], matches);
   }
-  const mode = requestedModel?.data && requestedModel.data !== "Auto" ? requestedModel.data : resolveMode(normalizeSavedMode(conversation.selected_model), availableModes);
+  const mode = routingKind === "system_mode"
+    ? normalizeSavedMode(conversation.system_mode_snapshot)
+    : routingKind === "user_provider"
+      ? "Balanced"
+      : requestedModel?.data && requestedModel.data !== "Auto" ? requestedModel.data : resolveMode(normalizeSavedMode(conversation.selected_model), availableModes);
   if (!mode && !historyIntent) return NextResponse.json({ error: safeError }, { status: 503 });
   if (messageError) return NextResponse.json({ error: safeError }, { status: 503 });
   if (!userMessage) return NextResponse.json({ error: "Message unavailable." }, { status: 404 });
@@ -491,6 +517,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       webVerificationUnavailable,
       memories,
       recallOperation,
+      agentInstructions: conversation.instructions_snapshot,
       messages: rows.map((row) => ({ role: row.role as "user" | "assistant", content: row.content, position: row.position })),
       omittedMessagePositions,
       currentPosition: userMessage.position,
@@ -617,16 +644,36 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   const providerStartedAt = Date.now();
   const timeoutError = "The provider took too long to finish this response. Please try again.";
   let responseStream: ReadableStream<Uint8Array>;
-  try { responseStream = await chatProvider.stream(mode, prompt, lifecycle.signal); }
+  let turn: { route: ModelRoute | null; headers?: { name: string; value: string }[] };
+  try {
+    turn = await openTurn(supabase, conversation, mode);
+  } catch (error) {
+    const providerError = error instanceof ProviderRequestError ? error : new ProviderRequestError("unavailable", null);
+    lifecycle.stopWatching();
+    try {
+      logError("chat.response.failed", { requestId, durationMs: durationMs(), ...providerFailureFields(providerError) });
+      await releaseReservation();
+      await persist(providerError.message, "error");
+      return NextResponse.json({ error: providerError.message }, { status: providerHttpStatus(providerError) });
+    } finally { lifecycle.cleanup(); }
+  }
+  try {
+    responseStream = turn.route
+      ? await streamRoute(turn.route, prompt, lifecycle.signal, turn.headers)
+      : await chatProvider.stream(mode, prompt, lifecycle.signal);
+  }
   catch (error) {
     lifecycle.stopWatching();
     try {
       const interrupted = lifecycle.userStopped || lifecycle.clientCancelled || request.signal.aborted;
+      const providerError = error instanceof ProviderRequestError ? error : null;
       if (interrupted) logWarn("chat.response.interrupted", { requestId, stage: "provider", status: "interrupted", durationMs: durationMs() });
       else logError("chat.response.failed", { requestId, durationMs: durationMs(), ...providerFailureFields(error) });
       if (!interrupted) await releaseReservation();
-      if (!lifecycle.userStopped) await persist(lifecycle.clientCancelled ? stoppedPlaceholder : "Response unavailable.", lifecycle.clientCancelled ? "interrupted" : "error");
-      return NextResponse.json({ error: lifecycle.providerTimedOut ? timeoutError : safeError }, { status: lifecycle.providerTimedOut ? 504 : 502 });
+      if (!lifecycle.userStopped) await persist(lifecycle.clientCancelled ? stoppedPlaceholder : providerError && !lifecycle.providerTimedOut ? providerError.message : "Response unavailable.", lifecycle.clientCancelled ? "interrupted" : "error");
+      return NextResponse.json({
+        error: lifecycle.providerTimedOut ? timeoutError : providerError ? providerError.message : safeError,
+      }, { status: lifecycle.providerTimedOut ? 504 : providerError ? providerHttpStatus(providerError) : 502 });
     } finally { lifecycle.cleanup(); }
   }
 
@@ -673,8 +720,8 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
           logGenerationTelemetry({
             requestId,
             logicalMode: mode,
-            provider: providerFor(mode),
-            model: configuredModelLabel(mode),
+            provider: routingKind === "user_provider" ? "user" : providerFor(mode),
+            model: routingKind === "user_provider" ? "user" : configuredModelLabel(mode),
             usageKind,
             usage: costEstimate,
             providerTtftMs: generation.providerTtftMs,
@@ -700,8 +747,63 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   return new Response(stream, { headers });
 }
 
+function providerHttpStatus(error: ProviderRequestError) {
+  if (error.code === "authentication_failed") return 401;
+  if (error.code === "insufficient_balance") return 402;
+  if (error.code === "rate_limited") return 429;
+  return 502;
+}
+
+function asFinite(value: number | string | null | undefined) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+async function openTurn(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, conversation: ChatConversation, mode: ChatModel): Promise<{ route: ModelRoute | null; headers?: { name: string; value: string }[] }> {
+  const routingKind = conversation.routing_kind === "system_mode" || conversation.routing_kind === "user_provider" ? conversation.routing_kind : null;
+  if (routingKind == null) return { route: planFromSnapshot({ routing_kind: null, creditMode: mode }, null, null).route };
+  if (routingKind === "system_mode") {
+    const systemRoute = resolveRoute(mode, getAiConfig());
+    return { route: planFromSnapshot({ routing_kind: "system_mode", creditMode: mode, agent_name_snapshot: conversation.agent_name_snapshot, system_mode_snapshot: mode }, systemRoute, null).route };
+  }
+  if (!conversation.provider_config_id || !conversation.model_snapshot) throw new ProviderRequestError("unavailable", null);
+  const config = await supabase.from("provider_configs").select("provider_type,base_url").eq("id", conversation.provider_config_id).maybeSingle();
+  if (config.error || !config.data?.base_url || (config.data.provider_type !== "nibie_router" && config.data.provider_type !== "openai_compatible")) {
+    throw new ProviderRequestError("unavailable", null);
+  }
+  const packed = await supabase.rpc("read_own_provider_secret", { p_config_id: conversation.provider_config_id });
+  if (packed.error || typeof packed.data !== "string" || !packed.data) throw new ProviderRequestError("unavailable", null);
+  let secret;
+  try { secret = decryptSecret(packed.data); } catch { throw new ProviderRequestError("unavailable", null); }
+  let baseUrl: string;
+  try { baseUrl = assertProviderBaseUrl(config.data.provider_type, config.data.base_url); } catch { throw new ProviderRequestError("unavailable", null); }
+  const temperature = asFinite(conversation.temperature_snapshot);
+  const userRoute: ModelRoute = {
+    provider: "openai_compatible",
+    baseUrl,
+    apiKey: secret.apiKey,
+    model: conversation.model_snapshot,
+    ...(temperature != null ? { temperature } : {}),
+    ...(conversation.max_output_tokens_snapshot != null ? { maxOutputTokens: conversation.max_output_tokens_snapshot } : {}),
+  };
+  return {
+    route: planFromSnapshot({
+      routing_kind: "user_provider",
+      creditMode: "Balanced",
+      agent_name_snapshot: conversation.agent_name_snapshot,
+      model_snapshot: conversation.model_snapshot,
+    }, null, userRoute).route,
+    headers: secret.headers,
+  };
+}
+
 function providerFailureFields(error: unknown) {
   const base = { stage: "provider", code: operationalCodes.aiProviderFailed };
+  if (error instanceof ProviderRequestError) return { ...base, reason: error.code };
   if (!(error instanceof Error)) return { ...base, reason: "request_failed" };
   if (error.message.startsWith("Missing AI configuration:")) {
     const missing = error.message.slice("Missing AI configuration:".length).split(",").map((name) => name.trim()).filter((name) => /^AI_[A-Z0-9_]+$/.test(name));

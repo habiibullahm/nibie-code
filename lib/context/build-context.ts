@@ -1,5 +1,6 @@
 import { contextPolicyFor, CONTEXT_POLICY_VERSION, HISTORY_INCOMPLETE_INSTRUCTION } from "@/lib/context/context-policy";
 import { ContextBuildError, type BuildContextInput, type ContextBlock, type ContextDiagnostics, type ContextPlan, type ContextSourceDiagnostic, type ThreadMessage } from "@/lib/context/context-types";
+import { renderAgentContext } from "@/lib/context/agent-context";
 import { renderAttachmentContext } from "@/lib/context/attachment-context";
 import { renderFileContext } from "@/lib/context/file-context";
 import { pinPieces, type PinPiece } from "@/lib/context/pin-context";
@@ -92,6 +93,16 @@ function assembleContext(input: BuildContextInput, historyIncomplete: boolean): 
       summaryIncluded = true;
       remaining.value -= tokens;
     } else summaryDroppedForBudget = true;
+  }
+  const agentText = renderAgentContext(input.agentInstructions);
+  let agentIncluded = false;
+  let agentDropped = false;
+  if (agentText) {
+    const tokens = estimateTokens(agentText);
+    if (tokens <= remaining.value) {
+      agentIncluded = true;
+      remaining.value -= tokens;
+    } else agentDropped = true;
   }
   const coveredThrough = summaryIncluded && summary ? summary.coversThroughPosition : 0;
   const uncoveredOlder = olderMessages.filter((message) => message.position > coveredThrough);
@@ -192,7 +203,7 @@ function assembleContext(input: BuildContextInput, historyIncomplete: boolean): 
     corePolicyText = corePolicyTextFor(false);
     coreTokens = estimateTokens(corePolicyText);
   }
-  const truncated = countCapOmissions > 0 || budgetOmissions > 0 || droppedMessages.length > 0 || droppedPieces.length > 0 || droppedRoom.length > 0 || droppedPins.length > 0 || Boolean(renderedFiles?.truncated) || Boolean(renderedAttachments?.truncated) || Boolean(renderedWeb?.truncated) || Boolean(renderedMemories?.truncated) || summaryDroppedForBudget;
+  const truncated = countCapOmissions > 0 || budgetOmissions > 0 || droppedMessages.length > 0 || droppedPieces.length > 0 || droppedRoom.length > 0 || droppedPins.length > 0 || agentDropped || Boolean(renderedFiles?.truncated) || Boolean(renderedAttachments?.truncated) || Boolean(renderedWeb?.truncated) || Boolean(renderedMemories?.truncated) || summaryDroppedForBudget;
 
   const profileText = includedPieces.map((piece) => piece.text).join("\n");
   const roomText = includedRoom.map((piece) => piece.text).join("\n\n");
@@ -205,6 +216,9 @@ function assembleContext(input: BuildContextInput, historyIncomplete: boolean): 
     block({ id: "core", authority: "policy", priority: 1, required: true, text: corePolicyText, tokenEstimate: coreTokens, included: true, exclusionReason: null }),
     block({ id: "profile", authority: "untrusted_data", priority: 4, required: false, text: profileText, tokenEstimate: profileText ? estimateTokens(profileText) : 0, included: Boolean(profileText), exclusionReason: profileText ? null : input.preferenceReadFailed ? "read_failed" : droppedPieces.length && !includedPieces.length ? "budget" : "defaults_only" }),
   ];
+  if (agentText) {
+    blocks.push(block({ id: "agent", authority: "untrusted_data", priority: 4, required: false, text: agentText, tokenEstimate: estimateTokens(agentText), included: agentIncluded, exclusionReason: agentIncluded ? null : "budget" }));
+  }
   if (hasRoom) {
     blocks.push(block({ id: "room", authority: "untrusted_data", priority: 5, required: false, text: roomText, tokenEstimate: roomText ? estimateTokens(roomText) : 0, included: Boolean(roomText), exclusionReason: roomText ? null : droppedRoom.length ? "budget" : "not_needed" }));
     blocks.push(block({ id: "pins", authority: "untrusted_data", priority: 5, required: false, text: pinText, tokenEstimate: pinText ? estimateTokens(pinText) : 0, included: Boolean(pinText), exclusionReason: pinText ? null : droppedPins.length ? "budget" : "not_needed" }));
@@ -277,6 +291,12 @@ function assembleContext(input: BuildContextInput, historyIncomplete: boolean): 
       ? { type: "web", label: "Web sources", state: "not_used", reason: WEB_VERIFICATION_UNAVAILABLE_DIAGNOSTIC_REASON }
       : null;
 
+  const agentDiagnostic: ContextSourceDiagnostic | null = agentText
+    ? agentIncluded
+      ? { type: "agent", label: "This agent", state: "included", reason: "Agent instructions" }
+      : { type: "agent", label: "This agent", state: "not_used", reason: "Not used for this reply." }
+    : null;
+
   const memoryDiagnostic: ContextSourceDiagnostic | null = requestedMemories
     ? renderedMemories?.includedCount
       ? { type: "memory", label: "Saved memories", state: "included", reason: renderedMemories.truncated ? "Partly included: some memories did not fit this reply." : renderedMemories.includedCount === 1 ? "A saved memory" : "Saved memories" }
@@ -297,6 +317,7 @@ function assembleContext(input: BuildContextInput, historyIncomplete: boolean): 
     if (attachmentDiagnostic) sources.splice(sources.findIndex((source) => source.type === "recent_messages"), 0, attachmentDiagnostic);
     if (webDiagnostic) sources.splice(sources.findIndex((source) => source.type === "recent_messages"), 0, webDiagnostic);
     if (memoryDiagnostic) sources.splice(sources.findIndex((source) => source.type === "recent_messages"), 0, memoryDiagnostic);
+    if (agentDiagnostic) sources.unshift(agentDiagnostic);
     diagnostics = { sources, recentMessageCount: dialogue.length };
   } catch {
     diagnostics = { sources: [], recentMessageCount: dialogue.length };

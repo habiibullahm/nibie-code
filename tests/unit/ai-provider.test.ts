@@ -110,6 +110,20 @@ describe("provider adapter routes each mode server-side", () => {
     });
   });
 
+  it("sends caller headers and does not let them replace authorization", async () => {
+    configure();
+    const { fetchMock } = stubFetch();
+    const route = { provider: "openai_compatible" as const, baseUrl: "https://router.nibie.app/v1", apiKey: "router-key", model: "m" };
+    await streamRoute(route, messages, new AbortController().signal, [
+      { name: "X-Title", value: "nibie" },
+      { name: "Authorization", value: "Bearer stolen" },
+    ]);
+    const init = (fetchMock.mock.calls as unknown as [unknown, { headers: Record<string, string> }][])[0]?.[1];
+    expect(init.headers.authorization).toBe("Bearer router-key");
+    expect(init.headers["X-Title"]).toBe("nibie");
+    expect(JSON.stringify(init.headers)).not.toContain("stolen");
+  });
+
   it("maps a 401 and a network failure to safe errors", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 401 })));
     const route = { provider: "openai_compatible" as const, baseUrl: "https://router.nibie.app/v1", apiKey: "bad", model: "m" };

@@ -44,14 +44,28 @@ const requestBodies: Record<ProviderId, (route: ModelRoute, messages: ProviderMe
   }),
 };
 
-export async function streamRoute(route: ModelRoute, messages: ProviderMessage[], signal: AbortSignal): Promise<ReadableStream<Uint8Array>> {
+const blockedRequestHeaders = new Set(["authorization", "host", "cookie", "content-length", "proxy-authorization", "content-type"]);
+
+function requestHeaders(apiKey: string, extra?: { name: string; value: string }[]) {
+  const headers: Record<string, string> = { "content-type": "application/json", authorization: `Bearer ${apiKey}` };
+  for (const header of extra ?? []) {
+    const name = header.name?.trim?.() ?? "";
+    if (!/^[A-Za-z0-9-]{1,40}$/.test(name) || blockedRequestHeaders.has(name.toLowerCase())) continue;
+    if (typeof header.value !== "string" || header.value.length === 0 || header.value.length > 200) continue;
+    headers[name] = header.value;
+  }
+  headers.authorization = `Bearer ${apiKey}`;
+  return headers;
+}
+
+export async function streamRoute(route: ModelRoute, messages: ProviderMessage[], signal: AbortSignal, extraHeaders?: { name: string; value: string }[]): Promise<ReadableStream<Uint8Array>> {
   let response: Response;
   try {
     response = await fetch(`${route.baseUrl}/chat/completions`, {
       method: "POST",
       redirect: "manual",
       signal,
-      headers: { "content-type": "application/json", authorization: `Bearer ${route.apiKey}` },
+      headers: requestHeaders(route.apiKey, extraHeaders),
       body: JSON.stringify(requestBodies[route.provider](route, messages)),
     });
   } catch (error) {
