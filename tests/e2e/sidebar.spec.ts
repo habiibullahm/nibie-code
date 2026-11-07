@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { fulfillAgentsList, rscActionBody } from "./chat-core-actions";
 
 test("desktop sidebar collapses to an accessible primary navigation rail", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -390,9 +391,10 @@ test("a long thread displays an active summary from response diagnostics", async
   await page.route("**/preview/chat-core**", async (route) => {
     if (route.request().method() !== "POST" || !route.request().headers()["next-action"]) return route.continue();
     const args = JSON.parse(route.request().postData() ?? "[]") as unknown[];
+    if (await fulfillAgentsList(route, args)) return;
     if (args.length !== 4) return route.abort();
     const result = { data: { id: args[2], position: 5 } };
-    await route.fulfill({ contentType: "text/x-component", body: `0:{"a":"$@1","f":[],"b":"development"}\n1:${JSON.stringify(result)}\n` });
+    await route.fulfill({ contentType: "text/x-component", body: rscActionBody(result) });
   });
   await page.addInitScript(() => {
     const originalFetch = window.fetch;

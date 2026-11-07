@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import { fulfillAgentsList, rscActionBody } from "./chat-core-actions";
 import { clickStop, expect, test } from "./stop-diagnostics";
 
 // This spec only visits the synthetic dev harness; retain artifacts when a failure occurs.
@@ -38,6 +39,7 @@ async function workspace(page: Page, mode: string, stopFailure = false, holdMode
     // Intercept the real workspace's Next action boundary; no DB action runs.
     if (!route.request().headers()["next-action"]) return route.abort();
     const args = JSON.parse(route.request().postData()!) as unknown[];
+    if (await fulfillAgentsList(route, args)) return;
     actions.push(args);
     const modelUpdate = args.length === 2 && ["Fast", "Balanced", "High"].includes(args[1] as string);
     // Only the message save (and an explicit model choice) are Server Actions here; anything else is recorded and fails the Stop tests.
@@ -45,7 +47,7 @@ async function workspace(page: Page, mode: string, stopFailure = false, holdMode
     if (modelUpdate && holdModelSave) await modelSaveGate;
     const adds = actions.filter((action) => action.length === 4).length;
     const result = modelUpdate ? {} : { data: { id: args[2], position: adds * 2 - 1 } };
-    await route.fulfill({ contentType: "text/x-component", body: '0:{"a":"$@1","f":[],"b":"development"}\n1:' + JSON.stringify(result) + "\n" });
+    await route.fulfill({ contentType: "text/x-component", body: rscActionBody(result) });
   });
   await page.addInitScript(() => {
     const emit = (kind: string, metadata: Record<string, string | number | boolean | null> = {}) => {

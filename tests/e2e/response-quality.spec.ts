@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { fulfillAgentsList, rscActionBody } from "./chat-core-actions";
 
 /**
  * Mocked Response Quality V2 UX coverage (Issue #73 / PR #77).
@@ -76,10 +77,11 @@ async function stubWorkspaceActions(page: Page) {
     if (route.request().method() !== "POST") return route.continue();
     if (!route.request().headers()["next-action"]) return route.abort();
     const args = JSON.parse(route.request().postData()!) as unknown[];
+    if (await fulfillAgentsList(route, args)) return;
     if (args.length !== 4) return route.abort();
     await route.fulfill({
       contentType: "text/x-component",
-      body: '0:{"a":"$@1","f":[],"b":"development"}\n1:' + JSON.stringify({ data: { id: args[2], position: 1 } }) + "\n",
+      body: rscActionBody({ data: { id: args[2], position: 1 } }),
     });
   });
 }

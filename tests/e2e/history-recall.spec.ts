@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { renderHistoryReply } from "../../lib/history-recall/render";
+import { fulfillAgentsList, rscActionBody } from "./chat-core-actions";
 
 const conversation = "5e9bdcca-9205-4fea-a773-13952bb78c44";
 const assistant = "e3b624e6-d792-47a8-8ff2-46724452c1ca";
@@ -21,9 +22,10 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
       if (route.request().method() !== "POST") return route.continue();
       if (!route.request().headers()["next-action"]) return route.abort();
       const args = JSON.parse(route.request().postData()!) as unknown[];
+      if (await fulfillAgentsList(route, args)) return;
       if (args.length !== 4 && args.length !== 5) return route.abort();
       userId = String(args[2]);
-      await route.fulfill({ contentType: "text/x-component", body: '0:{"a":"$@1","f":[],"b":"development"}\n1:' + JSON.stringify({ data: { id: userId, position: 1 } }) + "\n" });
+      await route.fulfill({ contentType: "text/x-component", body: rscActionBody({ data: { id: userId, position: 1 } }) });
     });
     await page.route("**/api/chat", async route => {
       const payload = route.request().postDataJSON() as { conversationId: string; userMessageId: string };

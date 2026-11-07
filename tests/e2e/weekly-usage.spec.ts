@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { fulfillAgentsList, rscActionBody } from "./chat-core-actions";
 
 const dialog = (page: Page) => page.getByRole("dialog", { name: "Settings" });
 
@@ -37,9 +38,10 @@ test("weekly quota rejection removes the optimistic reply and shows the reset no
   await page.route("**/preview/chat-core**", async (route) => {
     if (route.request().method() !== "POST" || !route.request().headers()["next-action"]) return route.continue();
     const args = JSON.parse(route.request().postData() ?? "[]") as unknown[];
+    if (await fulfillAgentsList(route, args)) return;
     if (args.length !== 4) return route.abort();
     const result = { data: { id: args[2], position: 5 } };
-    await route.fulfill({ contentType: "text/x-component", body: `0:{"a":"$@1","f":[],"b":"development"}\n1:${JSON.stringify(result)}\n` });
+    await route.fulfill({ contentType: "text/x-component", body: rscActionBody(result) });
   });
   await page.addInitScript(() => {
     const originalFetch = window.fetch;
