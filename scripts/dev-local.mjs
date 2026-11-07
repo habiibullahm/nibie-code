@@ -66,13 +66,15 @@ export function parseEnv(text) {
   );
 }
 
-// `supabase status -o env` prints the CLI's own names. The app reads these three.
+// `supabase status -o env` prints the CLI's own names. The app reads these four.
+// Spend and other privileged RPCs reject a hosted service-role key against the local API.
 export function localEnvFromStatus(text) {
   const status = parseEnv(text);
   const env = {
     NEXT_PUBLIC_SUPABASE_URL: status.API_URL,
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: status.PUBLISHABLE_KEY,
     DATABASE_URL: status.DB_URL,
+    SUPABASE_SERVICE_ROLE_KEY: status.SERVICE_ROLE_KEY,
   };
   const missing = Object.keys(env).filter((key) => !env[key]);
   return { env, missing };

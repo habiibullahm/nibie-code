@@ -12,6 +12,7 @@ const status = [
   "JWT_SECRET=jwt-placeholder",
   "PUBLISHABLE_KEY=publishable-placeholder",
   "SECRET_KEY=secret-placeholder",
+  "SERVICE_ROLE_KEY=service-role-placeholder",
   'STUDIO_URL="http://127.0.0.1:54323"',
 ].join("\n");
 
@@ -32,13 +33,14 @@ describe("dev:local script", () => {
         NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321",
         NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "publishable-placeholder",
         DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres",
+        SUPABASE_SERVICE_ROLE_KEY: "service-role-placeholder",
       },
       missing: [],
     });
   });
 
   it("names every value the status output did not provide", () => {
-    expect(localEnvFromStatus('API_URL="http://127.0.0.1:54321"').missing).toEqual(["NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "DATABASE_URL"]);
+    expect(localEnvFromStatus('API_URL="http://127.0.0.1:54321"').missing).toEqual(["NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "DATABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"]);
   });
 
   it("loads Next env through its CommonJS default export under Node ESM", () => {
