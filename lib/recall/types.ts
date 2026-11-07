@@ -20,6 +20,7 @@ export const recallOperationStatuses = [
   "forget_succeeded",
   "forget_not_found",
   "forget_failed",
+  "temporary_chat",
 ] as const;
 export type RecallOperationStatus = (typeof recallOperationStatuses)[number];
 

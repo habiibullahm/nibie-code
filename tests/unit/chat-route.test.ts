@@ -111,7 +111,7 @@ vi.mock("@/lib/ai/registry", () => ({ getModelOptions: modelOptions, contextCapa
 // The thread summary read and its after-response maintenance are their own module (tested in thread-summary-store.test.ts).
 // Mocked here so the ordered table results above stay about the reply itself.
 const summaryStore = vi.hoisted(() => ({ load: vi.fn(), defer: vi.fn(), complete: vi.fn(), finish: vi.fn() }));
-vi.mock("@/lib/context/thread-summary-store", () => ({ loadThreadSummary: summaryStore.load, deferThreadSummaryMaintenance: summaryStore.defer }));
+vi.mock("@/lib/context/thread-summary-store", () => ({ loadThreadSummary: summaryStore.load, deferThreadSummaryMaintenance: summaryStore.defer, skippedThreadSummaryMaintenance: { complete: () => undefined, finish: () => undefined } }));
 vi.mock("@/lib/web/routing", () => ({ decideWebSearch: webMocks.decideWebSearch }));
 vi.mock("@/lib/web/config", () => ({ getWebSearchConfig: webMocks.getWebSearchConfig }));
 vi.mock("@/lib/web/provider", () => ({ getWebSearchProvider: webMocks.getWebSearchProvider }));
@@ -162,6 +162,57 @@ describe("POST /api/chat", () => {
     researchMocks.runDeepResearch.mockReset();
   });
   afterEach(() => vi.useRealTimers());
+
+  describe("temporary chats", () => {
+    const future = () => new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    function temporaryClient(content: string, temporaryExpiresAt: string, writes: unknown[] = []) {
+      const results = [
+        { data: { id: "user-message", position: 1, content }, error: null },
+        { data: [{ role: "user", content, status: "complete", position: 1 }], error: null },
+        { data: { id: assistantId }, error: null },
+      ];
+      const from = vi.fn((table: string) => table === "user_preferences" ? query(preferenceResult) : table === "conversations"
+        ? query({ data: { id: "conversation", selected_model: "Balanced", room_id: "room", temporary_expires_at: temporaryExpiresAt }, error: null })
+        : query(results.shift(), (write) => writes.push(write)));
+      createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc });
+      return from;
+    }
+
+    it("reads and writes no Memory, summary or Room, and tells the model it is a temporary chat", async () => {
+      const writes: unknown[] = [];
+      const from = temporaryClient("Remember that I prefer tea.", future(), writes);
+      summaryStore.load.mockResolvedValue({ goal: "", decisions: "Saved summary decision", completedWork: "", currentState: "", openQuestions: "", coversThroughPosition: 0, updatedAt: "2026-10-01T00:00:00.000Z" });
+      stream.mockResolvedValue(providerChunks(["Noted for this chat only."], "stop"));
+      const response = await POST(validRequest());
+      expect(response.status).toBe(200);
+      await response.text();
+      expect(recallMocks.handleRecallTurn).not.toHaveBeenCalled();
+      expect(recallMocks.retrieveRelevantMemories).not.toHaveBeenCalled();
+      expect(summaryStore.defer).not.toHaveBeenCalled();
+      expect(from.mock.calls.map(([table]) => table)).not.toEqual(expect.arrayContaining(["rooms", "room_briefs", "pins"]));
+      const prompt = JSON.stringify(stream.mock.calls[0][1]);
+      expect(prompt).toContain("This is a temporary chat.");
+      expect(prompt).not.toContain("Saved summary decision");
+      expect(writes).toContainEqual({ content: "Noted for this chat only.", status: "complete" });
+    });
+
+    it("treats an expired temporary chat as deleted and never calls the model", async () => {
+      temporaryClient("hello", "2026-01-01T00:00:00.000Z");
+      const response = await POST(validRequest());
+      expect(response.status).toBe(404);
+      expect(stream).not.toHaveBeenCalled();
+      expect(claim).not.toHaveBeenCalled();
+    });
+
+    it("keeps ordinary chats on Memory and summaries", async () => {
+      readyClient([]);
+      stream.mockResolvedValue(providerChunks(["Hi."], "stop"));
+      await (await POST(validRequest())).text();
+      expect(recallMocks.handleRecallTurn).toHaveBeenCalledTimes(1);
+      expect(summaryStore.defer).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(stream.mock.calls[0][1])).not.toContain("This is a temporary chat.");
+    });
+  });
 
   it.each(["stop", "length", "content_filter"])("finalizes %s explicitly, with sanitized persistence", async (reason) => {
     const writes: unknown[] = [];

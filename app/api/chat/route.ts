@@ -22,7 +22,7 @@ import { FETCH_CAP } from "@/lib/context/token-budget";
 import { CONTEXT_POLICY_VERSION } from "@/lib/context/context-policy";
 import type { FileContextInput } from "@/lib/context/context-types";
 import type { RoomContextInput } from "@/lib/context/room-context";
-import { deferThreadSummaryMaintenance, loadThreadSummary } from "@/lib/context/thread-summary-store";
+import { deferThreadSummaryMaintenance, loadThreadSummary, skippedThreadSummaryMaintenance } from "@/lib/context/thread-summary-store";
 import { parseSelectedFileIds } from "@/lib/files/inspect";
 import { contextAttachments, type AttachmentContextRow, type ContextMessageRow } from "@/lib/attachments/context";
 import { MAX_FILES_PER_MESSAGE } from "@/lib/files/limits";
@@ -50,6 +50,8 @@ import { decideWebSearch } from "@/lib/web/routing";
 import type { WebContextInput } from "@/lib/web/types";
 import { detectHistoryRecallIntent } from "@/lib/history-recall/intent";
 import { createHistoryRecallResponse } from "@/lib/history-recall/response";
+import { detectMemoryIntent } from "@/lib/recall/intent";
+import { isExpiredTemporaryConversation, isTemporaryConversation } from "@/lib/chat/temporary";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -160,8 +162,9 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   // Preferences are soft personalization. A failed read uses safe defaults and does not block this authenticated request.
   // Chat attachments of this conversation only (RLS also limits them to the owner); trimmed to the messages in context below.
   // The thread summary is optional context: a failed read is logged and the reply continues without it.
-  const [{ data: loadedConversation, error: loadedConversationError }, { data: userMessage, error: messageError }, { data: recent, error: readError }, preferenceState, attachmentResult, summary] = await Promise.all([
-    supabase.from("conversations").select("id,selected_model,room_id").eq("id", parsedId.data).maybeSingle(),
+  // A temporary chat never uses its thread summary; one is never written for it, so the read below simply finds none.
+  const [{ data: loadedConversation, error: loadedConversationError }, { data: userMessage, error: messageError }, { data: recent, error: readError }, preferenceState, attachmentResult, loadedSummary] = await Promise.all([
+    supabase.from("conversations").select("id,selected_model,room_id,temporary_expires_at").eq("id", parsedId.data).maybeSingle<{ id: string; selected_model: string; room_id: string | null; temporary_expires_at?: string | null }>(),
     supabase.from("messages").select("id,position,content").eq("id", parsedMessageId.data).eq("conversation_id", parsedId.data).eq("role", "user").eq("status", "complete").maybeSingle(),
     supabase.from("messages").select("id,role,content,status,position").eq("conversation_id", parsedId.data).eq("status", "complete").order("position", { ascending: false }).limit(34),
     loadOwnerPreferences(supabase),
@@ -171,14 +174,25 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   if (preferenceState.error) logError("preferences.read.failed", { requestId, code: operationalCodes.preferenceReadFailed });
   let conversation = loadedConversation;
   let conversationError = loadedConversationError;
+  // A database without temporary chats yet has none: read the ordinary columns.
+  if (schemaUnavailable(conversationError)) {
+    const ordinary = await supabase.from("conversations").select("id,selected_model,room_id").eq("id", parsedId.data).maybeSingle();
+    conversationError = ordinary.error;
+    conversation = ordinary.data ? { ...(ordinary.data as unknown as { id: string; selected_model: string; room_id: string | null }), temporary_expires_at: null } : null;
+  }
   if (schemaUnavailable(conversationError)) {
     const legacy = await supabase.from("conversations").select("id,selected_model").eq("id", parsedId.data).maybeSingle();
     conversationError = legacy.error;
     conversation = legacy.data ? { ...(legacy.data as unknown as { id: string; selected_model: string }), room_id: null } : null;
   }
   if (conversationError) return NextResponse.json({ error: safeError }, { status: 503 });
-  if (!conversation) return NextResponse.json({ error: "Conversation unavailable." }, { status: 404 });
-  const historyIntent = !deepResearch && typeof userMessage?.content === "string"
+  // An expired temporary chat is treated as already deleted.
+  if (!conversation || isExpiredTemporaryConversation(conversation)) return NextResponse.json({ error: "Conversation unavailable." }, { status: 404 });
+  // A temporary chat reads no Memory, thread summary, Room or past chats, and writes none of them.
+  const temporary = isTemporaryConversation(conversation);
+  if (temporary) conversation = { ...conversation, room_id: null };
+  const summary = temporary ? null : loadedSummary;
+  const historyIntent = !temporary && !deepResearch && typeof userMessage?.content === "string"
     ? detectHistoryRecallIntent(userMessage.content) : null;
   if (!historyIntent && requestedModel && requestedModel.data !== "Auto" && !availableModes.includes(requestedModel.data)) return NextResponse.json({ error: "That model isn't available." }, { status: 400 });
   let room: RoomContextInput | null = null;
@@ -262,9 +276,13 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
   // Explicit recall: save/forget intent and retrieval never block the reply.
   // Fail closed when preferences could not be read so a disabled user is not briefly re-enabled.
   // Always run handle on non-regenerate turns so disabled/failed outcomes reach the model truthfully.
-  const recallEnabled = !preferenceState.error && preferenceState.preferences.recallEnabled !== false;
+  const recallEnabled = !temporary && !preferenceState.error && preferenceState.preferences.recallEnabled !== false;
   let recallOperation: RecallOperationStatus = "none";
-  if (!regenerate) {
+  if (temporary) {
+    // Nothing is saved or forgotten. The model is told so on every turn, so it never claims to remember or recall.
+    recallOperation = "temporary_chat";
+    if (!regenerate && detectMemoryIntent(userMessage.content).kind !== "none") logInfo("memory.disabled", { requestId, stage: "temporary_chat" });
+  } else if (!regenerate) {
     try {
       const recallResult = await handleRecallTurn({
         supabase,
@@ -349,6 +367,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       recallOperation,
       rows,
       omittedMessagePositions,
+      temporary,
       weeklyUsageReserved: true,
     });
   }
@@ -390,6 +409,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       githubRawInput: githubDecision.input,
       githubRouteReason: githubDecision.reason,
       githubActionTitle: githubDecision.title,
+      temporary,
       weeklyUsageReserved: true,
     });
   }
@@ -429,6 +449,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
       rows,
       omittedMessagePositions,
       webRouteReason: webDecision.reason,
+      temporary,
       weeklyUsageReserved: true,
     });
   }
@@ -622,7 +643,7 @@ async function respond(request: Request, requestId: string, requestStartedAt: nu
 
   // Summary maintenance runs after the response finishes, and only for a reply saved as complete. It is best effort:
   // whatever happens to it, the saved reply stays as it is.
-  const summaryMaintenance = deferThreadSummaryMaintenance({ supabase, conversationId: conversation.id, requestId });
+  const summaryMaintenance = temporary ? skippedThreadSummaryMaintenance : deferThreadSummaryMaintenance({ supabase, conversationId: conversation.id, requestId });
   const promptChars = prompt.reduce((sum, message) => sum + message.content.length, 0);
   let costEstimate: GenerationCostEstimate | null = null;
   const stream = new ReadableStream<Uint8Array>({

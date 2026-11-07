@@ -274,11 +274,14 @@ export const conversations = pgTable(
     instructionsSnapshot: text("instructions_snapshot"),
     temperatureSnapshot: numeric("temperature_snapshot", { precision: 3, scale: 2 }),
     maxOutputTokensSnapshot: integer("max_output_tokens_snapshot"),
+    // Set only on a temporary chat: hidden from history and Memory, and deleted on leave or at this time at the latest.
+    temporaryExpiresAt: timestamp("temporary_expires_at", { withTimezone: true, mode: "date" }),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
   },
   (table) => [
     index("conversations_user_updated_idx").on(table.userId, table.updatedAt),
+    index("conversations_temporary_expiry_idx").on(table.temporaryExpiresAt).where(sql`${table.temporaryExpiresAt} IS NOT NULL`),
     index("conversations_user_room_idx").on(table.userId, table.roomId),
     index("conversations_user_agent_idx").on(table.userId, table.agentId),
     unique("conversations_id_user_id_key").on(table.id, table.userId),

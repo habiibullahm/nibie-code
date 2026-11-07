@@ -19,7 +19,7 @@ import { CONTEXT_POLICY_VERSION } from "@/lib/context/context-policy";
 import type { AttachmentContextInput, FileContextInput } from "@/lib/context/context-types";
 import type { RoomContextInput } from "@/lib/context/room-context";
 import { RESEARCH_WEB_TOKEN_CAP } from "@/lib/context/token-budget";
-import { deferThreadSummaryMaintenance } from "@/lib/context/thread-summary-store";
+import { deferThreadSummaryMaintenance, skippedThreadSummaryMaintenance } from "@/lib/context/thread-summary-store";
 import type { ThreadSummary } from "@/lib/context/context-types";
 import { operationalCodes } from "@/lib/observability/codes";
 import { logError, logInfo, logWarn } from "@/lib/observability/logger";
@@ -71,6 +71,8 @@ export type DeepResearchChatStreamInput = {
   recallOperation: RecallOperationStatus;
   rows: { role: string; content: string; position: number }[];
   omittedMessagePositions?: number[];
+  /** A temporary chat: no rolling summary is kept for it. */
+  temporary?: boolean;
   /** HTTP preflight already reserved this generation; do not reserve again. */
   weeklyUsageReserved?: boolean;
 };
@@ -225,7 +227,7 @@ export async function createDeepResearchChatResponse(input: DeepResearchChatStre
     await releaseWeeklyUsageHold({ supabase, generationId: assistant.id, requestId, logicalMode: mode });
   };
 
-  const summaryMaintenance = deferThreadSummaryMaintenance({ supabase, conversationId, requestId });
+  const summaryMaintenance = input.temporary ? skippedThreadSummaryMaintenance : deferThreadSummaryMaintenance({ supabase, conversationId, requestId });
   let usageReservationMs = 0;
   let spendReservedMicros = 0;
   let providerStartedAt = Date.now();

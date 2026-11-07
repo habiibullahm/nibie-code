@@ -10,8 +10,8 @@ test("the public landing page does not require authentication", async ({ page })
   for (const link of await opens.all()) await expect(link).toHaveAttribute("href", "/chat");
   const tries = page.getByRole("link", { name: "Try Nibie" });
   await expect(tries).toHaveCount(2);
-  for (const link of await tries.all()) await expect(link).toHaveAttribute("href", "/chat");
-  await expect(page.locator(".landing-hero").getByRole("link", { name: "Try Nibie" })).toHaveAttribute("href", "/chat");
+  for (const link of await tries.all()) await expect(link).toHaveAttribute("href", "/demo");
+  await expect(page.locator(".landing-hero").getByRole("link", { name: "Try Nibie" })).toHaveAttribute("href", "/demo");
   await expect(page.getByRole("link", { name: "See how it works" })).toHaveAttribute("href", "#product");
 });
 

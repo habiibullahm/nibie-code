@@ -181,13 +181,12 @@ test("a completed answer saved before Stop landed never replaces the stopped rep
     document.cookie = "chat-core-stop-partial=complete;path=/preview/chat-core";
   });
   await input.fill("Third draft");
-  const refreshed = page.waitForResponse((response) => response.url().includes("/preview/chat-core") && response.request().headers()["rsc"] === "1");
   await page.evaluate(() => window.userStopHarness!.completeSecond());
   await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();
   await expect(page.locator(".message-row.assistant").last()).toContainText("Second response completed.");
-  // Let the refreshed server snapshot render before checking that it did not replace the stopped reply.
-  await (await refreshed).finished();
-  await page.waitForTimeout(500);
+  // Wait for the harness snapshot (the finished first reply) to land. Do not wait for the RSC
+  // socket to close: Next can keep that stream open after the payload is already on screen.
+  await expect(page.getByTestId("chat-core-stop-partial")).toHaveText("complete");
   const first = page.locator(".message-row.assistant").first();
   await expect(first).toContainText("Partial first response");
   await expect(first).toContainText("Stopped");

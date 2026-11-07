@@ -4,6 +4,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getAuthenticatedUser } from "@/lib/auth/get-user";
 import { sanitizeModelOutput } from "@/lib/ai/sanitize-model-output";
 import { schemaUnavailable } from "@/lib/chat/schema-error";
+import { isTemporaryConversation } from "@/lib/chat/temporary";
 import { canContinueInWorkbench } from "@/lib/workbench/offer";
 import { workbenchTitleFromContent } from "@/lib/workbench/title";
 import {
@@ -303,6 +304,8 @@ export async function deleteWorkbenchDocumentAction(id: unknown): Promise<Workbe
   }
 }
 
+const temporaryChatWorkbenchUnavailable = "A reply from a temporary chat can't be opened in Workbench.";
+
 export async function createWorkbenchFromAssistantAction(messageId: unknown): Promise<WorkbenchActionResult<{ id: string }>> {
   const parsedId = validateWorkbenchId(messageId);
   if (!parsedId.success) return { error: responseUnavailable };
@@ -317,14 +320,19 @@ export async function createWorkbenchFromAssistantAction(messageId: unknown): Pr
     if (messageError) return { error: saveFailed };
     if (!message) return { error: responseUnavailable };
     if (!canContinueInWorkbench(message)) return { error: responseNotReady };
-    const { data: conversation, error: conversationError } = await supabase
+    const readConversation = (columns: string) => supabase
       .from("conversations")
-      .select("id,room_id")
+      .select(columns)
       .eq("id", message.conversation_id)
       .eq("user_id", user.id)
-      .maybeSingle();
+      .maybeSingle<{ id: string; room_id: string | null; temporary_expires_at?: string | null }>();
+    let { data: conversation, error: conversationError } = await readConversation("id,room_id,temporary_expires_at");
+    // A database without temporary chats yet has none: read the ordinary columns.
+    if (schemaUnavailable(conversationError)) ({ data: conversation, error: conversationError } = await readConversation("id,room_id"));
     if (conversationError) return { error: saveFailed };
     if (!conversation) return { error: responseUnavailable };
+    // A Workbench document outlives its chat, so nothing from a temporary chat may be copied into one.
+    if (isTemporaryConversation(conversation)) return { error: temporaryChatWorkbenchUnavailable };
     const visible = sanitizeModelOutput(message.content).text;
     if (!visible.trim()) return { error: responseNotReady };
     const draft = parseWorkbenchWrite({

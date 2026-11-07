@@ -1,3 +1,4 @@
 {
-  "regions": ["icn1"]
+  "regions": ["icn1"],
+  "crons": [{ "path": "/api/cron/purge-temporary-chats", "schedule": "15 3 * * *" }]
 }

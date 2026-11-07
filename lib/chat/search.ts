@@ -287,6 +287,8 @@ export type SearchConversationRow = {
   room_id: string | null;
   archived_at: string | null;
   updated_at?: string | null;
+  /** Set only on a temporary chat, which search never shows. */
+  temporary_expires_at?: string | null;
 };
 
 /** Map owner-scoped DB rows into the client search payload. */

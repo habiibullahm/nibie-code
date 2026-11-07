@@ -11,8 +11,9 @@ import {
   type SearchConversationRow,
   type SearchMessageRow,
 } from "@/lib/chat/search";
+import { schemaUnavailable } from "@/lib/chat/schema-error";
 
-type QueryResult<T> = PromiseLike<{ data: T[] | null; error: { message?: string } | null }>;
+type QueryResult<T> = PromiseLike<{ data: T[] | null; error: { message?: string; code?: string } | null }>;
 
 /** Narrow facade over the authenticated Supabase client's filter builder. */
 export type ChatSearchDb = {
@@ -61,14 +62,21 @@ export async function searchOwnedChats(
   let messageRows: SearchMessageRow[] = [];
   let messageSearchFailed = false;
 
+  // Temporary chats are read only so they can be left out. A database without them yet has the ordinary columns only.
+  let conversationColumns = "id,title,room_id,archived_at,updated_at,temporary_expires_at";
   if (pattern) {
-    const titleResult = await supabase
+    const readTitles = () => supabase
       .from("conversations")
-      .select("id,title,room_id,archived_at,updated_at")
+      .select(conversationColumns)
       .ilike("title", pattern)
       .order("updated_at", { ascending: false })
       .order("id", { ascending: true })
       .limit(SEARCH_MAX_RESULTS);
+    let titleResult = await readTitles();
+    if (schemaUnavailable(titleResult.error)) {
+      conversationColumns = "id,title,room_id,archived_at,updated_at";
+      titleResult = await readTitles();
+    }
 
     if (titleResult.error) {
       return { ok: false, error: "Search is temporarily unavailable.", status: 503 };
@@ -103,7 +111,7 @@ export async function searchOwnedChats(
   if (missingIds.length) {
     const extra = await supabase
       .from("conversations")
-      .select("id,title,room_id,archived_at,updated_at")
+      .select(conversationColumns)
       .in("id", missingIds);
     if (!extra.error && extra.data) {
       conversationRows = [...conversationRows, ...(extra.data as SearchConversationRow[])];
@@ -112,6 +120,9 @@ export async function searchOwnedChats(
       messageRows = [];
     }
   }
+
+  // Without its conversation row a message hit is dropped too (see mapOwnedSearchRows).
+  conversationRows = conversationRows.filter((row) => !row.temporary_expires_at);
 
   const roomIds = [...new Set(conversationRows.map((row) => row.room_id).filter((id): id is string => Boolean(id)))];
   let rooms: { id: string; name: string }[] = [];

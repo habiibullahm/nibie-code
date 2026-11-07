@@ -98,3 +98,38 @@ The test consumes one Fast-mode credit when Fast is available.
 Vercel Preview uses the same Supabase database as production today. New tables from `drizzle/` are **not** created by PR Guard’s Integration DB + RLS job (local Docker only), and the external **Supabase Preview** check is skipped for this repo.
 
 PRs that change `drizzle/**` must get a green **Preview app DB migration** check (`.github/workflows/preview-app-db-migration.yml`) so additive migrations (for example `0019_action_runs`) exist on the shared DB before exact-HEAD Preview acceptance that depends on them. Shared DB apply requires the PR label `allow-shared-db-migrate` (or a manual `workflow_dispatch`) after SQL review — PR synchronize alone does not write.
+
+## Skipped browser tests (`npm run test:e2e` without credentials)
+
+A plain `npm run test:e2e` run without `E2E_USER_EMAIL` / `E2E_USER_PASSWORD` reports 24 skipped tests. Every one of them needs the dedicated signed-in Supabase test account, so none can run in credential-free CI. A skip is never acceptance: run these against an exact-HEAD preview or a local stack with the QA account before calling a related change verified.
+
+Default CI does not set the credentials. `preview-smoke.yml` does and is dispatched manually only. Mocking Supabase auth in Playwright was considered and rejected: it would test less than the real flow.
+
+### Needs the test account only (15 tests, no model requests)
+
+These are the candidates to run first if a CI test account is ever provisioned.
+
+| Spec | Tests | Extra requirement |
+| --- | --- | --- |
+| `settings-v2-account.spec.ts` | 9 | Two of them (memory edits, live owner usage) also need `E2E_SETTINGS_MEMORY_FIXTURE` with disposable local fixtures. The privacy export test asserts fixture content only when it is set. |
+| `settings-preview.spec.ts` | 3 | None. `/api/chat` is aborted. Also run by `test:qa:preview -- --settings`. |
+| `settings-persistence.spec.ts` | 1 | None. |
+| `default-model-inheritance.spec.ts` | 1 | None. No provider calls. |
+| `home.spec.ts` | 1 | None. |
+
+### Needs the test account and a real provider (9 tests, spends money)
+
+Run these only with explicit spend authorization.
+
+| Spec | Tests | Why |
+| --- | --- | --- |
+| `last-turn.spec.ts` | 2 | Regenerate, edit and Stop/Retry against a real reply. |
+| `retry-reconcile.spec.ts` | 3 | Stream drop, regenerate collision and Retry after Stop against a real reply. |
+| `chat.spec.ts` | 1 | A real provider response survives refresh, reopen and a fresh sign-in. |
+| `model-picker.spec.ts` | 1 | Sends a real chat request to verify the mode picker. |
+| `room-onboarding.spec.ts` | 1 | Room onboarding drafts through the real AI provider. |
+| `qa-smoke.spec.ts` | 1 | Sends one real Fast request (also `npm run test:qa:smoke`). |
+
+### Accepted skips
+
+All 24 stay skipped in credential-free runs by design. The skip messages in each spec name the credential or fixture needed.
