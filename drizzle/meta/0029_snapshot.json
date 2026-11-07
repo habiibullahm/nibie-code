@@ -256,7 +256,7 @@
       "checkConstraints": {
         "conversations_routing_shape": {
           "name": "conversations_routing_shape",
-          "value": "\"conversations\".\"routing_kind\" is null\n        OR (\"conversations\".\"routing_kind\" = 'system_mode' AND \"conversations\".\"system_mode_snapshot\" in ('Fast', 'Balanced', 'High') AND \"conversations\".\"provider_config_id\" is null AND \"conversations\".\"model_snapshot\" is null AND \"conversations\".\"agent_name_snapshot\" is not null)\n        OR (\"conversations\".\"routing_kind\" = 'user_provider' AND \"conversations\".\"system_mode_snapshot\" is null AND \"conversations\".\"provider_config_id\" is not null AND \"conversations\".\"model_snapshot\" is not null AND \"conversations\".\"agent_name_snapshot\" is not null)"
+          "value": "(\"conversations\".\"routing_kind\" is null AND \"conversations\".\"agent_id\" is null AND \"conversations\".\"agent_name_snapshot\" is null AND \"conversations\".\"system_mode_snapshot\" is null AND \"conversations\".\"provider_config_id\" is null AND \"conversations\".\"model_snapshot\" is null AND \"conversations\".\"instructions_snapshot\" is null AND \"conversations\".\"temperature_snapshot\" is null AND \"conversations\".\"max_output_tokens_snapshot\" is null)\n        OR (\"conversations\".\"routing_kind\" = 'system_mode' AND \"conversations\".\"system_mode_snapshot\" in ('Fast', 'Balanced', 'High') AND \"conversations\".\"provider_config_id\" is null AND \"conversations\".\"model_snapshot\" is null AND \"conversations\".\"agent_name_snapshot\" is not null)\n        OR (\"conversations\".\"routing_kind\" = 'user_provider' AND \"conversations\".\"system_mode_snapshot\" is null AND \"conversations\".\"provider_config_id\" is not null AND \"conversations\".\"model_snapshot\" is not null AND \"conversations\".\"agent_name_snapshot\" is not null)"
         }
       },
       "isRLSEnabled": false
@@ -3692,6 +3692,10 @@
         "provider_configs_base_url_length": {
           "name": "provider_configs_base_url_length",
           "value": "char_length(\"provider_configs\".\"base_url\") between 8 and 300 and \"provider_configs\".\"base_url\" = btrim(\"provider_configs\".\"base_url\") and \"provider_configs\".\"base_url\" like 'https://%'"
+        },
+        "provider_configs_base_url_host": {
+          "name": "provider_configs_base_url_host",
+          "value": "\"provider_configs\".\"base_url\" !~* '@' and \"provider_configs\".\"base_url\" !~* 'https://localhost([:/]|$)' and \"provider_configs\".\"base_url\" !~* 'https://[^/]*\\.local([:/]|$)' and \"provider_configs\".\"base_url\" !~* 'https://[^/]*\\.internal([:/]|$)' and \"provider_configs\".\"base_url\" !~* 'https://(127|10|0)\\.' and \"provider_configs\".\"base_url\" !~* 'https://192\\.168\\.' and \"provider_configs\".\"base_url\" !~* 'https://169\\.254\\.' and \"provider_configs\".\"base_url\" !~* 'https://172\\.(1[6-9]|2[0-9]|3[0-1])\\.' and \"provider_configs\".\"base_url\" !~* 'https://\\[(::1|fe80:|f[cd][0-9a-f]{2}:)'"
         },
         "provider_configs_hint_length": {
           "name": "provider_configs_hint_length",

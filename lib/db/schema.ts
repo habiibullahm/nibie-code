@@ -169,7 +169,7 @@ export const roomFileChunks = pgTable("room_file_chunks", {
   check("room_file_chunks_content_bounds", sql`char_length(${table.content}) between 1 and 3000`),
 ]);
 
-// User-owned provider connection. secret_ciphertext is never readable by the authenticated role; use read_own_provider_secret.
+// User-owned provider connection. The migration revokes table SELECT, then grants the safe columns. read_own_provider_secret returns ciphertext to the owner.
 export const providerConfigs = pgTable(
   "provider_configs",
   {
@@ -192,6 +192,18 @@ export const providerConfigs = pgTable(
     check("provider_configs_type_check", sql`${table.providerType} in ('nibie_router', 'openai_compatible')`),
     check("provider_configs_name_length", sql`char_length(${table.name}) between 1 and 80 and ${table.name} = btrim(${table.name})`),
     check("provider_configs_base_url_length", sql`char_length(${table.baseUrl}) between 8 and 300 and ${table.baseUrl} = btrim(${table.baseUrl}) and ${table.baseUrl} like 'https://%'`),
+    check(
+      "provider_configs_base_url_host",
+      sql`${table.baseUrl} !~* '@'
+        and ${table.baseUrl} !~* 'https://localhost([:/]|$)'
+        and ${table.baseUrl} !~* 'https://[^/]*\\.local([:/]|$)'
+        and ${table.baseUrl} !~* 'https://[^/]*\\.internal([:/]|$)'
+        and ${table.baseUrl} !~* 'https://(127|10|0)\\.'
+        and ${table.baseUrl} !~* 'https://192\\.168\\.'
+        and ${table.baseUrl} !~* 'https://169\\.254\\.'
+        and ${table.baseUrl} !~* 'https://172\\.(1[6-9]|2[0-9]|3[0-1])\\.'
+        and ${table.baseUrl} !~* 'https://\\[(::1|fe80:|f[cd][0-9a-f]{2}:)'`,
+    ),
     check("provider_configs_hint_length", sql`char_length(${table.keyHint}) between 2 and 8`),
     check("provider_configs_configuration_empty", sql`${table.configuration} = '{}'::jsonb`),
   ],
@@ -283,7 +295,7 @@ export const conversations = pgTable(
     }).onDelete("restrict"),
     check(
       "conversations_routing_shape",
-      sql`${table.routingKind} is null
+      sql`(${table.routingKind} is null AND ${table.agentId} is null AND ${table.agentNameSnapshot} is null AND ${table.systemModeSnapshot} is null AND ${table.providerConfigId} is null AND ${table.modelSnapshot} is null AND ${table.instructionsSnapshot} is null AND ${table.temperatureSnapshot} is null AND ${table.maxOutputTokensSnapshot} is null)
         OR (${table.routingKind} = 'system_mode' AND ${table.systemModeSnapshot} in ('Fast', 'Balanced', 'High') AND ${table.providerConfigId} is null AND ${table.modelSnapshot} is null AND ${table.agentNameSnapshot} is not null)
         OR (${table.routingKind} = 'user_provider' AND ${table.systemModeSnapshot} is null AND ${table.providerConfigId} is not null AND ${table.modelSnapshot} is not null AND ${table.agentNameSnapshot} is not null)`,
     ),

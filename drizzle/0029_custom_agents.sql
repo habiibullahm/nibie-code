@@ -13,7 +13,18 @@ CREATE TABLE public.provider_configs (
   CONSTRAINT provider_configs_id_user_id_key UNIQUE (id, user_id),
   CONSTRAINT provider_configs_type_check CHECK (provider_type in ('nibie_router', 'openai_compatible')),
   CONSTRAINT provider_configs_name_length CHECK (char_length(name) between 1 and 80 and name = btrim(name)),
-  CONSTRAINT provider_configs_base_url_length CHECK (char_length(base_url) between 8 and 300 and base_url = btrim(base_url) and base_url like 'https://%'),
+	CONSTRAINT provider_configs_base_url_length CHECK (char_length(base_url) between 8 and 300 and base_url = btrim(base_url) and base_url like 'https://%'),
+	CONSTRAINT provider_configs_base_url_host CHECK (
+		base_url !~* '@'
+		and base_url !~* 'https://localhost([:/]|$)'
+		and base_url !~* 'https://[^/]*\.local([:/]|$)'
+		and base_url !~* 'https://[^/]*\.internal([:/]|$)'
+		and base_url !~* 'https://(127|10|0)\.'
+		and base_url !~* 'https://192\.168\.'
+		and base_url !~* 'https://169\.254\.'
+		and base_url !~* 'https://172\.(1[6-9]|2[0-9]|3[0-1])\.'
+		and base_url !~* 'https://\[(::1|fe80:|f[cd][0-9a-f]{2}:)'
+	),
   CONSTRAINT provider_configs_hint_length CHECK (char_length(key_hint) between 2 and 8),
   CONSTRAINT provider_configs_configuration_empty CHECK (configuration = '{}'::jsonb)
 );
@@ -66,7 +77,7 @@ ALTER TABLE public.conversations ADD COLUMN max_output_tokens_snapshot integer;-
 ALTER TABLE public.conversations ADD CONSTRAINT conversations_agent_owner_fk FOREIGN KEY (agent_id, user_id) REFERENCES public.agents(id, user_id) ON DELETE SET NULL (agent_id) ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE public.conversations ADD CONSTRAINT conversations_provider_owner_fk FOREIGN KEY (provider_config_id, user_id) REFERENCES public.provider_configs(id, user_id) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE public.conversations ADD CONSTRAINT conversations_routing_shape CHECK (
-  routing_kind is null
+  (routing_kind is null AND agent_id is null AND agent_name_snapshot is null AND system_mode_snapshot is null AND provider_config_id is null AND model_snapshot is null AND instructions_snapshot is null AND temperature_snapshot is null AND max_output_tokens_snapshot is null)
   OR (routing_kind = 'system_mode' AND system_mode_snapshot in ('Fast', 'Balanced', 'High') AND provider_config_id is null AND model_snapshot is null AND agent_name_snapshot is not null)
   OR (routing_kind = 'user_provider' AND system_mode_snapshot is null AND provider_config_id is not null AND model_snapshot is not null AND agent_name_snapshot is not null)
 );--> statement-breakpoint
@@ -87,10 +98,10 @@ CREATE POLICY agents_select_own ON public.agents FOR SELECT TO authenticated USI
 CREATE POLICY agents_insert_own ON public.agents FOR INSERT TO authenticated WITH CHECK (user_id = (SELECT auth.uid()));--> statement-breakpoint
 CREATE POLICY agents_update_own ON public.agents FOR UPDATE TO authenticated USING (user_id = (SELECT auth.uid())) WITH CHECK (user_id = (SELECT auth.uid()));--> statement-breakpoint
 CREATE POLICY agents_delete_own ON public.agents FOR DELETE TO authenticated USING (user_id = (SELECT auth.uid()));--> statement-breakpoint
+-- Default privileges grant table SELECT to authenticated. A column revoke does not remove that. Clear it, then grant the safe columns only.
+REVOKE ALL ON public.provider_configs FROM PUBLIC, anon, authenticated;--> statement-breakpoint
 GRANT SELECT (id, user_id, provider_type, name, base_url, key_hint, configuration, is_default, created_at, updated_at), INSERT, UPDATE, DELETE ON public.provider_configs TO authenticated;--> statement-breakpoint
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.agents TO authenticated;--> statement-breakpoint
-REVOKE SELECT (secret_ciphertext) ON public.provider_configs FROM authenticated;--> statement-breakpoint
-REVOKE ALL ON public.provider_configs FROM anon;--> statement-breakpoint
 REVOKE ALL ON public.agents FROM anon;--> statement-breakpoint
 CREATE FUNCTION public.read_own_provider_secret(p_config_id uuid) RETURNS text
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = ''
@@ -102,6 +113,7 @@ LANGUAGE plpgsql SET search_path = ''
 AS $$
 DECLARE n integer;
 BEGIN
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(NEW.user_id::text, 0));
   IF TG_TABLE_NAME = 'agents' THEN
     SELECT count(*) INTO n FROM public.agents WHERE user_id = NEW.user_id;
     IF n >= 20 THEN RAISE EXCEPTION 'agent cap' USING ERRCODE = '23514'; END IF;
@@ -118,4 +130,7 @@ CREATE OR REPLACE FUNCTION public.set_agents_updated_at() RETURNS trigger LANGUA
 REVOKE ALL ON FUNCTION public.set_agents_updated_at() FROM PUBLIC;--> statement-breakpoint
 GRANT EXECUTE ON FUNCTION public.set_agents_updated_at() TO authenticated;--> statement-breakpoint
 CREATE TRIGGER provider_configs_set_updated_at BEFORE UPDATE ON public.provider_configs FOR EACH ROW EXECUTE FUNCTION public.set_agents_updated_at();--> statement-breakpoint
-CREATE TRIGGER agents_set_updated_at BEFORE UPDATE ON public.agents FOR EACH ROW EXECUTE FUNCTION public.set_agents_updated_at();
+CREATE TRIGGER agents_set_updated_at BEFORE UPDATE ON public.agents FOR EACH ROW EXECUTE FUNCTION public.set_agents_updated_at();--> statement-breakpoint
+-- Recreate this user link last so account delete removes agents before provider configs. RESTRICT still blocks a direct provider delete.
+ALTER TABLE public.provider_configs DROP CONSTRAINT provider_configs_user_id_users_id_fk;--> statement-breakpoint
+ALTER TABLE public.provider_configs ADD CONSTRAINT provider_configs_user_id_users_id_fk FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE cascade ON UPDATE no action;
