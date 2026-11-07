@@ -434,7 +434,9 @@ export function runQaSmoke({
   const result = spawn(command, args, {
     stdio: "inherit",
     env: childEnv,
-    shell: process.platform === "win32",
+    // A shell splits an unquoted path at the space in "Training Project".
+    // Node can run the smoke script directly. Only npx.cmd needs a shell.
+    shell: wrapWithEnvRun && process.platform === "win32",
   });
   return result.status ?? 1;
 }
