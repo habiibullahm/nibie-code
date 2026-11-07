@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status (2026-11-07):** Tasks 1–3 are on `origin/feat/custom-agents`. Tasks 4–9 are implemented on `feature/custom-agents-routing-53cd` (provider save, model test, agent CRUD, conversation snapshot, untrusted instructions, snapshotted send). Tasks 10–12 (settings UI and the chat picker) are not done. See `docs/engineering/CUSTOM_AGENTS_HANDOFF.md`. The source-order sentence was shortened so the existing 1,450-token context fixture still fits.
+**Status (2026-11-07):** Tasks 1–3 are on `origin/feat/custom-agents`. Tasks 4–12 are on `feat/custom-agents-routing-53cd` (PR 147). That covers provider save, model test, agent CRUD, conversation snapshot, untrusted instructions, snapshotted send, Providers settings, Agents settings, and the new-chat agent menu. See `docs/engineering/CUSTOM_AGENTS_HANDOFF.md`. The source-order sentence was shortened so the existing 1,450-token context fixture still fits. The signed-in composer path was not exercised in a browser here.
 
 **Goal:** Let each user own multiple custom agents, each with its own instructions and provider route, and add Nibie Router as one OpenAI-compatible provider, without replacing Fast / Balanced / High.
 

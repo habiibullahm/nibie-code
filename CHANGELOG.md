@@ -8,7 +8,7 @@ What's new in Nibie.
 
 ### Added
 
-- Save your own agents, each with instructions and a provider route. Nibie Router is one of those routes. Chats you already started on Fast, Balanced, or High stay on that mode. Settings screens for agents are not in this update yet.
+- Save providers and agents in Settings. A new chat can start with Nibie or one of your agents. Nibie Router is one provider route. Chats you already started on Fast, Balanced, or High stay on that mode, and a chat that already has an agent keeps it.
 - Start a temporary chat from the ghost button next to New chat: it stays out of your history and search, doesn't use or update Memory, and is deleted when you leave it. If you just close the tab, it expires 24 hours after it started and is deleted soon after. Temporary chats are General only and don't take attachments.
 - Try Nibie on the landing page opens a public /demo workspace with recorded chat and cited-research replies, no account and no live model calls.
 - Ask what you decided about a topic to see dated excerpts and original conversation links from this Room's active chats; historical lookup stays separate from saved Memory.
