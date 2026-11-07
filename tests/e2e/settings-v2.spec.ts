@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const sections = ["General", "AI & Models", "Chat", "Personalization", "Memory & Context", "Usage & Plan", "Data & Privacy"];
+const sections = ["General", "AI & Models", "Providers", "Agents", "Chat", "Personalization", "Memory & Context", "Usage & Plan", "Data & Privacy"];
 const settings = (page: Page) => page.getByRole("dialog", { name: "Settings", exact: true });
 
 async function open(page: Page) {
@@ -22,6 +22,8 @@ for (const width of [320, 390, 768, 1024, 1440]) {
     for (const name of sections) {
       await select(page, name);
       await expect(settings(page).getByRole("heading", { name, exact: true })).toBeVisible();
+      if (name === "Providers") await expect(settings(page).getByText("No providers yet.", { exact: true })).toBeVisible();
+      if (name === "Agents") await expect(settings(page).getByRole("button", { name: "New agent", exact: true })).toBeVisible();
       const dimensions = await settings(page).evaluate((element) => {
         const content = element.querySelector(".settings-content")!;
         const rect = element.getBoundingClientRect();
@@ -144,7 +146,7 @@ test.describe("mobile section tabs", () => {
     await open(page);
     const navigation = settings(page).getByRole("tablist", { name: "Settings sections" });
     await expect(navigation).toHaveAttribute("aria-orientation", "horizontal");
-    await expect(navigation.getByRole("tab")).toHaveCount(7);
+    await expect(navigation.getByRole("tab")).toHaveCount(9);
     expect((await navigation.boundingBox())!.height).toBeLessThanOrEqual(70);
     expect(await navigation.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
 
