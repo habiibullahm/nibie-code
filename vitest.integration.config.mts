@@ -11,6 +11,9 @@ export default defineConfig({
   },
   test: {
     include: ["tests/integration/**/*.test.ts"],
+    // The suite shares one Postgres database and resets it by dropping tables.
+    // Parallel files deadlock with that reset.
+    fileParallelism: false,
     testTimeout: 30_000,
     hookTimeout: 60_000,
   },

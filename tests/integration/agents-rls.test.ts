@@ -92,6 +92,48 @@ describe("custom agent RLS", () => {
     await sql`delete from auth.users where id = ${userId}`;
   });
 
+  it("hides another user's config and the ciphertext column", async () => {
+    const id = randomUUID();
+    await sql`insert into public.provider_configs (id, user_id, provider_type, name, base_url, secret_ciphertext, key_hint)
+      values (${id}, ${userA}, 'nibie_router', 'Nibie Router', 'https://router.nibie.app/v1', 'v1.ciphertext', 'ab12')`;
+    const asB = await sql.begin(async (tx) => {
+      await tx`set local role authenticated`;
+      await tx`select set_config('request.jwt.claim.sub', ${userB}, true)`;
+      return tx`select id from public.provider_configs where id = ${id}`;
+    });
+    expect(asB).toEqual([]);
+    const secret = await sql.begin(async (tx) => {
+      await tx`set local role authenticated`;
+      await tx`select set_config('request.jwt.claim.sub', ${userA}, true)`;
+      return tx`select public.read_own_provider_secret(${id}) as secret`;
+    });
+    expect(secret[0]?.secret).toBe("v1.ciphertext");
+    const stolen = await sql.begin(async (tx) => {
+      await tx`set local role authenticated`;
+      await tx`select set_config('request.jwt.claim.sub', ${userB}, true)`;
+      return tx`select public.read_own_provider_secret(${id}) as secret`;
+    });
+    expect(stolen[0]?.secret).toBeNull();
+  });
+
+  it("hides another user's agent", async () => {
+    const id = randomUUID();
+    await sql`insert into public.agents (id, user_id, name, provider_binding, system_mode)
+      values (${id}, ${userA}, 'General', 'system', 'Balanced')`;
+    const asB = await sql.begin(async (tx) => {
+      await tx`set local role authenticated`;
+      await tx`select set_config('request.jwt.claim.sub', ${userB}, true)`;
+      return tx`select id from public.agents where id = ${id}`;
+    });
+    expect(asB).toEqual([]);
+    const asA = await sql.begin(async (tx) => {
+      await tx`set local role authenticated`;
+      await tx`select set_config('request.jwt.claim.sub', ${userA}, true)`;
+      return tx`select name from public.agents where id = ${id}`;
+    });
+    expect(asA).toEqual([{ name: "General" }]);
+  });
+
   it("rejects a loopback base URL and a provider pin on an old chat", async () => {
     await expect(sql`insert into public.provider_configs (user_id, provider_type, name, base_url, secret_ciphertext, key_hint)
       values (${userA}, 'openai_compatible', 'Local', 'https://127.0.0.1/v1', 'v1.cipher', 'ab12')`).rejects.toMatchObject({ code: "23514" });
