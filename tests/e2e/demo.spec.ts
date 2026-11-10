@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("landing Try Nibie opens the public demo and shows an AI reply without login", async ({ page }) => {
+test("landing Try the demo opens the public demo and shows an AI reply without login", async ({ page }) => {
   const forbidden: string[] = [];
   page.on("request", (request) => {
     const url = request.url();
@@ -8,7 +8,7 @@ test("landing Try Nibie opens the public demo and shows an AI reply without logi
   });
 
   await page.goto("/");
-  await page.locator(".landing-hero").getByRole("link", { name: "Try Nibie" }).click();
+  await page.locator(".landing-hero").getByRole("link", { name: "Try the demo" }).click();
   await expect(page).toHaveURL((url) => url.pathname === "/demo");
   await expect(page).not.toHaveURL(/\/login/);
   await expect(page.getByTestId("demo-banner")).toContainText("Demo mode");

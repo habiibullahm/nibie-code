@@ -3,8 +3,8 @@ import { LandingPage } from "@/components/landing-page";
 import { absolutePublicUrl, publicShareImage } from "@/lib/config/public-metadata";
 import "./landing.css";
 
-const title = "Nibie — A quieter place to think with AI";
-const description = "Nibie is a personal AI workspace that helps you think, research, and continue your work—with less repetition.";
+const title = "Nibie — A personal AI workspace for thinking, writing, and code";
+const description = "Choose Fast, Balanced, or High per question, keep context in Rooms, and pick up any conversation where you left it.";
 
 // Absolute only when the public origin is known. A missing production origin must not become localhost.
 const canonical = absolutePublicUrl("/");
