@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { fulfillAgentsList, rscActionBody } from "./chat-core-actions";
 
 // Exercise the real workspace against a synthetic persistence boundary. No auth,
 // database or provider request runs; signed-in/RLS acceptance is a separate gate.
@@ -26,9 +27,10 @@ async function mockWorkspace(page: Page, failure: Failure) {
     if (route.request().method() !== "POST") return route.continue();
     if (!route.request().headers()["next-action"]) return route.abort();
     const args = JSON.parse(route.request().postData()!) as unknown[];
+    if (await fulfillAgentsList(route, args)) return;
     actions.push(args);
     if (args.length !== 4) return route.abort();
-    await route.fulfill({ contentType: "text/x-component", body: '0:{"a":"$@1","f":[],"b":"development"}\n1:' + JSON.stringify({ data: { id: args[2], position: 1 } }) + "\n" });
+    await route.fulfill({ contentType: "text/x-component", body: rscActionBody({ data: { id: args[2], position: 1 } }) });
   });
   await page.route("**/api/chat/stop", async (route) => {
     const stop = JSON.parse(route.request().postData()!) as { userMessageId: string; assistantId: string; content: string };

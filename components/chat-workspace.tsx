@@ -4,6 +4,8 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "re
 import { useRouter, useSearchParams } from "next/navigation";
 import { Ghost, PanelLeftClose, PanelLeftOpen, SquarePen, X } from "lucide-react";
 import { addUserMessageAction, archiveConversationAction, discardTemporaryConversationAction, editLastUserMessageAction, moveConversationAction, renameConversationAction, restoreConversationAction, startConversationAction, updateConversationModelAction } from "@/app/actions/chat";
+import { listAgentsAction, type PublicAgent } from "@/lib/agents/actions";
+import { composerRouteLabel } from "@/lib/agents/composer-label";
 import { createWorkbenchFromAssistantAction } from "@/app/actions/workbench";
 import { WORKBENCH_UI_ENABLED } from "@/lib/workbench/flags";
 import { ChatComposer, type ComposerHandle } from "@/components/chat-composer";
@@ -102,6 +104,22 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   // A conversation's saved mode is only used while that mode is still configured; otherwise the first available one is shown.
   const availableModes = useMemo(() => models.map((option) => option.id), [models]);
   const [modelChoice, setModelChoice] = useState<ModelChoice>("Auto");
+  const [pickerAgents, setPickerAgents] = useState<PublicAgent[]>([]);
+  const [draftAgentId, setDraftAgentId] = useState<string | null>(null);
+  const defaultAgentIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (preview) return;
+    let cancelled = false;
+    listAgentsAction().then((result) => {
+      if (cancelled) return;
+      const enabled = (result.data ?? []).filter((agent) => agent.isEnabled);
+      setPickerAgents(enabled);
+      const fallback = enabled.find((agent) => agent.isDefault)?.id ?? null;
+      defaultAgentIdRef.current = fallback;
+      setDraftAgentId(fallback);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [preview]);
   const [savingMode, setSavingMode] = useState(false);
   const [savedPreferences, setSavedPreferences] = useState(preferences ?? defaultUserPreferences());
   const [serverUpdatedAt, setServerUpdatedAt] = useState(preferences?.updatedAt ?? null);
@@ -188,6 +206,7 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   function beforeNewChat() {
     if (busy.current) return false;
     setTemporaryDraft(false);
+    setDraftAgentId(defaultAgentIdRef.current);
     setWelcomeGreetingIndex((index) => (index + 1) % welcomeGreetings.length);
     composerRef.current?.clear();
     return true;
@@ -440,9 +459,15 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
       let saved: { id: string; position: number };
       if (!id) {
         // The first message of a new chat creates the conversation and saves the message in a single round trip.
-        const started = temporary
-          ? await startConversationAction(mode, messageId, content, null, attachmentIds.length ? attachmentIds : undefined, true)
-          : await startConversationAction(mode, messageId, content, drafting ? selectedRoomId : null, ...withAttachments);
+        const started = await startConversationAction(
+          !temporary && draftAgentId ? "Balanced" : mode,
+          messageId,
+          content,
+          temporary ? null : (drafting ? selectedRoomId : null),
+          attachmentIds.length ? attachmentIds : undefined,
+          temporary,
+          temporary ? undefined : draftAgentId ?? undefined,
+        );
         if (started.error || !started.data) { rollback(started.error ?? "Conversation couldn't be created.", key); return; }
         const { conversation } = started.data;
         saved = started.data.message;
@@ -751,7 +776,16 @@ export function ChatWorkspace({ email, metadataName = null, initialData, preview
   }, [preview, previewConversations, previewArchivedConversations, localConversations]);
   const sidebarProps = { conversations: shownConversations, archivedConversations: preview ? previewArchivedConversations.filter((item) => !localConversations.some((entry) => entry.id === item.id)) : archivedConversations, rooms, activeId: history, activeRoomId: showRoom ? selectedRoomId : threadRoom?.id ?? null, busy: controlsDisabled || recovering, activity: assistantActivity, preview, demo, email, name: accountName, releasePreview, renderedAt, settingsActive: settingsOpen, searchCorpus, onClose: closeDrawer, onOpen: openConversation, onOpenMessage: openConversationAtMessage, onOpenRoom: openRoom, onNewThreadInRoom: newThreadInRoom, onDeleteRoom: deleteRoomFromSidebar, onCreateRoom: openRoomSetup, onNewChat: newChat, onOpenSettings: openSettings, onRename: rename, onArchive: archive, onRestore: restore, onMove: moveThread, onCopyTranscript: copyTranscript };
   // A temporary chat is General only and takes no attachments (their bytes would outlive the chat).
-  const composerProps = { ref: composerRef, dockRef: composerDockRef, sending: sending || recovering || movingThread !== null, streaming, mode, models, onModelChange: changeModel, researchMode, onResearchModeChange: setResearchMode, savingMode, caption, diagnostics: contextDiagnostics ?? contextPreview, onEditProfile: editProfile, onSubmit: submitMessage, onStop: stopStream, onAttach: temporary ? attachUnavailable : attach, attachmentsEnabled: !preview && !temporary, onRoomFiles: threadRoom && !preview && !temporary ? toggleRoomFiles : undefined, roomItems, roomId: threadRoomId ?? "", roomLabel, roomSelectionNotice, roomsLoading, onRoomChange: temporary ? undefined : activeId ? rooms.length ? changeComposerRoom : undefined : chooseDraftRoom, attachmentPanel: filePickerOpen && threadRoom ? <RoomFilePicker roomId={threadRoom.id} selectedIds={selectedFileIds} disabled={controlsDisabled || sending || streaming} onChange={setSelectedFileIds} /> : null };
+  const routeLabel = activeConversation
+    ? composerRouteLabel({ routing_kind: activeConversation.routing_kind ?? null, selected_model: activeConversation.selected_model, agent_name_snapshot: activeConversation.agent_name_snapshot ?? null })
+    : { kind: "model" as const };
+  const agentLabel = routeLabel.kind === "agent" ? routeLabel.label : null;
+  const agentMenu = !preview && !activeId && !temporary ? {
+    value: draftAgentId ?? "",
+    items: [{ value: "", label: "Nibie" }, ...pickerAgents.map((agent) => ({ value: agent.id, label: agent.name }))],
+    onChange: (value: string) => setDraftAgentId(value || null),
+  } : null;
+  const composerProps = { ref: composerRef, dockRef: composerDockRef, sending: sending || recovering || movingThread !== null, streaming, mode, models, onModelChange: changeModel, researchMode, onResearchModeChange: setResearchMode, savingMode, caption, diagnostics: contextDiagnostics ?? contextPreview, onEditProfile: editProfile, onSubmit: submitMessage, onStop: stopStream, onAttach: temporary ? attachUnavailable : attach, attachmentsEnabled: !preview && !temporary, onRoomFiles: threadRoom && !preview && !temporary ? toggleRoomFiles : undefined, roomItems, roomId: threadRoomId ?? "", roomLabel, roomSelectionNotice, roomsLoading, onRoomChange: temporary ? undefined : activeId ? rooms.length ? changeComposerRoom : undefined : chooseDraftRoom, attachmentPanel: filePickerOpen && threadRoom ? <RoomFilePicker roomId={threadRoom.id} selectedIds={selectedFileIds} disabled={controlsDisabled || sending || streaming} onChange={setSelectedFileIds} /> : null, agentLabel, agentMenu };
 
   return <main className={`chat-workspace${workbenchDocumentId ? " has-workbench" : ""}`}>
     <ChatSidebar {...sidebarProps} collapsed={desktopSidebarCollapsed} desktopToggleRef={desktopCollapseButtonRef} desktopExpandRef={desktopExpandButtonRef} onCollapse={collapseDesktopSidebar} onExpand={expandDesktopSidebar} />

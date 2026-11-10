@@ -25,9 +25,18 @@ describe("chat server action input boundaries", () => {
   it("saves a configured mode on the conversation", async () => {
     const eq = vi.fn(() => ({ select: () => ({ maybeSingle: async () => ({ data: { id: "c" }, error: null }) }) }));
     const update = vi.fn(() => ({ eq }));
-    createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from: () => ({ update }) });
+    const select = vi.fn(() => ({ eq: () => ({ maybeSingle: async () => ({ data: { routing_kind: null }, error: null }) }) }));
+    createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from: () => ({ update, select }) });
     await expect(updateConversationModelAction("5e9bdcca-9205-4fea-a773-13952bb78c44", "Fast")).resolves.toEqual({});
     expect(update).toHaveBeenCalledWith(expect.objectContaining({ selected_model: "Fast" }));
+  });
+
+  it("keeps a snapshotted conversation on its agent", async () => {
+    const update = vi.fn();
+    const select = vi.fn(() => ({ eq: () => ({ maybeSingle: async () => ({ data: { routing_kind: "user_provider" }, error: null }) }) }));
+    createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from: () => ({ update, select }) });
+    await expect(updateConversationModelAction("5e9bdcca-9205-4fea-a773-13952bb78c44", "Fast")).resolves.toEqual({ error: "This conversation keeps its agent." });
+    expect(update).not.toHaveBeenCalled();
   });
 
   it("rejects malformed IDs and invalid message/title content before database access", async () => {

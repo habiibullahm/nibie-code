@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
-import { openAiCompatibleProvider } from "../../lib/ai/provider";
+import { openAiCompatibleProvider, streamRoute } from "../../lib/ai/provider";
 
 const messages = [{ role: "user" as const, content: "hello" }];
 function configure() {
@@ -69,9 +69,9 @@ describe("provider adapter routes each mode server-side", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("hides provider failures behind a generic error", async () => {
+  it("maps fetch network failures to unavailable ProviderRequestError", async () => {
     configure(); vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("socket detail with secret"); }));
-    await expect(openAiCompatibleProvider.stream("Fast", messages, new AbortController().signal)).rejects.toThrow("AI provider request failed.");
+    await expect(openAiCompatibleProvider.stream("Fast", messages, new AbortController().signal)).rejects.toMatchObject({ code: "unavailable" });
   });
 
   it("Fast still reaches Sumopod when the OpenAI configuration is broken, while Balanced and High fail closed without any request", async () => {
@@ -90,5 +90,45 @@ describe("provider adapter routes each mode server-side", () => {
     await openAiCompatibleProvider.stream("Balanced", messages, new AbortController().signal);
     await openAiCompatibleProvider.stream("High", messages, new AbortController().signal);
     expect([0, 1].map((call) => sent(call).body.model)).toEqual(["gpt-6-luna", "gpt-6.1-sol"]);
+  });
+
+  it("streams a user route with temperature and max_tokens and no reasoning_effort", async () => {
+    const { sent } = stubFetch();
+    const route = {
+      provider: "openai_compatible" as const,
+      baseUrl: "https://router.nibie.app/v1",
+      apiKey: "router-key",
+      model: "deepseek-chat",
+      temperature: 0.2,
+      maxOutputTokens: 256,
+    };
+    await streamRoute(route, messages, new AbortController().signal);
+    expect(sent(0)).toEqual({
+      url: "https://router.nibie.app/v1/chat/completions",
+      authorization: "Bearer router-key",
+      body: { model: "deepseek-chat", messages, stream: true, stream_options: { include_usage: true }, temperature: 0.2, max_tokens: 256 },
+    });
+  });
+
+  it("sends caller headers and does not let them replace authorization", async () => {
+    configure();
+    const { fetchMock } = stubFetch();
+    const route = { provider: "openai_compatible" as const, baseUrl: "https://router.nibie.app/v1", apiKey: "router-key", model: "m" };
+    await streamRoute(route, messages, new AbortController().signal, [
+      { name: "X-Title", value: "nibie" },
+      { name: "Authorization", value: "Bearer stolen" },
+    ]);
+    const init = (fetchMock.mock.calls as unknown as [unknown, { headers: Record<string, string> }][])[0]?.[1];
+    expect(init.headers.authorization).toBe("Bearer router-key");
+    expect(init.headers["X-Title"]).toBe("nibie");
+    expect(JSON.stringify(init.headers)).not.toContain("stolen");
+  });
+
+  it("maps a 401 and a network failure to safe errors", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 401 })));
+    const route = { provider: "openai_compatible" as const, baseUrl: "https://router.nibie.app/v1", apiKey: "bad", model: "m" };
+    await expect(streamRoute(route, messages, new AbortController().signal)).rejects.toMatchObject({ code: "authentication_failed" });
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("connect ECONNREFUSED"); }));
+    await expect(streamRoute(route, messages, new AbortController().signal)).rejects.toMatchObject({ code: "unavailable" });
   });
 });

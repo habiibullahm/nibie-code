@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { longReplyEnd, longReplyFixtureId, longReplyParts } from "../fixtures/long-reply";
+import { fulfillAgentsList, rscActionBody } from "./chat-core-actions";
 
 declare global {
   interface Window { highStream?: { release: () => void; requests: number }; loadedOnce?: boolean }
@@ -23,9 +24,10 @@ async function workspace(page: Page) {
     if (route.request().method() !== "POST") return route.continue();
     if (!route.request().headers()["next-action"]) return route.abort();
     const args = JSON.parse(route.request().postData()!) as unknown[];
+    if (await fulfillAgentsList(route, args)) return;
     if (args.length !== 4) return route.abort();
     saves.push(args[2] as string);
-    await route.fulfill({ contentType: "text/x-component", body: '0:{"a":"$@1","f":[],"b":"development"}\n1:' + JSON.stringify({ data: { id: args[2], position: 1 } }) + "\n" });
+    await route.fulfill({ contentType: "text/x-component", body: rscActionBody({ data: { id: args[2], position: 1 } }) });
   });
   await page.addInitScript((parts) => {
     const original = window.fetch;

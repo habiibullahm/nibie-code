@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { ATTACHMENT_TUS_CHUNK_SIZE, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS_TOTAL_BYTES } from "../../lib/attachments/limits";
+import { fulfillAgentsList, rscActionBody } from "./chat-core-actions";
 
 const conversation = "5e9bdcca-9205-4fea-a773-13952bb78c44";
 const fixture = (name: string) => ({ name, mimeType: name.endsWith(".md") ? "text/markdown" : "text/plain", buffer: readFileSync(`tests/fixtures/attachments/${name}`) });
@@ -142,10 +143,11 @@ async function workspace(page: Page, options: { failFirstFinalize?: boolean; rej
     if (route.request().method() !== "POST") return route.continue();
     if (!route.request().headers()["next-action"]) return route.abort();
     const args = JSON.parse(route.request().postData()!) as unknown[];
+    if (await fulfillAgentsList(route, args)) return;
     if (args.length !== 4 && args.length !== 5) return route.abort();
     sends.push(args);
     const result = { data: { id: args[2], position: sends.length * 2 - 1 } };
-    await route.fulfill({ contentType: "text/x-component", body: '0:{"a":"$@1","f":[],"b":"development"}\n1:' + JSON.stringify(result) + "\n" });
+    await route.fulfill({ contentType: "text/x-component", body: rscActionBody(result) });
   });
   await page.addInitScript(() => {
     const original = window.fetch;

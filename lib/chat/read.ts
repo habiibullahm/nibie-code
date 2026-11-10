@@ -21,6 +21,16 @@ export type ConversationSummary = {
   archived_at?: string | null;
   /** Set only on a temporary chat (see lib/chat/temporary.ts). */
   temporary_expires_at?: string | null;
+  /** Null on a built-in chat. Set when the conversation was created from an agent. */
+  agent_id?: string | null;
+  agent_name_snapshot?: string | null;
+  routing_kind?: "system_mode" | "user_provider" | null;
+  system_mode_snapshot?: string | null;
+  provider_config_id?: string | null;
+  model_snapshot?: string | null;
+  instructions_snapshot?: string | null;
+  temperature_snapshot?: number | null;
+  max_output_tokens_snapshot?: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -91,7 +101,7 @@ export async function getChatWorkspaceData(conversationId: unknown) {
   // The history list and the selected conversation's messages are independent reads, so they run together.
   // RLS scopes both to the signed-in owner; messages are only used when the conversation is in the owner's list.
   const [conversationResult, { data: roomRows, error: roomsError }, { data: briefRows, error: briefsError }, { data: pinRows, error: pinsError }, messagesResult, attachmentsResult, sourcesResult, researchResult, actionsResult] = await Promise.all([
-    orderedConversations("id,title,selected_model,room_id,archived_at,temporary_expires_at,created_at,updated_at"),
+    orderedConversations("id,title,selected_model,room_id,archived_at,temporary_expires_at,agent_id,agent_name_snapshot,routing_kind,system_mode_snapshot,provider_config_id,model_snapshot,instructions_snapshot,temperature_snapshot,max_output_tokens_snapshot,created_at,updated_at"),
     supabase
     .from("rooms")
       .select("id,name,description,instructions,created_at,updated_at")
@@ -141,7 +151,22 @@ export async function getChatWorkspaceData(conversationId: unknown) {
   const empty = { conversations: [] as ConversationSummary[], archivedConversations: [] as ConversationSummary[], temporaryConversation: null as ConversationSummary | null, rooms: [] as RoomSummary[], roomsError: null as string | null, messages: [] as PersistedMessage[], activeId: null };
   if (conversationsError) return { ...empty, error: "Conversation history couldn't be loaded. Refresh to try again." };
   // Saved modes from earlier builds ("Reasoning", display names) are normalized here, so the client only ever sees Fast / Balanced / High.
-  const allConversations = ((conversationRows ?? []) as ConversationSummary[]).map((row) => ({ ...row, selected_model: normalizeSavedMode(row.selected_model) ?? row.selected_model, room_id: row.room_id ?? null, archived_at: row.archived_at ?? null, temporary_expires_at: row.temporary_expires_at ?? null }));
+  const allConversations = ((conversationRows ?? []) as ConversationSummary[]).map((row) => ({
+    ...row,
+    selected_model: normalizeSavedMode(row.selected_model) ?? row.selected_model,
+    room_id: row.room_id ?? null,
+    archived_at: row.archived_at ?? null,
+    temporary_expires_at: row.temporary_expires_at ?? null,
+    agent_id: row.agent_id ?? null,
+    agent_name_snapshot: row.agent_name_snapshot ?? null,
+    routing_kind: row.routing_kind ?? null,
+    system_mode_snapshot: row.system_mode_snapshot ?? null,
+    provider_config_id: row.provider_config_id ?? null,
+    model_snapshot: row.model_snapshot ?? null,
+    instructions_snapshot: row.instructions_snapshot ?? null,
+    temperature_snapshot: row.temperature_snapshot == null ? null : Number(row.temperature_snapshot),
+    max_output_tokens_snapshot: row.max_output_tokens_snapshot ?? null,
+  }));
   // Temporary chats never appear in history. Only the one this page was opened on is returned, and only until it expires.
   const history = allConversations.filter((item) => !isTemporaryConversation(item));
   const conversations = history.filter((item) => !item.archived_at);

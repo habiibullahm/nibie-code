@@ -22,7 +22,7 @@ export type FailureCategory =
 export type GenerationTelemetryInput = {
   requestId: string;
   logicalMode: ChatModel;
-  provider: ProviderId | null;
+  provider: ProviderId | "user" | null;
   /** Logical model route label only — never the raw secret-bearing route payload. */
   model: string;
   usageKind: UsageKind;

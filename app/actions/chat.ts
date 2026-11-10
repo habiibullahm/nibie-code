@@ -11,6 +11,8 @@ import { operationalCodes } from "@/lib/observability/codes";
 import { attachmentErrors, parseAttachmentIds } from "@/lib/attachments/rules";
 import { parseStopRequest, parseStopRequests, stopDecision, stoppedContent, type StopRequest } from "@/lib/chat/stop";
 import { temporaryChatExpiry, temporaryChatUnavailable } from "@/lib/chat/temporary";
+import { agentPublicColumns } from "@/lib/agents/columns";
+import { snapshotForAgent, type ConversationSnapshot } from "@/lib/agents/snapshot";
 
 export type ChatActionResult<T = undefined> = { data?: T; error?: string };
 type ConversationRow = { id: string; title: string; selected_model: string; room_id: string | null; temporary_expires_at?: string | null; created_at: string; updated_at: string };
@@ -34,7 +36,25 @@ function failure<T>(): ChatActionResult<T> {
   return { error: saveFailed };
 }
 
-async function insertConversation(supabase: Supabase, userId: string, model: ChatModel, roomId: string | null, temporary = false) {
+async function insertConversation(supabase: Supabase, userId: string, model: ChatModel, roomId: string | null, temporary = false, snapshot?: ConversationSnapshot) {
+  if (snapshot) {
+    // A snapshotted chat must not fall back to a built-in insert when the new columns are missing.
+    return supabase.from("conversations").insert({
+      user_id: userId,
+      title: "New chat",
+      selected_model: snapshot.selected_model,
+      ...(roomId ? { room_id: roomId } : {}),
+      agent_id: snapshot.agent_id,
+      agent_name_snapshot: snapshot.agent_name_snapshot,
+      routing_kind: snapshot.routing_kind,
+      system_mode_snapshot: snapshot.system_mode_snapshot,
+      provider_config_id: snapshot.provider_config_id,
+      model_snapshot: snapshot.model_snapshot,
+      instructions_snapshot: snapshot.instructions_snapshot,
+      temperature_snapshot: snapshot.temperature_snapshot,
+      max_output_tokens_snapshot: snapshot.max_output_tokens_snapshot,
+    }).select("id,title,selected_model,room_id,created_at,updated_at,agent_id,agent_name_snapshot,routing_kind,system_mode_snapshot,provider_config_id,model_snapshot,instructions_snapshot,temperature_snapshot,max_output_tokens_snapshot").single();
+  }
   if (temporary) {
     // A temporary chat is always General. It never falls back to an ordinary insert: one that cannot be marked temporary is not created.
     return supabase.from("conversations").insert({
@@ -128,13 +148,68 @@ async function appendMessage(supabase: Supabase, conversationId: string, message
   return { data };
 }
 
-export async function createConversationAction(model: unknown): Promise<ChatActionResult<ConversationRow>> {
+function requestedAgentId(agentId: unknown): { id: string | null; error?: string } {
+  if (agentId === undefined || agentId === null) return { id: null };
+  const parsed = validateConversationId(agentId);
+  if (!parsed.success) return { id: null, error: "Choose a valid agent." };
+  return { id: parsed.data };
+}
+
+function asNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+async function loadAgentSnapshot(supabase: Supabase, agentId: string): Promise<{ snapshot: ConversationSnapshot } | { error: string }> {
+  const loaded = await supabase.from("agents").select(agentPublicColumns).eq("id", agentId).eq("is_enabled", true).maybeSingle();
+  if (loaded.error || !loaded.data) return { error: "That agent is not available." };
+  const row = loaded.data;
+  let defaultProviderId: string | null = null;
+  if (row.provider_binding === "default_provider") {
+    const provider = await supabase.from("provider_configs").select("id").eq("is_default", true).maybeSingle();
+    if (provider.error) return { error: saveFailed };
+    defaultProviderId = provider.data?.id ?? null;
+  }
+  try {
+    const snapshot = snapshotForAgent({
+      id: row.id,
+      name: row.name,
+      system_instructions: row.system_instructions,
+      provider_binding: row.provider_binding,
+      provider_config_id: row.provider_config_id,
+      system_mode: row.system_mode,
+      model: row.model,
+      temperature: asNumber(row.temperature),
+      max_output_tokens: row.max_output_tokens,
+    }, defaultProviderId);
+    if (snapshot.routing_kind === "system_mode" && !isModeAvailable(snapshot.selected_model)) return modelUnavailable;
+    return { snapshot };
+  } catch (error) {
+    if (error instanceof Error && (error.message.startsWith("Choose a default provider") || error.message === "This agent has no mode.")) return { error: error.message };
+    return { error: "That agent is not available." };
+  }
+}
+
+export async function createConversationAction(model: unknown, agentId: unknown = undefined): Promise<ChatActionResult<ConversationRow>> {
+  const requested = requestedAgentId(agentId);
+  if (requested.error) return { error: requested.error };
   const parsedModel = modelInputSchema.safeParse(model);
-  if (!parsedModel.success) return { error: "Choose a valid response mode." };
-  if (!isModeAvailable(parsedModel.data)) return modelUnavailable;
+  if (!requested.id) {
+    if (!parsedModel.success) return { error: "Choose a valid response mode." };
+    if (!isModeAvailable(parsedModel.data)) return modelUnavailable;
+  }
   try {
     const { supabase, user } = await authenticatedClient();
-    const { data, error } = await insertConversation(supabase, user.id, parsedModel.data, null);
+    const loaded = requested.id ? await loadAgentSnapshot(supabase, requested.id) : { snapshot: undefined as ConversationSnapshot | undefined };
+    if ("error" in loaded) return loaded;
+    const modelForInsert = loaded.snapshot?.selected_model ?? parsedModel.data;
+    if (!modelForInsert) return { error: "Choose a valid response mode." };
+    const { data, error } = await insertConversation(supabase, user.id, modelForInsert, null, false, loaded.snapshot);
+    if (loaded.snapshot && schemaUnavailable(error)) return { error: "Agents are not available yet." };
     if (error || !data) return failure();
     return { data };
   } catch {
@@ -145,25 +220,33 @@ export async function createConversationAction(model: unknown): Promise<ChatActi
 // The first message of a new chat: creates the conversation and saves the message in one round trip from the browser.
 // If the message cannot be saved, the empty conversation is removed again so history is not left with a blank "New chat".
 // A temporary chat (see lib/chat/temporary.ts) is General only and is hidden from history, search, recall and Memory.
-export async function startConversationAction(model: unknown, messageId: unknown, content: unknown, roomId: unknown = null, attachmentIds: unknown = undefined, temporary: unknown = false): Promise<ChatActionResult<{ conversation: ConversationRow; message: SavedMessage }>> {
+export async function startConversationAction(model: unknown, messageId: unknown, content: unknown, roomId: unknown = null, attachmentIds: unknown = undefined, temporary: unknown = false, agentId: unknown = undefined): Promise<ChatActionResult<{ conversation: ConversationRow; message: SavedMessage }>> {
   const parsedAttachments = parseAttachmentIds(attachmentIds);
   if (!parsedAttachments.ok) return { error: attachmentErrors.tooMany };
   if (typeof temporary !== "boolean") return { error: "Choose a valid chat type." };
   if (temporary && roomId !== null && roomId !== undefined) return { error: "Temporary chats can't be started in a room." };
   if (temporary && parsedAttachments.ids.length) return { error: temporaryAttachmentsUnavailable };
+  const requested = requestedAgentId(agentId);
+  if (requested.error) return { error: requested.error };
+  if (requested.id && temporary) return { error: "Temporary chats use Nibie's built-in modes." };
   const parsedModel = modelInputSchema.safeParse(model);
   const parsedMessageId = validateConversationId(messageId);
   const parsedContent = validateMessage(content);
   const parsedRoom = roomId === null || roomId === undefined ? { success: true as const, data: null } : validateConversationId(roomId);
-  if (!parsedModel.success) return { error: "Choose a valid response mode." };
+  if (!requested.id && !parsedModel.success) return { error: "Choose a valid response mode." };
   if (!parsedMessageId.success) return { error: "Choose a valid message." };
   if (!parsedContent.success) return { error: "Messages must be between 1 and 20,000 characters." };
   if (!parsedRoom.success) return { error: "Choose a valid room." };
-  if (!isModeAvailable(parsedModel.data)) return modelUnavailable;
+  if (!requested.id && parsedModel.success && !isModeAvailable(parsedModel.data)) return modelUnavailable;
   try {
     const { supabase, user } = await authenticatedClient();
     if (temporary) await purgeExpiredTemporaryConversations(supabase);
-    const { data: conversation, error } = await insertConversation(supabase, user.id, parsedModel.data, parsedRoom.data, temporary);
+    const loaded = requested.id ? await loadAgentSnapshot(supabase, requested.id) : { snapshot: undefined as ConversationSnapshot | undefined };
+    if ("error" in loaded) return loaded;
+    const modelForInsert = loaded.snapshot?.selected_model ?? (parsedModel.success ? parsedModel.data : undefined);
+    if (!modelForInsert) return { error: "Choose a valid response mode." };
+    const { data: conversation, error } = await insertConversation(supabase, user.id, modelForInsert, parsedRoom.data, temporary, loaded.snapshot);
+    if (loaded.snapshot && schemaUnavailable(error)) return { error: "Agents are not available yet." };
     if (temporary && schemaUnavailable(error)) return { error: temporaryChatUnavailable };
     if (error?.code === "23503") return { error: "That room is no longer available." };
     if (error || !conversation) return failure();
@@ -186,6 +269,12 @@ export async function updateConversationModelAction(id: unknown, model: unknown)
   if (!isModeAvailable(parsedModel.data)) return modelUnavailable;
   try {
     const { supabase } = await authenticatedClient();
+    const current = await supabase.from("conversations").select("routing_kind").eq("id", parsedId.data).maybeSingle();
+    if (!schemaUnavailable(current.error)) {
+      if (current.error) return failure();
+      if (!current.data) return { error: "That conversation is no longer available." };
+      if (current.data.routing_kind) return { error: "This conversation keeps its agent." };
+    }
     const { data, error } = await supabase.from("conversations").update({ selected_model: parsedModel.data, updated_at: new Date().toISOString() }).eq("id", parsedId.data).select("id").maybeSingle();
     if (error) return failure();
     if (!data) return { error: "That conversation is no longer available." };

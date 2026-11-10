@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { fulfillAgentsList, rscActionBody } from "./chat-core-actions";
 
 for (const diagnosticEvent of ["start", "context"] as const) {
   test(`Memory diagnostics in ${diagnosticEvent} preserve a complete reply`, async ({ page }) => {
@@ -6,8 +7,9 @@ for (const diagnosticEvent of ["start", "context"] as const) {
       if (route.request().method() !== "POST") return route.continue();
       if (!route.request().headers()["next-action"]) return route.abort();
       const args: unknown[] = JSON.parse(route.request().postData()!);
+      if (await fulfillAgentsList(route, args)) return;
       if (args.length !== 4) return route.abort();
-      await route.fulfill({ contentType: "text/x-component", body: '0:{"a":"$@1","f":[],"b":"development"}\n1:' + JSON.stringify({ data: { id: args[2], position: 1 } }) + "\n" });
+      await route.fulfill({ contentType: "text/x-component", body: rscActionBody({ data: { id: args[2], position: 1 } }) });
     });
     const context = { sources: [{ type: "memory", label: "Saved memories", state: "included", reason: "A saved memory" }], recentMessageCount: 1 };
     const frame = (type: string, data: unknown) => `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;

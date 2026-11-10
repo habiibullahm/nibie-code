@@ -106,7 +106,10 @@ const webMocks = vi.hoisted(() => {
   };
 });
 vi.mock("@/lib/supabase/server", () => ({ createSupabaseServerClient: async () => withoutAttachments(await createClient()) }));
-vi.mock("@/lib/ai/provider", () => ({ chatProvider: { stream }, configuredModelLabel: (mode: string) => mode }));
+vi.mock("@/lib/ai/provider", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/ai/provider")>("@/lib/ai/provider");
+  return { chatProvider: { stream }, configuredModelLabel: (mode: string) => mode, streamRoute: actual.streamRoute };
+});
 vi.mock("@/lib/ai/registry", () => ({ getModelOptions: modelOptions, contextCapabilitiesFor: contextCapabilities, providerFor: (mode: string) => mode === "Fast" ? "sumopod" : "openai" }));
 // The thread summary read and its after-response maintenance are their own module (tested in thread-summary-store.test.ts).
 // Mocked here so the ordered table results above stay about the reply itself.
@@ -126,6 +129,7 @@ vi.mock("@/lib/recall/retrieve", () => ({ retrieveRelevantMemories: recallMocks.
 const allModes = { models: ["Fast", "Balanced", "High"].map((id) => ({ id, label: id, description: "" })) };
 
 import { POST } from "../../app/api/chat/route";
+import { encryptSecret } from "../../lib/crypto/secret-box";
 import { CONTEXT_DATA_PREAMBLE, CONTEXT_POLICY_TEXT, contextPolicyFor, HISTORY_INCOMPLETE_INSTRUCTION } from "../../lib/context/context-policy";
 import { readChatSse } from "../../lib/ai/sse";
 import { responseQualityFor } from "../../lib/ai/response-quality";
@@ -2175,6 +2179,93 @@ describe("POST /api/chat", () => {
       stream.mockResolvedValue(providerChunks(["Ok."], "stop"));
       await (await POST(validRequest())).text();
       expect((stream.mock.calls.at(-1)?.[1] as { content: string }[])[0]?.content).toContain("no matching saved memory");
+    });
+  });
+
+  describe("snapshotted custom agents", () => {
+    const secretKey = Buffer.alloc(32, 3).toString("base64");
+    const packed = encryptSecret({ apiKey: "router-key", headers: [{ name: "X-Title", value: "nibie" }] }, { PROVIDER_SECRET_KEY: secretKey });
+
+    function agentRequest() {
+      return new Request("http://localhost/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ conversationId: "5e9bdcca-9205-4fea-a773-13952bb78c44", userMessageId: "b79e56e1-b479-46f4-97d3-30b2e22be90e", model: "Fast" }),
+      });
+    }
+
+    function agentClient() {
+      const results = [
+        { data: { id: "user-message", position: 1, content: "hello" }, error: null },
+        { data: [{ role: "user", content: "hello", status: "complete", position: 1 }], error: null },
+        { data: { id: assistantId }, error: null },
+      ];
+      const conversation = {
+        id: "conversation",
+        selected_model: "Balanced",
+        room_id: null,
+        routing_kind: "user_provider",
+        agent_name_snapshot: "Coding",
+        provider_config_id: "22222222-2222-4222-8222-222222222222",
+        model_snapshot: "deepseek-chat",
+        instructions_snapshot: "Prefer patches.",
+        temperature_snapshot: 0.2,
+        max_output_tokens_snapshot: 256,
+      };
+      const from = vi.fn((table: string) => {
+        if (table === "user_preferences") return query(preferenceResult);
+        if (table === "conversations") return query({ data: conversation, error: null });
+        if (table === "provider_configs") return query({ data: { provider_type: "nibie_router", base_url: "https://router.nibie.app/v1" }, error: null });
+        return query(results.shift());
+      });
+      createClient.mockResolvedValue({ auth: { getClaims: async () => ({ data: { claims: { sub: "owner" } }, error: null }) }, from, rpc });
+    }
+
+    async function withSecretRpc(data: string | null, run: () => Promise<void>) {
+      const original = rpc.getMockImplementation();
+      rpc.mockImplementation((name: string, args: unknown) => name === "read_own_provider_secret" ? Promise.resolve({ data, error: null }) : original?.(name, args));
+      try { await run(); } finally { if (original) rpc.mockImplementation(original); }
+    }
+
+    it("routes a saved agent through Nibie Router and ignores the client mode", async () => {
+      vi.stubEnv("PROVIDER_SECRET_KEY", secretKey);
+      const fetchMock = vi.fn(async () => new Response(providerChunks(["ok"], "stop"), { status: 200 }));
+      vi.stubGlobal("fetch", fetchMock);
+      agentClient();
+      await withSecretRpc(packed, async () => {
+        const response = await POST(agentRequest());
+        expect(response.status).toBe(200);
+        await response.text();
+      });
+      expect(stream).not.toHaveBeenCalled();
+      const [url, init] = fetchMock.mock.calls[0] as unknown as [string, { headers: Record<string, string>; body: string }];
+      expect(url).toBe("https://router.nibie.app/v1/chat/completions");
+      expect(url).not.toContain("gateway");
+      expect(init.headers.authorization).toBe("Bearer router-key");
+      expect(init.headers["X-Title"]).toBe("nibie");
+      const sent = JSON.parse(init.body) as { model: string; temperature: number; max_tokens: number; messages: { content: string }[] };
+      expect(sent.model).toBe("deepseek-chat");
+      expect(sent.temperature).toBe(0.2);
+      expect(sent.max_tokens).toBe(256);
+      expect(sent.messages[0]?.content).not.toContain("Prefer patches");
+      expect(JSON.stringify(sent.messages)).toContain("Prefer patches");
+      expect(usageReserve.mock.calls[0]?.[0]).toMatchObject({ p_logical_mode: "Balanced" });
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    });
+
+    it("fails closed when the saved provider secret cannot be read", async () => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      agentClient();
+      await withSecretRpc(null, async () => {
+        const response = await POST(agentRequest());
+        expect(response.status).toBe(502);
+        await expect(response.json()).resolves.toEqual({ error: "The provider is unavailable." });
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(stream).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
     });
   });
 });

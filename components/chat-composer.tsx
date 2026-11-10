@@ -46,6 +46,10 @@ type Props = {
   roomsLoading: boolean;
   onRoomChange?: (id: string) => void;
   centered?: boolean;
+  // Set on a chat that already has an agent snapshot. The Model menu stays hidden.
+  agentLabel?: string | null;
+  // New chats only. An empty value is Nibie, which keeps the Model menu.
+  agentMenu?: { value: string; items: MenuItem<string>[]; onChange: (value: string) => void } | null;
 };
 
 function fitCollapsedTextarea(element: HTMLTextAreaElement) {
@@ -56,7 +60,7 @@ function fitCollapsedTextarea(element: HTMLTextAreaElement) {
 }
 
 // The draft lives here, not in the workspace: typing re-renders only this component, never the message list or sidebar.
-export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, streaming, mode, models, onModelChange, researchMode, onResearchModeChange, savingMode, caption, diagnostics, onEditProfile, onSubmit, onStop, onAttach, attachmentsEnabled = false, onRoomFiles, attachmentPanel = null, roomItems, roomId, roomLabel, roomSelectionNotice, roomsLoading, onRoomChange, centered = false }: Props) {
+export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, streaming, mode, models, onModelChange, researchMode, onResearchModeChange, savingMode, caption, diagnostics, onEditProfile, onSubmit, onStop, onAttach, attachmentsEnabled = false, onRoomFiles, attachmentPanel = null, roomItems, roomId, roomLabel, roomSelectionNotice, roomsLoading, onRoomChange, centered = false, agentLabel = null, agentMenu = null }: Props) {
   const [draft, setDraft] = useState("");
   const [expanded, setExpanded] = useState(false);
   const [canExpand, setCanExpand] = useState(false);
@@ -255,7 +259,10 @@ export const ChatComposer = memo(function ChatComposer({ ref, dockRef, sending, 
     <div className="composer-tools composer-secondary-tools">
       <div className="composer-left-tools">
         {onRoomChange ? <ComposerMenu name="Room" description="Choose where this conversation belongs." value={roomId} items={roomItems} onChange={onRoomChange} disabled={sending || streaming || roomsLoading} disabledReason={roomsLoading ? "Loading rooms" : "Message is being sent"} /> : <span className="composer-room-context" aria-label={`Room context: ${roomLabel}`} title={roomLabel}>{roomLabel}</span>}
-        <ComposerMenu name="Model" description="Choose how Nibie answers: Fast, Balanced, or High." value={mode} items={modelItems} onChange={onModelChange} disabled={sending || streaming || !models.length} disabledReason={!models.length ? "No models are configured" : savingMode ? "Saving…" : "A response is running"} />
+        {agentLabel ? <button type="button" className="composer-menu-button" disabled aria-label={`Agent: ${agentLabel}`}><span>{agentLabel}</span></button> : <>
+          {agentMenu ? <ComposerMenu name="Agent" description="Choose who answers this new chat. Nibie uses Fast, Balanced, or High." value={agentMenu.value} items={agentMenu.items} onChange={agentMenu.onChange} disabled={sending || streaming} disabledReason="A response is running" /> : null}
+          <ComposerMenu name="Model" description="Choose how Nibie answers: Fast, Balanced, or High." value={mode} items={modelItems} onChange={onModelChange} disabled={sending || streaming || !models.length} disabledReason={!models.length ? "No models are configured" : savingMode ? "Saving…" : "A response is running"} />
+        </>}
         <ComposerMenu name="Research" description="Choose how far Nibie should research before answering." value={researchMode} items={researchItems} onChange={onResearchModeChange} disabled={sending || streaming} disabledReason={savingMode ? "Saving…" : "A response is running"} emphasizedValue="deep" />
       </div>
     </div>
